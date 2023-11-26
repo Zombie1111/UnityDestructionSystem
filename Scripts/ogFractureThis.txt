@@ -1,0 +1,2701 @@
+using UnityEngine;
+using Random = System.Random;
+using System.Collections.Generic;
+using System.Linq;
+using Project.Scripts.Utils;
+using System.Collections;
+using UnityEditor;
+using System.Threading.Tasks;
+using Debug = UnityEngine.Debug;
+using System;
+using Time = UnityEngine.Time;
+using Component = UnityEngine.Component;
+
+namespace FractureDestruction
+{
+    public class FractureThis : MonoBehaviour
+    {
+
+        //create custom editor
+        [System.NonSerialized] public bool generateFracture = false;
+        [System.NonSerialized] public bool stopGenerating = false;
+
+#if UNITY_EDITOR
+        [CustomEditor(typeof(FractureThis))]
+        public class YourScriptEditor : Editor
+        {
+            public override void OnInspectorGUI()
+            {
+                serializedObject.Update();
+
+                FractureThis yourScript = (FractureThis)target;
+
+                EditorGUILayout.Space();
+
+
+                if (GUILayout.Button("Generate Fracture"))
+                {
+                    yourScript.generateFracture = true;
+                    yourScript.OnDrawGizmosSelected();
+                }
+
+                if (GUILayout.Button("Remove Fracture"))
+                {
+                    yourScript.stopGenerating = true;
+                    yourScript.OnDrawGizmosSelected();
+                }
+
+                EditorGUILayout.Space();
+
+                DrawPropertiesExcluding(serializedObject, "generateNavMesh", "stopGenerating");
+
+                serializedObject.ApplyModifiedProperties();
+            }
+
+
+
+            private void OnDestroy()
+            {
+                FractureThis yourScript = (FractureThis)target;
+                if (yourScript == null)
+                {
+                    //FractureMain fM = GameObject.FindAnyObjectByType<FractureMain>();
+                    //fM.FN_removeFractureThis(null, true);
+                }
+            }
+        }
+#endif
+
+        [Space(10)]
+        [Header("General Settings")]
+        //[SerializeField] private bool combineFractures;
+        [SerializeField] [Tooltip("The amount of parts to fracture the mesh into (If dynamicFractureCount is true, its multiplied by mesh bounding box volume)")] private int fractureCount = 200;
+        [SerializeField] [Tooltip("If true, fractureCount will be multiplied by the mesh bounding box volume")] private bool dynamicFractureCount = false;
+        [SerializeField] [Tooltip("High may improve the result but can dramatically increase the time it takes to fracture the object")] private GenerateQuality generationQuality = GenerateQuality.normal;
+        [SerializeField] [Tooltip("Should parts that overlap with other colliders be kinematic?")] private bool overlappingIsKinematic = true;
+        [SerializeField][Tooltip("All parts inside these volumes will be kinematic")] private List<VolumeTriggers> makeKinematicVolumes = new List<VolumeTriggers>();
+        [SerializeField] [Tooltip("Should it try to auto split the mesh into chunks before fracturing?")] private bool autoSplit = true;
+        [SerializeField][Tooltip("All triangels inside this volume will become its own chunk")] private List<VolumeTriggers> manuallSplitVolumes = new List<VolumeTriggers>();
+        [SerializeField][Tooltip("Multiplies the force required to break for all parts inside the volumes")] private List<VolumeModifiers> healthMultiplyVolumes = new List<VolumeModifiers>();
+        [SerializeField][Tooltip("If true, the fractured objects pos+rot+colliders will be synced with this. Usefull if you want the whole object to have a rigidbody (Always true if skinned mesh)")] private bool syncWithThis = true;
+
+        [Space(10)]
+        [Header("Fracture Settings")]
+        [SerializeField][Tooltip("Same seed, fracture count and mesh will result in the same fractured mesh. If < 0 a random seed will be used")] private int fractureSeed = -1;
+        [SerializeField] [Tooltip("whenBreak is recommended, other options are experimental")] private ColliderUpdate colliderUpdateRate = ColliderUpdate.whenBreak;
+        [SerializeField] [Tooltip("The collider type to use for the full object")] private ColliderType colliderType = ColliderType.sphere;
+        [SerializeField] [Tooltip("The collider type to use for broken pieces")] private ColliderType colliderTypeBroken = ColliderType.box;
+        [SerializeField] [Tooltip("Tries to combine the colliders. None is recommended for non skinned meshes since it has minimal performance impact on them")] private ColliderOptimization colliderOptimization = ColliderOptimization.mergeAll;
+        [SerializeField] [Tooltip("May cause the parts to not look the same as the orginal mesh but improve performance")] private MeshOptimization meshOptimization = MeshOptimization.normal;
+        [Tooltip("The mass for each part")] public float Mass = 0.1f;
+        [Tooltip("Mass for the parent rigidbody (If it exists) = Mass * alivePartsCount * totalMassMultiplier")] public float totalMassMultiplier = 0.5f;
+        [SerializeField][Tooltip("The layer for parts that are not broken")] private int fractureLayer = 0;
+        [Tooltip("The layer for broken parts")] public int fractureDamagedLayer = 0;
+
+        [Space(10)]
+        [Header("Destruction Settings")]
+        [SerializeField] [Range(0.0f, 1.25f)] private float forceSpreadWidth = 0.5f;
+        [SerializeField] private float forceSpreadFalloff = 1.0f;
+        [SerializeField] private float forceRequiedToBreak = 20.0f;
+        public bool kinematicCanBreak = false;
+        [SerializeField] private float minChainDestructionDelay = 0.1f;
+        [SerializeField][Tooltip("If true, the biggest chunk will never count has disconnected")] private bool biggestChunkIsNeverLoose = true;
+        [SerializeField][Tooltip("If true, collision will be disabled between all Neighbour parts (Always false if colliderOptimization != None)")] private bool disableCollisionWithNeighbours = true;
+
+        [Space(10)]
+        [Header("Material Settings")]
+        [SerializeField] private string materialDamagePropertyName = "None";
+        [SerializeField] private Material outsideMaterial;
+        [SerializeField] private Material insideMaterial;
+        [SerializeField] private Material outsideDamagedMaterial;
+        [SerializeField] private Material insideDamagedMaterial;
+        [SerializeField] private PhysicMaterial physicsMaterial;
+        [SerializeField] private PhysicMaterial physicsDamagedMaterial;
+
+        [Space(50)]
+        [Header("Debug (Dont touch)")]
+        [SerializeField] private List<FracturePart> allParts = new List<FracturePart>();
+        public GameObject fracturePartsParent = null;
+        public SkinnedMeshRenderer isSkinned;
+        public List<PartRefs> partRefs = new List<PartRefs>();
+        [SerializeField] private Mesh orginalSkinnedMesh = null;
+        [SerializeField] private Vector3[] orginalCombinedMeshV;
+        [SerializeField] private Material[] orginalSkinnedMaterials = null;
+        [SerializeField] private List<CollisionCombination> colCombs = new List<CollisionCombination>();
+        public float totalHealthOg = 1.0f;
+        [System.NonSerialized] public float totalHealthCurrent = 1.0f;
+        [SerializeField] private Rigidbody parentRb = null;
+        [SerializeField] private List<Collider> syncedCols = new();
+        /// <summary>
+        /// Should the rigidbody be kinematic
+        /// </summary>
+        public bool parentRbKinematic = false;
+
+        private enum ColliderOptimization
+        {
+            mergeAll,
+            mergeNearby,
+            none
+        }
+
+        private enum MeshOptimization
+        {
+            normal,
+            makeConvex,
+            mergeVertics,
+            none
+        }
+
+        private enum ColliderType
+        {
+            mesh,
+            box,
+            sphere
+        }
+
+        private enum ColliderUpdate
+        {
+            everyFrameAccurate,
+            everyFrameFast,
+            whenBreak
+        }
+
+        private enum GenerateQuality
+        {
+            high,
+            normal
+        }
+
+        [System.Serializable]
+        public class VolumeTriggers
+        {
+            public BoxCollider boxVolume = null;
+            public bool includeAllRelated = false;
+        }
+
+        [System.Serializable]
+        public class VolumeModifiers
+        {
+            public BoxCollider boxVolume = null;
+            public float healthMultiplier = 1.0f;
+        }
+
+        [System.Serializable]
+        public class PartRefs
+        {
+            /// <summary>
+            /// The order of this array is what part vertex that is linked, eg fPart.sharedmesh.vertics[0] = combinedVertics[0]
+            /// </summary>
+            public List<int> combinedVertics = new List<int>();
+            public FracturePart fPart = null;
+            public Transform linkedBoneTrans = null;
+            public List<int> connectedPartIndexes = new List<int>();
+            public bool isKinematic = false;
+            /// <summary>
+            /// 0 = none, 1 = inside only, 2 = inside and outside
+            /// </summary>
+            public byte damagedSides = 0;
+            public float healthCurrent = 20.0f;
+            public float healthDefualt = 20.0f;
+            public Vector3[] boneLocalBoundWalls = new Vector3[6];
+            public int linkedColComIndex = -1;
+            public MeshFilter partFilter = null;
+        }
+
+        [System.Serializable]
+        private class CollisionCombination
+        {
+            public Collider linkedBoneCol = null;
+            public List<int> usedPartIndexes = new List<int>();
+            public List<Vector3> localPoss = new List<Vector3>();
+        }
+
+#if UNITY_EDITOR
+        private void OnDrawGizmosSelected()
+        {
+            //limit varibels
+            if (forceSpreadFalloff < 0.0f) forceSpreadFalloff = 0.0f;
+
+            if (generateFracture == true)
+            {
+                //start gen
+                FN_generateFracture();
+            }
+
+            if (stopGenerating == true)
+            {
+                //stop gen
+                stopGenerating = false;
+                FN_removeFracture();
+            }
+
+            if (Application.isPlaying == false)
+            {
+                if (syncWithThis == true && isSkinned == null && fracturePartsParent != null)
+                {
+                    fracturePartsParent.transform.SetPositionAndRotation(transform.position, transform.rotation);
+                }
+            }
+        }
+#endif
+
+        public int debugPartRef = -1;
+
+        private void Update()
+        {
+            ////handle syncedWithThis
+            //if (syncWithThis == true && isSkinned == null)
+            //{
+            //    fracturePartsParent.transform.SetPositionAndRotation(transform.position, transform.rotation);
+            //}
+
+            //time since col
+            timeSinceCol += Time.deltaTime;
+
+            //avoid floating points
+            if (fixFloating_timer >= 0.0f)
+            {
+                fixFloating_timer += Time.deltaTime;
+                if (fixFloating_timer >= minChainDestructionDelay && ThreadRemoveFloating == null)
+                {
+                    fixFloating_timer = -69420.0f;
+                    StartCoroutine(FN_desRemoveFloating());
+                }
+
+            }
+
+            //update part meshes
+            if (partsToUpdate.Count > 0) FN_updatePartMeshes();
+            if (isSkinned != null && isSkinned.isVisible == true && colCombs.Count == 0 && colliderUpdateRate != ColliderUpdate.whenBreak) FN_realtimeColUpdate();
+
+            //repair mesh
+            if (repairAnims.Count > 0) FN_repAnimUpdate();
+
+            //debug keys
+            if (Input.GetKey(KeyCode.R) == true)
+            {
+                int iAdd = FN_repGetBrokenEdgePart();
+                if (iAdd >= 0) FN_repAddNewPart(iAdd, partRefs[iAdd].partFilter, 10.0f);
+            }
+        }
+
+        /// <summary>
+        /// Call to remove this fracture and reactivate the orginal object
+        /// </summary>
+        public void FN_removeFracture()
+        {
+            //destroy fractures
+            bool wasKinematic = parentRb != null && parentRb.isKinematic;
+            bool hadParentRb = parentRb != null;
+
+            if (fracturePartsParent != null)
+            {
+                if (Application.isPlaying == false) DestroyImmediate(fracturePartsParent);
+                else Destroy(fracturePartsParent);
+            }
+
+            //reactivate orginal object
+            FN_setFractureSourceActive(true);
+            FN_fixScaleWeird();
+
+            //remove cols on orginal
+            for (int i = 0; i < colCombs.Count; i += 1)
+            {
+                DestroyImmediate(colCombs[i].linkedBoneCol);
+            }
+
+            //remove synced object
+            for (int i = 0; i < syncedCols.Count; i += 1)
+            {
+                if (syncedCols[i] != null)
+                {
+                    DestroyImmediate(syncedCols[i].gameObject);
+                    break;
+                }
+            }
+
+            //remove rigidbody from orginal
+            if (syncWithThis == false && colliderOptimization == ColliderOptimization.none && transform.TryGetComponent(out Rigidbody rb) == true && transform.GetComponentsInChildren<Collider>().Length <= transform.GetComponents<Collider>().Length)
+            {
+                if (isSkinned != null) DestroyImmediate(rb);
+                else if (hadParentRb == true) rb.isKinematic = wasKinematic;
+            }
+
+            //reset lists
+            colCombs.Clear();
+            allParts.Clear();
+            partRefs.Clear();
+            isSkinned = null;
+            orginalCombinedMeshV = null;
+            orginalSkinnedMesh = null;
+            orginalSkinnedMaterials = null;
+        }
+
+        /// <summary>
+        /// Call this function to generate a fracture
+        /// </summary>
+        public void FN_generateFracture(bool destroyPreviousFracture = true)
+        {
+            //reset previous
+            generateFracture = false;
+            stopGenerating = false;
+            if (destroyPreviousFracture == true) FN_removeFracture();
+
+            //get dynamic fracture count
+            int fracCount = fractureCount;
+            if (dynamicFractureCount == true)
+            {
+                Mesh tempMesh = GetWorldMesh(gameObject, false);
+                float totalVolume = 0.0f;
+
+                totalVolume += CalculateBoundingBoxVolume(tempMesh.bounds);
+                //Debug_drawColBounds(tempMesh.bounds, transform.position, Color.red, 10.0f);
+
+                fracCount = Mathf.RoundToInt(fracCount * totalVolume);
+            }
+
+            //performance the fracture
+            int n_id = UnityEngine.Random.Range(0, int.MaxValue);
+            FN_fractureGameObject(fractureSeed < 0 ? n_id : fractureSeed, fracCount, insideMaterial, outsideMaterial);
+
+            float CalculateBoundingBoxVolume(Bounds bounds)
+            {
+                // Calculate the volume using the size of the bounds
+                float volume = bounds.size.x * bounds.size.y * bounds.size.z;
+
+                return volume;
+            }
+        }
+
+        private void FN_fixScaleWeird()
+        {
+            //why does it not work if I dont do this?
+            FN_resetParentsScale(true);
+            FN_resetParentsScale(false);
+        }
+
+        private class OgPosSaver
+        {
+            public Transform trans;
+            public Vector3 ogPos;
+        }
+
+        private bool mustConfirmLarge = true;
+        private int prevRes = 0;
+
+        private void FN_fractureGameObject(int seed, int resolution, Material insideMaterial, Material outsideMaterial)
+        {
+            //calls to fracture a object, do fracture
+            if (prevRes != resolution)
+            {
+                prevRes = resolution; ;
+                mustConfirmLarge = true;
+            }
+
+            if (mustConfirmLarge == true && resolution > 1000)
+            {
+                Debug.Log("You are trying to split the mesh into " + resolution + " parts, that can take a while. (Press again to confirm fracture)");
+                mustConfirmLarge = false;
+                return;
+            }
+
+            SkinnedMeshRenderer[] sRend = transform.GetComponentsInChildren<SkinnedMeshRenderer>();
+            if (sRend.Length > 1)
+            {
+                Debug.LogError("Only one SkinnedMeshRenderer is allowed");
+                return;
+            }
+
+            foreach (Transform kid in transform.GetComponentsInChildren<Transform>())
+            {
+                if (sRend.Length == 1 && kid.TryGetComponent<MeshRenderer>(out _) == true)
+                {
+                    Debug.Log(kid.name + " will be ignored because its not a part of the skinned mesh");
+                    continue;
+                }
+
+                if (kid.localScale != Vector3.one && kid.gameObject.activeInHierarchy == true && (kid.GetComponentInChildren<MeshFilter>(false) != null || kid.GetComponentInChildren<SkinnedMeshRenderer>(false) != null))
+                {
+                    Debug.LogError(kid.name + " does not have a local scale of 1,1,1");
+                    return;
+                }
+            }
+
+            //set skinned and clear lists
+            if (sRend.Length == 1) isSkinned = sRend[0];
+            else isSkinned = null;
+            allParts.Clear();
+
+            //save transform orginal position (For some weird reason fracturing does not work if positions aint 0.0.0)
+            Vector3 ogPos = transform.position;
+            Vector3 ogRot = transform.eulerAngles;
+
+            List<OgPosSaver> ogPoss = new List<OgPosSaver>();
+            Transform[] trans = transform.GetComponentsInParent<Transform>();
+            for (int i = trans.Length - 1; i >= 0; i -= 1)
+            {
+                if (trans[i] == transform) continue;
+                ogPoss.Add(new OgPosSaver() { ogPos = trans[i].position, trans = trans[i] });
+                trans[i].position = Vector3.zero;
+            }
+
+            transform.position = Vector3.zero;
+            transform.eulerAngles = Vector3.zero;
+
+            //get meshes to fracture
+            List<Mesh> meshesToFracture = FN_getMeshesToFractures(false);
+            if (meshesToFracture == null)
+            {
+                Debug.LogError("Unable to get the meshes to fracture");
+                transform.position = ogPos;
+                transform.eulerAngles = ogRot;
+                return;
+            }
+
+            List<float> meshesRes = FN_getConsistantResolution(meshesToFracture, resolution);
+
+            //fracture the mesehs in nvBlast
+            if (isSkinned != null)
+            {
+                orginalSkinnedMesh = isSkinned.sharedMesh;
+                orginalSkinnedMaterials = isSkinned.sharedMaterials;
+            }
+
+            List<Mesh> fracturedMeshes = new List<Mesh>();
+            List<Mesh> currentPieces;
+            List<FracturePart> chunks = null;
+            int maxAttempts = generationQuality == GenerateQuality.normal ? 15 : 30;
+            bool meshIsValid = true;
+
+            while (maxAttempts > 0)
+            {
+                maxAttempts -= 1;
+                meshIsValid = true;
+                fracturedMeshes.Clear();
+                //seed = rng.Next();
+                seed += 1;
+
+                for (int i = meshesToFracture.Count - 1; i >= 0; i -= 1)
+                {
+                    NvBlastExtUnity.setSeed(seed);
+
+                    var nvMesh = new NvMesh(
+                        meshesToFracture[i].vertices,
+                        meshesToFracture[i].normals,
+                        meshesToFracture[i].uv,
+                        meshesToFracture[i].vertexCount,
+                        meshesToFracture[i].GetIndices(0),
+                        (int)meshesToFracture[i].GetIndexCount(0)
+                    );
+
+                    //currentPieces = FractureMeshesInNvblast(Mathf.Max((int)meshesRes[i], 1), nvMesh);
+                    if ((int)meshesRes[i] < 3) currentPieces = new List<Mesh>() { meshesToFracture[i] };
+                    else currentPieces = FractureMeshesInNvblast((int)meshesRes[i], nvMesh);
+                    QuickHull_convex convex = new QuickHull_convex();
+                    for (int ii = currentPieces.Count - 1; ii >= 0; ii -= 1)
+                    {
+                        //validate the mesh
+                        if (FN_isMeshValid(currentPieces[ii]) == false)
+                        {
+                            meshIsValid = false;
+                            break;
+                        }
+
+                        //optimize mesh
+                        if (meshOptimization == MeshOptimization.normal)
+                        {
+                            currentPieces[ii].OptimizeReorderVertexBuffer();
+                            currentPieces[ii].OptimizeIndexBuffers();
+                        }
+                        else if (meshOptimization == MeshOptimization.makeConvex)
+                        {
+                            currentPieces[ii] = convex.FN_makeMeshConvex(currentPieces[ii]);
+                            currentPieces[ii].OptimizeReorderVertexBuffer();
+                            currentPieces[ii].OptimizeIndexBuffers();
+                        }
+                        else if (meshOptimization == MeshOptimization.mergeVertics)
+                        {
+                            currentPieces[ii] = FN_mergeVerticesInMesh(currentPieces[ii]);
+                            currentPieces[ii].OptimizeReorderVertexBuffer();
+                            currentPieces[ii].OptimizeIndexBuffers();
+                        }
+
+                        //link bones
+                        if (isSkinned != null) currentPieces[ii] = FN_linkBoneWeights(currentPieces[ii], isSkinned.transform, meshesToFracture[i], isSkinned.transform);
+                    }
+
+                    if (meshIsValid == false) break;
+                    fracturedMeshes.AddRange(currentPieces);
+                }
+
+                //Build chunk gameobjects
+                if (meshIsValid == false) continue;
+                chunks = BuildChunks(insideMaterial, outsideMaterial, fracturedMeshes);
+                if (chunks != null)
+                {
+                    meshIsValid = true;
+                    break;
+                }
+            }
+
+            //reset position
+            transform.position = ogPos;
+            transform.eulerAngles = ogRot;
+
+            //fail check
+            if (chunks == null || meshIsValid == false)
+            {
+                FN_failedFracturing("The mesh may be too complicated to fracture properly. (Potential salutions: Try again, lower fracture count, Split the mesh into smaller chunks, Improve mesh topology or Try lowering mesh tris count)");
+                return;
+            }
+
+            //setup destruction system
+            FN_destructionSetup(ogPos, ogRot);
+            FN_restorePositions();
+            //fracturedObject.transform.eulerAngles = ogRot;
+            //fracturedObject.transform.position = ogPos;
+            ////set chunk parents
+            //foreach (var chunk in chunks)
+            //{
+            //    chunk.transform.SetParent(fracturedObject.transform, false);
+            //}
+
+            //disable fractured object when done
+            if (isSkinned == null) FN_setFractureSourceActive(false);
+
+            if (fracturePartsParent.transform.childCount <= 1)
+            {
+                FN_failedFracturing("Could not fracture the object properly (Maybe too small object or too low resolution?)");
+                return;
+            }
+
+            if (syncWithThis == true && isSkinned == null)
+            {
+                //create the synced object
+                Transform newO = transform.Find("FracSynced_" + transform.name);
+                if (newO == null) newO = new GameObject("FracSynced_" + transform.name).transform;
+                newO.SetParent(transform, true);
+            }
+
+            //setup skinned and combined
+            FN_setupCombinedMesh();
+            FN_realtimeColSetup();
+            if (isSkinned != null)
+            {
+                FN_updateAllPartMeshes();
+                orginalCombinedMeshV = isSkinned.sharedMesh.vertices;
+            }
+            else orginalCombinedMeshV = combinedFilter.sharedMesh.vertices;
+
+            FN_mergedColsSetup();
+
+            //restore scale
+            FN_fixScaleWeird();
+            fracturePartsParent.transform.position = transform.position; //if fracture gets places wrong it may be because of this
+
+            //setup synced colliders
+            if (syncWithThis == true && isSkinned == null) FN_setupSyncedWithThis();
+
+            //log when done
+            bool kinematicExists = false;
+            for (int i = 0; i < partRefs.Count; i += 1)
+            {
+                if (partRefs[i].isKinematic == true)
+                {
+                    kinematicExists = true;
+                    break;
+                }
+            }
+
+            if (kinematicExists == false && biggestChunkIsNeverLoose == false) Debug.Log("Fractured the object (There are no kinematic parts, this will cause the whole object to fall apart when it takes any damage)");
+            else Debug.Log("Fractured " + transform.name + " into " + resolution + " parts");
+
+            void FN_restorePositions()
+            {
+                for (int i = ogPoss.Count - 1; i >= 0 ; i -= 1)
+                {
+                    ogPoss[i].trans.position = ogPoss[i].ogPos;
+                }
+
+                transform.position = ogPos;
+                transform.eulerAngles = ogRot;
+            }
+
+            void FN_failedFracturing(string failReason)
+            {
+                Debug.LogError(failReason);
+                FN_removeFracture();
+                FN_restorePositions();
+            }
+
+            List<Mesh> FN_getMeshesToFractures(bool getBakedSkinned)
+            {
+                // Translate all meshes to one world mesh
+                FN_resetParentsScale(true);
+                Mesh mesh = GetWorldMesh(gameObject, getBakedSkinned);
+
+                fracturePartsParent = new GameObject("Fractured_" + transform.name);
+                fracturePartsParent.transform.SetParent(transform.parent);
+                FN_resetParentsScale(false);
+                if (mesh.vertexCount < 3)
+                {
+                    Debug.LogError("There is no valid mesh to fracture");
+                    return null;
+                }
+
+                if (isSkinned == null) return new List<Mesh>() { mesh };
+
+                //split meshes depending on split volumes
+                meshesToFracture = FN_splitMeshWithVolumes(mesh, transform);
+
+                if (autoSplit == true)
+                {
+                    meshesToFracture = FN_autoSeperate(meshesToFracture[0]);
+                }
+
+                return meshesToFracture;
+            }
+        }
+
+        public int FN_getPartIndex(Transform part)
+        {
+            return part.GetSiblingIndex();
+        }
+
+        private List<float> FN_getConsistantResolution(List<Mesh> meshes, float totalRes)
+        {
+            List<float> meshVolumes = new List<float>();
+            float totalVolume = 0.0f;
+            for (int i = 0; i < meshes.Count; i += 1)
+            {
+                meshVolumes.Add(meshes[i].Volume());
+                totalVolume += meshVolumes[i];
+            }
+
+            totalRes /= totalVolume;
+            for (int i = 0; i < meshes.Count; i += 1)
+            {
+                meshVolumes[i] = totalRes * meshVolumes[i];
+            }
+
+            return meshVolumes;
+        }
+
+        System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
+
+#if UNITY_EDITOR
+        private void FN_doStopwathDebug()
+        {
+            if (stopwatch.IsRunning == true)
+            {
+                print(stopwatch.Elapsed.TotalMilliseconds.ToString("F3") + "ms");
+                stopwatch.Stop();
+                stopwatch.Reset();
+            }
+            else stopwatch.Start();
+        }
+#endif
+
+        private List<Mesh> FN_splitMeshWithVolumes(Mesh ogMesh, Transform trans)
+        {
+            List<Mesh> newMeshes = new List<Mesh>();
+            List<Mesh> tempNewM;
+            List<VolumeTriggers> oneVolume = new List<VolumeTriggers>();
+
+            if (autoSplit == false)
+            {
+                for (int i = manuallSplitVolumes.Count - 1; i >= 0; i -= 1)
+                {
+                    oneVolume.Clear();
+                    oneVolume.Add(manuallSplitVolumes[i]);
+                    tempNewM = FN_splitMesh(FN_getAllVerticsInsideVolumes(oneVolume, ogMesh, trans, false), ogMesh, isSkinned != null);
+                    newMeshes.Add(tempNewM[0]);
+                    ogMesh = tempNewM[1];
+                }
+            }
+
+            newMeshes.Add(ogMesh);
+            return newMeshes;
+        }
+
+        private HashSet<PartUpdateData> partsToUpdate = new HashSet<PartUpdateData>();
+        private class PartUpdateData
+        {
+            public int partToUpdate;
+            public bool removePart;
+        }
+
+        private bool pToUpdate_doRemove = false;
+        private bool pToUpdate_doAdd = false;
+
+        public void FN_requestPartToUpdate(int partIndex, bool removePart)
+        {
+            if (removePart == true) pToUpdate_doRemove = true;
+            else pToUpdate_doAdd = true;
+
+            partsToUpdate.Add(new PartUpdateData() { partToUpdate = partIndex, removePart = removePart });
+        }
+
+        private void FN_updatePartMeshes()
+        {
+            //called when something breaks (max once per frame)
+            //update combined stuff
+            Vector3[] partLocalVertics;
+            Vector3[] partLocalNormals;
+            Vector3[] combinedOrginalVertics;
+            Vector3[] wVer;
+            Vector3[] wNor;
+            Vector3 whatToAdd = Vector3.down * 100000.0f;
+            Mesh mesh = new Mesh();
+
+            if (pToUpdate_doAdd == true)
+            {
+                FN_updateCombinedMesh(false);
+                FN_updatePartMeshes(false);
+            }
+
+            if (pToUpdate_doRemove == true)
+            {
+                FN_updatePartMeshes(true);
+                FN_updateCombinedMesh(true);
+            }
+
+            pToUpdate_doRemove = false;
+            pToUpdate_doAdd = false;
+            partsToUpdate.Clear();
+
+            void FN_updateCombinedMesh(bool removeP)
+            {
+                if (isSkinned != null)
+                {
+                    combinedOrginalVertics = isSkinned.sharedMesh.vertices;
+                }
+                else
+                {
+                    combinedOrginalVertics = combinedFilter.sharedMesh.vertices;
+                }
+
+                foreach (PartUpdateData indexToUpdate in partsToUpdate)
+                {
+                    if (partRefs[indexToUpdate.partToUpdate].fPart == null || indexToUpdate.removePart != removeP) continue;
+                    //if (indexToUpdate.removePart == true)
+                    //{
+                    //    whatToAdd = Vector3.down * 100000.0f;
+                    //}
+                    //else
+                    //{
+                    //    whatToAdd = Vector3.up * 100000.0f;
+                    //}
+
+                    if (indexToUpdate.removePart == true)
+                    {
+                        for (int i = 0; i < partRefs[indexToUpdate.partToUpdate].combinedVertics.Count; i += 1)
+                        {
+                            combinedOrginalVertics[partRefs[indexToUpdate.partToUpdate].combinedVertics[i]] += whatToAdd;
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < partRefs[indexToUpdate.partToUpdate].combinedVertics.Count; i += 1)
+                        {
+                            combinedOrginalVertics[partRefs[indexToUpdate.partToUpdate].combinedVertics[i]] = orginalCombinedMeshV[partRefs[indexToUpdate.partToUpdate].combinedVertics[i]];
+                        }
+                    }
+                }
+
+                if (isSkinned != null) isSkinned.sharedMesh.SetVertices(combinedOrginalVertics);
+                else combinedFilter.sharedMesh.SetVertices(combinedOrginalVertics);
+            }
+
+            void FN_updatePartMeshes(bool removeP)
+            {
+                if (isSkinned != null)
+                {
+                    isSkinned.BakeMesh(mesh);
+                    wVer = FN_convertPositionsToWorldspace_noScale(mesh.vertices, isSkinned.transform);
+                    wNor = FN_convertDirectionsToWorldSpace(mesh.normals, isSkinned.transform);
+                }
+                else
+                {
+                    mesh = combinedFilter.sharedMesh;
+                    //wVer = FN_convertPositionsToWorldspace_noScale(mesh.vertices, combinedFilter.transform);
+                    wVer = FN_convertPositionsToWorldSpace(mesh.vertices, combinedFilter.transform);
+                    wNor = FN_convertDirectionsToWorldSpace(mesh.normals, combinedFilter.transform);
+                }
+
+                foreach (PartUpdateData indexToUpdate in partsToUpdate)
+                {
+                    if (partRefs[indexToUpdate.partToUpdate].fPart == null || indexToUpdate.removePart != removeP) continue;
+                    if (isSkinned != null && (colCombs.Count > 0 || colliderUpdateRate == ColliderUpdate.whenBreak)) partRefs[indexToUpdate.partToUpdate].fPart.transform.SetPositionAndRotation(partRefs[indexToUpdate.partToUpdate].linkedBoneTrans.position, partRefs[indexToUpdate.partToUpdate].linkedBoneTrans.rotation);
+
+                    partLocalVertics = new Vector3[partRefs[indexToUpdate.partToUpdate].combinedVertics.Count];
+                    partLocalNormals = new Vector3[partRefs[indexToUpdate.partToUpdate].combinedVertics.Count];
+
+                    for (int i = 0; i < partRefs[indexToUpdate.partToUpdate].combinedVertics.Count; i += 1)
+                    {
+                        partLocalVertics[i] = partRefs[indexToUpdate.partToUpdate].fPart.transform.InverseTransformPoint(wVer[partRefs[indexToUpdate.partToUpdate].combinedVertics[i]]);
+                        partLocalNormals[i] = partRefs[indexToUpdate.partToUpdate].fPart.transform.InverseTransformDirection(wNor[partRefs[indexToUpdate.partToUpdate].combinedVertics[i]]);
+                    }
+
+                    partRefs[indexToUpdate.partToUpdate].fPart.meshF.sharedMesh.SetVertices(partLocalVertics);
+                    partRefs[indexToUpdate.partToUpdate].fPart.meshF.sharedMesh.SetNormals(partLocalNormals);
+                    partRefs[indexToUpdate.partToUpdate].fPart.meshF.sharedMesh.RecalculateBounds();
+                    if (indexToUpdate.removePart == true) Destroy(partRefs[indexToUpdate.partToUpdate].fPart);
+                    else if (allParts[indexToUpdate.partToUpdate].TryGetComponent(out Renderer rend) == true) Destroy(rend);
+                    if (colliderUpdateRate == ColliderUpdate.whenBreak || colliderOptimization != ColliderOptimization.none) FN_updateCollider(indexToUpdate.partToUpdate);
+                }
+            }
+
+            void FN_updateCollider(int indexToUpdate)
+            {
+                if (colliderType == ColliderType.mesh && allParts[indexToUpdate].TryGetComponent(out MeshCollider mC) == true) mC.sharedMesh.SetVertices(allParts[indexToUpdate].meshF.sharedMesh.vertices);
+                else if (colliderType == ColliderType.box && allParts[indexToUpdate].TryGetComponent(out BoxCollider bC) == true) bC.center = allParts[indexToUpdate].meshF.sharedMesh.bounds.center;
+                else if (colliderType == ColliderType.sphere && allParts[indexToUpdate].TryGetComponent(out SphereCollider sC) == true) sC.center = allParts[indexToUpdate].meshF.sharedMesh.bounds.center;
+                //meshCol.enabled = false;
+                //meshCol.enabled = true;
+            }
+        }
+
+        private void FN_updateAllPartMeshes()
+        {
+            //this function is currently only used to fix all colliders after bone links has been set
+            Mesh mesh = new Mesh();
+            isSkinned.BakeMesh(mesh);
+            Vector3[] wVer = FN_convertPositionsToWorldspace_noScale(mesh.vertices, isSkinned.transform);
+            Vector3[] wNor = FN_convertDirectionsToWorldSpace(mesh.normals, isSkinned.transform);
+
+            List<UpdateParts> newVertics = new List<UpdateParts>();
+
+            //Parallel.For(0, partRefs.Count, i =>
+            for (int i = 0; i < partRefs.Count; i += 1)
+            {
+                Vector3[] vertics = new Vector3[partRefs[i].combinedVertics.Count];
+                Vector3[] normals = new Vector3[partRefs[i].combinedVertics.Count];
+                for (int vI = partRefs[i].combinedVertics.Count - 1; vI >= 0; vI -= 1)
+                {
+                    vertics[vI] = partRefs[i].fPart.transform.InverseTransformPoint(wVer[partRefs[i].combinedVertics[vI]]);
+                    normals[vI] = partRefs[i].fPart.transform.InverseTransformPoint(wNor[partRefs[i].combinedVertics[vI]]);
+                }
+
+                lock (newVertics)
+                {
+                    newVertics.Add(new UpdateParts() { vertics = vertics, fPart = partRefs[i].fPart, normals = normals });
+                }
+                //});
+            };
+
+            //set meshFilter
+            for (int i = newVertics.Count - 1; i >= 0; i -= 1)
+            {
+                newVertics[i].fPart.meshF.sharedMesh.SetVertices(newVertics[i].vertics);
+                newVertics[i].fPart.meshF.sharedMesh.SetNormals(newVertics[i].normals);
+            }
+
+            if (colliderOptimization == ColliderOptimization.none)
+            {
+                //assign new values to col
+                if (colliderType == ColliderType.mesh)
+                {
+                    for (int i = newVertics.Count - 1; i >= 0; i -= 1)
+                    {
+                        newVertics[i].fPart.GetComponent<MeshCollider>().sharedMesh.SetVertices(newVertics[i].vertics);
+                    }
+                }
+                else if (colliderType == ColliderType.box)
+                {
+                    BoxCollider boxC; ;
+                    for (int i = newVertics.Count - 1; i >= 0; i -= 1)
+                    {
+                        newVertics[i].fPart.meshF.sharedMesh.SetVertices(newVertics[i].vertics);
+                        newVertics[i].fPart.meshF.sharedMesh.RecalculateBounds();
+                        boxC = newVertics[i].fPart.GetComponent<BoxCollider>();
+                        boxC.center = newVertics[i].fPart.meshF.sharedMesh.bounds.center;
+                        boxC.size = newVertics[i].fPart.meshF.sharedMesh.bounds.size;
+                    }
+                }
+                else
+                {
+                    SphereCollider sphereC; ;
+                    for (int i = newVertics.Count - 1; i >= 0; i -= 1)
+                    {
+                        newVertics[i].fPart.meshF.sharedMesh.SetVertices(newVertics[i].vertics);
+                        newVertics[i].fPart.meshF.sharedMesh.RecalculateBounds();
+                        sphereC = newVertics[i].fPart.GetComponent<SphereCollider>();
+                        sphereC.center = newVertics[i].fPart.meshF.sharedMesh.bounds.center;
+                        sphereC.radius = (newVertics[i].fPart.meshF.sharedMesh.bounds.extents.x + newVertics[i].fPart.meshF.sharedMesh.bounds.extents.y + newVertics[i].fPart.meshF.sharedMesh.bounds.extents.z) / 3.0f;
+                    }
+                }
+            }
+            
+            //else
+            //{
+            //    for (int i = 0; i < allParts.Count; i += 1)
+            //    {
+            //        print("fd");
+            //        allParts[i].GetComponent<BoxCollider>().center = allParts[i].meshF.sharedMesh.bounds.center;
+            //    }
+            //}
+        }
+
+        private struct UpdateParts
+        {
+            public Vector3[] vertics;
+            public Vector3[] normals;
+            public FracturePart fPart;
+        }
+
+        //handle scale when fracture object
+        private List<OgScalesList> ogScales = new List<OgScalesList>();
+        private class OgScalesList
+        {
+            public Transform trans;
+            public Vector3 ogScale;
+        }
+
+        public void FN_resetParentsScale(bool toOne)
+        {
+            if (toOne == true)
+            {
+                //reset scale
+                ogScales.Clear();
+                foreach (Transform pT in transform.GetComponentsInParent<Transform>())
+                {
+                    ogScales.Add(new OgScalesList() { ogScale = pT.localScale, trans = pT });
+                    if (pT.localScale.x == pT.localScale.y && pT.localScale.y == pT.localScale.z && pT.localScale.x == pT.localScale.z) pT.localScale = Vector3.one;
+                    else pT.localScale.Normalize();
+                }
+            }
+            else
+            {
+                //set scale back
+                foreach (OgScalesList oS in ogScales)
+                {
+                    oS.trans.localScale = oS.ogScale;
+                }
+            }
+        }
+
+        public void FN_setFractureSourceActive(bool toActive)
+        {
+            if (toActive == true && isSkinned != null)
+            {
+                if (orginalSkinnedMesh != null) isSkinned.sharedMesh = orginalSkinnedMesh;
+                if (orginalSkinnedMaterials != null) isSkinned.sharedMaterials = orginalSkinnedMaterials;
+            }
+
+            foreach (Renderer rend in transform.GetComponentsInChildren<Renderer>())
+            {
+                rend.enabled = toActive;
+            }
+        }
+
+        private List<FracturePart> BuildChunks(Material insideMaterial, Material outsideMaterial, List<Mesh> meshes)
+        {
+            List<FracturePart> fps = new List<FracturePart>();
+            FracturePart newFp;
+            for (int i = 0; i < meshes.Count; i += 1)
+            {
+                newFp = BuildChunk(insideMaterial, outsideMaterial, meshes[i]);
+                if (newFp == null) return null;
+                fps.Add(newFp);
+            }
+
+            return fps;
+        }
+
+        private static List<Mesh> FractureMeshesInNvblast(int totalChunks, NvMesh nvMesh)
+        {
+            var fractureTool = new NvFractureTool();
+            fractureTool.setRemoveIslands(false);
+            fractureTool.setSourceMesh(nvMesh);
+            var sites = new NvVoronoiSitesGenerator(nvMesh);
+            sites.uniformlyGenerateSitesInMesh(totalChunks);
+            fractureTool.voronoiFracturing(0, sites);
+            fractureTool.finalizeFracturing();
+
+            // Extract meshes
+            var meshCount = fractureTool.getChunkCount();
+            var meshes = new List<Mesh>(fractureTool.getChunkCount());
+            for (var i = 1; i < meshCount; i++)
+            {
+                meshes.Add(ExtractChunkMesh(fractureTool, i));
+            }
+
+            return meshes;
+        }
+
+        /// <summary>
+        /// Transforms local positions to world positions
+        /// </summary>
+        /// <param name="transform"></param>
+        /// <param name="points"></param>
+        /// <returns>World positions</returns>
+        private static Vector3[] FN_transformPoints(Transform localTrans, Vector3[] localPoss)
+        {
+            for (int i = localPoss.Length - 1; i >= 0; i -= 1)
+            {
+                localPoss[i] = localTrans.TransformPoint(localPoss[i]);
+            }
+
+            return localPoss;
+        }
+
+        private static Mesh ExtractChunkMesh(NvFractureTool fractureTool, int index)
+        {
+            var outside = fractureTool.getChunkMesh(index, false);
+            var inside = fractureTool.getChunkMesh(index, true);
+            var chunkMesh = outside.toUnityMesh();
+            chunkMesh.subMeshCount = 2;
+            chunkMesh.SetIndices(inside.getIndexes(), MeshTopology.Triangles, 1);
+            return chunkMesh;
+        }
+
+        private Mesh GetWorldMesh(GameObject gameObject, bool getBakedSkinned)
+        {
+            var combineInstances = new List<CombineInstance>();
+
+            if (isSkinned == null)
+            {
+                // Get meshes from MeshFilters
+                var meshFilters = gameObject.GetComponentsInChildren<MeshFilter>();
+                foreach (var meshFilter in meshFilters)
+                {
+                    if (ValidateMesh(meshFilter.sharedMesh))
+                    {
+                        var combineInstance = new CombineInstance
+                        {
+                            mesh = meshFilter.sharedMesh,
+                            transform = meshFilter.transform.localToWorldMatrix
+                        };
+                        combineInstances.Add(combineInstance);
+                    }
+                }
+            }
+
+            // Get meshes from SkinnedMeshRenderers
+            var skinnedMeshRenderers = gameObject.GetComponentsInChildren<SkinnedMeshRenderer>();
+            foreach (var skinnedMeshRenderer in skinnedMeshRenderers)
+            {
+                if (ValidateMesh(skinnedMeshRenderer.sharedMesh))
+                {
+                    //get skinned, get baked
+                    Mesh mesh = new Mesh();
+                    if (getBakedSkinned == false) mesh = skinnedMeshRenderer.sharedMesh;
+                    else
+                    {
+                        skinnedMeshRenderer.BakeMesh(mesh);
+                        mesh.boneWeights = skinnedMeshRenderer.sharedMesh.boneWeights;
+                        mesh.bindposes = skinnedMeshRenderer.sharedMesh.bindposes;
+                    }
+
+                    var combineInstance = new CombineInstance
+                    {
+                        mesh = mesh,
+                        transform = skinnedMeshRenderer.transform.localToWorldMatrix
+                    };
+                    combineInstances.Add(combineInstance);
+                }
+            }
+
+            var totalMesh = new Mesh();
+            totalMesh.CombineMeshes(combineInstances.ToArray(), true);
+            return totalMesh;
+        }
+
+        public MeshFilter combinedFilter;
+        private void FN_setupCombinedMesh()
+        {
+            //called once when done fracturing object
+            //when combined
+            //get meshes and add render
+            if (allParts.Count == 0) return;
+            if (isSkinned == null)
+            {
+                MeshRenderer mR;
+                if (syncWithThis == false) mR = fracturePartsParent.AddComponent<MeshRenderer>();
+                else mR = transform.Find("FracSynced_" + transform.name).gameObject.AddComponent<MeshRenderer>();
+
+                mR.sharedMaterials = new Material[2] { outsideMaterial, insideMaterial };
+                combinedFilter = mR.gameObject.AddComponent<MeshFilter>();
+            }
+            else
+            {
+                SkinnedMeshRenderer smR = isSkinned.GetComponent<SkinnedMeshRenderer>();
+                smR.sharedMaterials = new Material[2] { outsideMaterial, insideMaterial };
+                combinedFilter = allParts[0].meshF.transform.parent.gameObject.AddComponent<MeshFilter>();
+            }
+
+            //combine meshes
+            combinedFilter.sharedMesh = FN_combineMeshes();
+            if (isSkinned != null)
+            {
+                combinedFilter.sharedMesh.bindposes = isSkinned.sharedMesh.bindposes;
+                isSkinned.sharedMesh = combinedFilter.sharedMesh;
+            }
+        }
+
+        private static bool ValidateMesh(Mesh mesh)
+        {
+            if (mesh.isReadable == false)
+            {
+                Debug.LogError($"Mesh [{mesh}] has to be readable.");
+                return false;
+            }
+
+            if (mesh.vertices == null || mesh.vertices.Length == 0)
+            {
+                Debug.LogError($"Mesh [{mesh}] does not have any vertices.");
+                return false;
+            }
+
+            if (mesh.uv == null || mesh.uv.Length == 0)
+            {
+                Debug.LogError($"Mesh [{mesh}] does not have any uvs.");
+                return false;
+            }
+
+            return true;
+        }
+
+        private FracturePart BuildChunk(Material insideMaterial, Material outsideMaterial, Mesh mesh)
+        {
+            //runs once for each chunk
+            //check if mesh is valid
+            if (FN_isMeshValid(mesh) == false) return null;
+
+            //create new part object
+            GameObject chunk = new GameObject("Chunk (" + fracturePartsParent.transform.childCount + ")");
+            chunk.transform.SetParent(fracturePartsParent.transform, false);
+            chunk.layer = fractureLayer;
+
+            //optimize part and add meshfilter
+            MeshFilter meshFilter = chunk.AddComponent<MeshFilter>();
+            meshFilter.sharedMesh = mesh;
+            meshFilter.sharedMesh.RecalculateBounds();
+
+            //add destrution data
+            FracturePart fP = chunk.AddComponent<FracturePart>();
+            fP.meshF = meshFilter;
+            fP.fractureDaddy = this;
+            allParts.Add(fP);
+
+            //add collider
+            FN_addColliderToFracture(meshFilter, physicsMaterial);
+
+            //add rigidbody
+            if (colliderUpdateRate == ColliderUpdate.everyFrameAccurate && isSkinned == true && colliderOptimization == ColliderOptimization.none)
+            {
+                Rigidbody newRb = chunk.AddComponent<Rigidbody>();
+                newRb.mass = Mass;
+                newRb.isKinematic = true;
+                fP.rb = newRb;
+            }
+
+            return fP;
+        }
+
+        private void FN_addColliderToFracture(MeshFilter filterToAddTo, PhysicMaterial phyMat)
+        {
+            //add collider
+            if (colliderTypeBroken == ColliderType.box)
+            //if (true == true)
+            {
+                BoxCollider bc = filterToAddTo.gameObject.GetOrAddComponent<BoxCollider>();
+                bc.center = filterToAddTo.sharedMesh.bounds.center;
+                bc.size = filterToAddTo.sharedMesh.bounds.size;
+                bc.sharedMaterial = phyMat;
+            }
+            else if (colliderTypeBroken == ColliderType.sphere)
+            {
+                SphereCollider sc = filterToAddTo.gameObject.GetOrAddComponent<SphereCollider>();
+                sc.center = filterToAddTo.sharedMesh.bounds.center;
+                sc.radius = (filterToAddTo.sharedMesh.bounds.extents.x + filterToAddTo.sharedMesh.bounds.extents.y + filterToAddTo.sharedMesh.bounds.extents.z) / 3.0f;
+                sc.sharedMaterial = phyMat;
+            }
+            else
+            {
+                MeshCollider mc = filterToAddTo.gameObject.GetOrAddComponent<MeshCollider>();
+                mc.convex = true;
+                mc.sharedMaterial = phyMat;
+            }
+        }
+
+        const float EPSILON = 0.0001f;
+        private bool FN_isMeshValid(Mesh mesh)
+        {
+            if (mesh == null)
+            {
+                return false;
+            }
+
+            Vector3[] vertices = mesh.vertices;
+            int trisCount = mesh.triangles.Length;
+            if (vertices == null || vertices.Length < 4 || trisCount < 7 || trisCount % 3 != 0)
+            {
+                return false;
+            }
+
+            return FindInitialHullIndices(mesh.vertices.ToList());
+
+            bool FindInitialHullIndices(List<Vector3> points)
+            {
+                var count = points.Count;
+
+                for (int i0 = 0; i0 < count - 3; i0++)
+                {
+                    for (int i1 = i0 + 1; i1 < count - 2; i1++)
+                    {
+                        var p0 = points[i0];
+                        var p1 = points[i1];
+
+                        if (AreCoincident(p0, p1)) continue;
+
+                        for (int i2 = i1 + 1; i2 < count - 1; i2++)
+                        {
+                            var p2 = points[i2];
+
+                            if (AreCollinear(p0, p1, p2)) continue;
+
+                            for (int i3 = i2 + 1; i3 < count - 0; i3++)
+                            {
+                                var p3 = points[i3];
+
+                                if (AreCoplanar(p0, p1, p2, p3)) continue;
+
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                return false;
+            }
+
+            bool AreCollinear(Vector3 a, Vector3 b, Vector3 c)
+            {
+                return Cross(c - a, c - b).magnitude <= EPSILON;
+            }
+
+            Vector3 Cross(Vector3 a, Vector3 b)
+            {
+                return new Vector3(
+                    a.y * b.z - a.z * b.y,
+                    a.z * b.x - a.x * b.z,
+                    a.x * b.y - a.y * b.x);
+            }
+
+            bool AreCoplanar(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+            {
+                var n1 = Cross(c - a, c - b);
+                var n2 = Cross(d - a, d - b);
+
+                var m1 = n1.magnitude;
+                var m2 = n2.magnitude;
+
+                return m1 <= EPSILON
+                    || m2 <= EPSILON
+                    || AreCollinear(Vector3.zero,
+                        (1.0f / m1) * n1,
+                        (1.0f / m2) * n2);
+            }
+
+            bool AreCoincident(Vector3 a, Vector3 b)
+            {
+                return (a - b).magnitude <= EPSILON;
+            }
+        }
+
+        private Mesh FN_mergeVerticesInMesh(Mesh originalMesh)
+        {
+            var verts = originalMesh.vertices;
+            var normals = originalMesh.normals;
+            var uvs = originalMesh.uv;
+            Dictionary<Vector3, int> duplicateHashTable = new Dictionary<Vector3, int>();
+            List<int> newVerts = new List<int>();
+            int[] map = new int[verts.Length];
+
+            //create mapping and find duplicates, dictionaries are like hashtables, mean fast
+            for (int i = 0; i < verts.Length; i++)
+            {
+                if (!duplicateHashTable.ContainsKey(verts[i]))
+                {
+                    duplicateHashTable.Add(verts[i], newVerts.Count);
+                    map[i] = newVerts.Count;
+                    newVerts.Add(i);
+                }
+                else
+                {
+                    map[i] = duplicateHashTable[verts[i]];
+                }
+            }
+
+            // create new vertices
+            var verts2 = new Vector3[newVerts.Count];
+            var normals2 = new Vector3[newVerts.Count];
+            var uvs2 = new Vector2[newVerts.Count];
+            for (int i = 0; i < newVerts.Count; i++)
+            {
+                int a = newVerts[i];
+                verts2[i] = verts[a];
+                normals2[i] = normals[a];
+                uvs2[i] = uvs[a];
+            }
+            // map the triangle to the new vertices
+            int subMeshCount = originalMesh.subMeshCount;
+            for (int submeshIndex = 0; submeshIndex < subMeshCount; submeshIndex++)
+            {
+                var tris = originalMesh.GetTriangles(submeshIndex);
+                for (int i = 0; i < tris.Length; i++)
+                {
+                    tris[i] = map[tris[i]];
+                }
+                originalMesh.SetTriangles(tris, submeshIndex);
+            }
+            originalMesh.vertices = verts2;
+            originalMesh.normals = normals2;
+            originalMesh.uv = uvs2;
+
+            return originalMesh;
+        }
+
+        //get floating stuff
+        private float fixFloating_timer = -69.0f;
+
+        public HashSet<int> FN_getAllVerticsInsideVolumes(List<VolumeTriggers> volumes, Mesh mesh, Transform trans, bool justNeedOne)
+        {
+            HashSet<int> inside = new HashSet<int>();
+            Vector3[] wVer = FN_convertPositionsToWorldSpace(mesh.vertices, trans);
+            for (int vI = volumes.Count - 1; vI >= 0; vI -= 1)
+            {
+                for (int i = wVer.Length - 1; i >= 0; i -= 1)
+                {
+                    //loop once for every vertex for every volume
+                    if (volumes[vI].boxVolume.ClosestPoint(wVer[i]) == wVer[i])
+                    {
+                        if (inside.Add(i) == false) continue;
+                        if (justNeedOne == true) return inside;
+                        if (volumes[vI].includeAllRelated == true)
+                        {
+                            //get all related vertics
+                            foreach (int relVer in FN_GetConnectedVertexIndexes(mesh, i))
+                            {
+                                inside.Add(relVer);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return inside;
+        }
+
+        private Mesh FN_combineMeshes()
+        {
+            List<Vector3> combinedVertices = new List<Vector3>();
+            List<Vector3> combinedNormals = new List<Vector3>();
+            List<Vector2> combinedUVs = new List<Vector2>();
+            List<int> combinedTrianglesA = new List<int>();
+            List<int> combinedTrianglesB = new List<int>();
+            List<BoneWeight> combinedBones = new List<BoneWeight>();
+            int vertexOffset = 0;
+
+            for (int i = 0; i < allParts.Count; i += 1)
+            {
+                Mesh mesh = allParts[i].meshF.sharedMesh;
+
+                // Get the vertices, normals, and UVs from the small mesh
+                Vector3[] vertices = mesh.vertices;
+                Vector3[] normals = mesh.normals;
+                Vector2[] uvs = mesh.uv;
+                BoneWeight[] bones = mesh.boneWeights;
+
+                //link combined vertices to fracture part
+                for (int ii = 0; ii < vertices.Length; ii += 1)
+                {
+                    partRefs[i].combinedVertics.Add(combinedVertices.Count + ii);
+                }
+
+                // Append the vertex data to the combined lists
+                combinedVertices.AddRange(vertices);
+                combinedNormals.AddRange(normals);
+                combinedUVs.AddRange(uvs);
+                combinedBones.AddRange(bones);
+
+                int[] trianglesA = mesh.GetTriangles(0);
+                int[] trianglesB = new int[0];
+                if (mesh.subMeshCount > 1) trianglesB = mesh.GetTriangles(1);
+                
+                // Append the triangle data to the combined list, adjusting the indices with the vertex offset
+                for (int j = 0; j < trianglesA.Length; j++)
+                {
+                    combinedTrianglesA.Add(trianglesA[j] + vertexOffset);
+                }
+                
+                for (int j = 0; j < trianglesB.Length; j++)
+                {
+                    combinedTrianglesB.Add(trianglesB[j] + vertexOffset);
+                }
+
+                // Update the vertex offset for the next small mesh
+                vertexOffset += vertices.Length;
+            }
+
+            Mesh combinedMesh = new Mesh();
+            combinedMesh.vertices = combinedVertices.ToArray();
+            combinedMesh.normals = combinedNormals.ToArray();
+            combinedMesh.uv = combinedUVs.ToArray();
+            combinedMesh.subMeshCount = 2;
+            combinedMesh.SetTriangles(combinedTrianglesA.ToArray(), 0);
+            combinedMesh.SetTriangles(combinedTrianglesB.ToArray(), 1);
+            combinedMesh.boneWeights = combinedBones.ToArray();
+            return combinedMesh;
+        }
+
+        private class SubTrisData
+        {
+            public List<int> tris;
+            public Material material;
+        }
+
+        private static HashSet<int> FN_GetConnectedVertexIndexes(Mesh mesh, int vertexIndex)
+        {
+            //setup
+            HashSet<int> conV = new HashSet<int>();
+            Vector3[] vers = mesh.vertices;
+            int[] tris = mesh.triangles;
+            List<int> trisToSearch = FN_getAllTrisAtPos(vers[vertexIndex]);
+
+            //get all connected
+            for (int i = 0; i < trisToSearch.Count; i += 1)
+            {
+                if (conV.Add(tris[trisToSearch[i]]) == true) trisToSearch.AddRange(FN_getAllTrisAtPos(vers[tris[trisToSearch[i]]]));
+                if (conV.Add(tris[trisToSearch[i] + 1]) == true) trisToSearch.AddRange(FN_getAllTrisAtPos(vers[tris[trisToSearch[i] + 1]]));
+                if (conV.Add(tris[trisToSearch[i] + 2]) == true) trisToSearch.AddRange(FN_getAllTrisAtPos(vers[tris[trisToSearch[i] + 2]]));
+            }
+
+            return conV;
+
+            List<int> FN_getAllTrisAtPos(Vector3 pos)
+            {
+                List<int> trisAtPos = new List<int>();
+                for (int i = 0; i < tris.Length; i += 3)
+                {
+                    if (Vector3.Distance(vers[tris[i]], pos) < 0.0001f || Vector3.Distance(vers[tris[i + 1]], pos) < 0.0001f || Vector3.Distance(vers[tris[i + 2]], pos) < 0.0001f) trisAtPos.Add(i);
+                }
+
+                return trisAtPos;
+            }
+        }
+
+      
+
+        private Mesh FN_linkBoneWeights(Mesh meshToLink, Transform transToLink, Mesh referenceMesh, Transform referenceTrans)
+        {
+            //get skinned mesh
+            Vector3[] skinnedWv = FN_convertPositionsToWorldSpace(referenceMesh.vertices, referenceTrans);
+            Vector3[] partWv;
+            List<BoneWeight> boneWe = new List<BoneWeight>();
+            bool didAdd;
+            float closeDis;
+            BoneWeight closeWeight = new BoneWeight();
+            float currentDis;
+            float currentDis2;
+            partWv = FN_convertPositionsToWorldSpace(meshToLink.vertices, transToLink);
+
+            //add the fractured vertics to the skinnedmesh and update bones
+            if (generationQuality == GenerateQuality.high)
+            {
+                //best quality
+                for (int iii = 0; iii < partWv.Length; iii += 1)
+                {
+                    closeDis = 69420.0f;
+                    for (int i = 0; i < referenceMesh.triangles.Length; i += 3)
+                    {
+                        currentDis = FN_distanceToTriangle(skinnedWv[referenceMesh.triangles[i]], skinnedWv[referenceMesh.triangles[i + 1]], skinnedWv[referenceMesh.triangles[i + 2]], partWv[iii]);
+                        if (currentDis < closeDis)
+                        {
+                            closeDis = currentDis;
+
+                            //get closest tris vertex
+                            closeWeight = referenceMesh.boneWeights[referenceMesh.triangles[i]];
+                            currentDis2 = Vector3.Distance(partWv[iii], skinnedWv[referenceMesh.triangles[i]]);
+                            currentDis = Vector3.Distance(partWv[iii], skinnedWv[referenceMesh.triangles[i + 1]]);
+                            if (currentDis2 > currentDis)
+                            {
+                                currentDis2 = currentDis;
+                                closeWeight = referenceMesh.boneWeights[referenceMesh.triangles[i + 1]];
+                            }
+                            
+                            currentDis = Vector3.Distance(partWv[iii], skinnedWv[referenceMesh.triangles[i + 2]]);
+                            if (currentDis2 > currentDis)
+                            {
+                                closeWeight = referenceMesh.boneWeights[referenceMesh.triangles[i + 2]];
+                            }
+                        }
+                    }
+
+                    boneWe.Add(closeWeight);
+                }
+
+                //make sure all vertics at the same pos use the same weight
+                HashSet<int> allTested = new HashSet<int>();
+                for (int iii = 0; iii < partWv.Length; iii += 1)
+                {
+                    if (allTested.Contains(iii) == true) continue;
+                    for (int iiii = 0; iiii < partWv.Length; iiii += 1)
+                    {
+                        if (Vector3.Distance(partWv[iii], partWv[iiii]) < 0.0001f)
+                        {
+                            boneWe[iiii] = boneWe[iii];
+                            allTested.Add(iii);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                //normal quality
+                for (int iii = 0; iii < partWv.Length; iii += 1)
+                {
+                    didAdd = false;
+                    closeDis = 69420.0f;
+                    for (int i = referenceMesh.boneWeights.Length - 1; i >= 0; i -= 1)
+                    {
+                        //loops every skinned vertex for every vertex on every part
+                        currentDis = Vector3.Distance(partWv[iii], skinnedWv[i]);
+                        if (currentDis < 0.1f)
+                        {
+                            boneWe.Add(referenceMesh.boneWeights[i]);
+                            didAdd = true;
+                            break;
+                        }
+                        else if (currentDis < closeDis)
+                        {
+                            closeDis = currentDis;
+                            closeWeight = referenceMesh.boneWeights[i];
+                        }
+                    }
+
+                    if (didAdd == false)
+                    {
+                        boneWe.Add(closeWeight);
+                    }
+                }
+            }
+
+            meshToLink.bindposes = referenceMesh.bindposes;
+            meshToLink.boneWeights = boneWe.ToArray();
+            return meshToLink;
+        }
+
+        private class CalcBw
+        {
+            public int boneIndex;
+            public float totalWeight;
+            public int boneCount;
+        }
+
+        private static float FN_distanceToTriangle(Vector3 p1, Vector3 p2, Vector3 p3, Vector3 testPoint)
+        {
+            Vector3 v0 = p2 - p1;
+            Vector3 v1 = p3 - p1;
+            Vector3 v2 = testPoint - p1;
+
+            // Compute dot products
+            float dot00 = Vector3.Dot(v0, v0);
+            float dot01 = Vector3.Dot(v0, v1);
+            float dot02 = Vector3.Dot(v0, v2);
+            float dot11 = Vector3.Dot(v1, v1);
+            float dot12 = Vector3.Dot(v1, v2);
+
+            // Compute barycentric coordinates
+            float invDenom = 1f / (dot00 * dot11 - dot01 * dot01);
+            float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+            float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+            // Find the closest point on the triangle
+            if (u <= 0f)
+                return Vector3.Distance(testPoint, p1);
+            if (v <= 0f)
+                return Vector3.Distance(testPoint, p2);
+            if (u + v >= 1f)
+                return Vector3.Distance(testPoint, p3);
+
+            Vector3 closestPoint = p1 + u * v0 + v * v1;
+
+            // Calculate the distance from the test point to the closest point on the triangle
+            return Vector3.Distance(testPoint, closestPoint);
+        }
+
+        private Vector3[] FN_convertPositionsToWorldSpace(Vector3[] localPoss, Transform localTrans)
+        {
+            for (int i = localPoss.Length - 1; i >= 0; i -= 1)
+            {
+                localPoss[i] = localTrans.TransformPoint(localPoss[i]);
+            }
+
+            return localPoss;
+        }
+
+        private Vector3[] FN_convertDirectionsToWorldSpace(Vector3[] localDirs, Transform localTrans)
+        {
+            for (int i = localDirs.Length - 1; i >= 0; i -= 1)
+            {
+                localDirs[i] = localTrans.TransformDirection(localDirs[i]);
+            }
+
+            return localDirs;
+        }
+
+        private Vector3[] FN_convertPositionsToWorldspace_noScale(Vector3[] localposs, Transform transform)
+        {
+            for (int i = 0; i < localposs.Length; i++)
+            {
+                localposs[i] = (transform.rotation * localposs[i]) + transform.position;
+            }
+
+            return localposs;
+        }
+
+        private List<Mesh> FN_autoSeperate(Mesh meshToSeperate)
+        {
+            int maxLoops = 200;
+            List<Mesh> newM = new List<Mesh>();
+            List<Mesh> tempM;
+            while (maxLoops > 0)
+            {
+                maxLoops -= 1;
+                if (meshToSeperate.vertexCount < 4) break;
+                tempM = FN_splitMesh(FN_GetConnectedVertexIndexes(meshToSeperate, 0), meshToSeperate, isSkinned != null);
+                newM.Add(tempM[0]);
+                meshToSeperate = tempM[1];
+            }
+
+            return newM;
+        }
+
+
+        //############################REALTIME COLLIDER STUFF#################################
+        private void FN_realtimeColSetup()
+        {
+            //set linked trans and move part
+            if (isSkinned != null)
+            {
+                for (int i = 0; i < partRefs.Count; i += 1)
+                {
+                    partRefs[i].linkedBoneTrans = FN_getBoneTransWithHighestWeight(isSkinned, partRefs[i].fPart.meshF.sharedMesh.boneWeights);
+                    partRefs[i].fPart.transform.SetPositionAndRotation(partRefs[i].linkedBoneTrans.position, partRefs[i].linkedBoneTrans.rotation);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < partRefs.Count; i += 1)
+                {
+                    partRefs[i].linkedBoneTrans = combinedFilter.transform;
+                }
+            }
+        }
+
+        private void FN_realtimeColUpdate()
+        {
+            if (colliderUpdateRate == ColliderUpdate.everyFrameAccurate)
+            {
+                for (int i = 0; i < partRefs.Count; i += 1)
+                {
+                    if (partRefs[i].fPart == null) continue;
+                    partRefs[i].fPart.rb.MoveRotation(partRefs[i].linkedBoneTrans.rotation);
+                    partRefs[i].fPart.rb.MovePosition(partRefs[i].linkedBoneTrans.position);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < partRefs.Count; i += 1)
+                {
+                    if (partRefs[i].fPart == null) continue;
+                    partRefs[i].fPart.transform.SetPositionAndRotation(partRefs[i].linkedBoneTrans.position, partRefs[i].linkedBoneTrans.rotation);
+                }
+            }
+        }
+
+        private Transform FN_getBoneTransWithHighestWeight(SkinnedMeshRenderer skinnedMeshRenderer, BoneWeight[] boneWeights)
+        {
+            Transform[] bones = skinnedMeshRenderer.bones;
+
+            float[] boneWeightsSum = new float[bones.Length];
+
+            // Calculate the total weight for each bone based on the provided BoneWeights
+            for (int i = 0; i < boneWeights.Length; i++)
+            {
+                boneWeightsSum[boneWeights[i].boneIndex0] += boneWeights[i].weight0;
+                boneWeightsSum[boneWeights[i].boneIndex1] += boneWeights[i].weight1;
+                boneWeightsSum[boneWeights[i].boneIndex2] += boneWeights[i].weight2;
+                boneWeightsSum[boneWeights[i].boneIndex3] += boneWeights[i].weight3;
+            }
+
+            // Find the bone with the highest total weight
+            float highestWeight = 0f;
+            Transform highestWeightBone = null;
+
+            for (int i = 0; i < bones.Length; i++)
+            {
+                if (boneWeightsSum[i] > highestWeight)
+                {
+                    highestWeight = boneWeightsSum[i];
+                    highestWeightBone = bones[i];
+                }
+            }
+
+            return highestWeightBone;
+        }
+
+        private void FN_mergedColsSetup()
+        {
+            //get local bound walls pos
+            Bounds bound;
+            for (int i = 0; i < partRefs.Count; i += 1)
+            {
+                partRefs[i].fPart.meshF.sharedMesh.RecalculateBounds();
+                bound = partRefs[i].fPart.meshF.sharedMesh.bounds;
+                partRefs[i].boneLocalBoundWalls[0] = bound.center + new Vector3(bound.extents.x, 0.0f, 0.0f);
+                partRefs[i].boneLocalBoundWalls[1] = bound.center - new Vector3(bound.extents.x, 0.0f, 0.0f);
+                partRefs[i].boneLocalBoundWalls[2] = bound.center + new Vector3(0.0f, bound.extents.y, 0.0f);
+                partRefs[i].boneLocalBoundWalls[3] = bound.center - new Vector3(0.0f, bound.extents.y, 0.0f);
+                partRefs[i].boneLocalBoundWalls[4] = bound.center + new Vector3(0.0f, 0.0f, bound.extents.z);
+                partRefs[i].boneLocalBoundWalls[5] = bound.center - new Vector3(0.0f, 0.0f, bound.extents.z);
+            }
+
+            if (syncWithThis == true && isSkinned == null)
+            {
+                //if sync, parentRb should be this
+                parentRb = transform.GetComponent<Rigidbody>();
+            }
+            else
+            {
+                //add rigidbody to this
+                Rigidbody refRb = transform.GetComponent<Rigidbody>();
+                GameObject rbO = (isSkinned != null && colliderOptimization != ColliderOptimization.none) ? gameObject : fracturePartsParent;
+                if (rbO.TryGetComponent<Rigidbody>(out parentRb) == false && (isSkinned != null || refRb != null))
+                {
+                    parentRb = rbO.AddComponent<Rigidbody>();
+                    parentRb.mass = Mass * allParts.Count * totalMassMultiplier;
+                    if (refRb == null || (syncWithThis == true && isSkinned == null))
+                    {
+                        parentRb.isKinematic = true;
+
+                        if (syncWithThis == false || isSkinned != null)
+                        {
+                            parentRb.maxDepenetrationVelocity = 10.0f;
+                            parentRb.interpolation = RigidbodyInterpolation.Interpolate;
+                            parentRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                        }
+                    }
+                    else
+                    {
+                        parentRb.interpolation = refRb.interpolation;
+                        parentRb.useGravity = refRb.useGravity;
+                        parentRb.maxDepenetrationVelocity = refRb.maxDepenetrationVelocity;
+                        parentRb.maxAngularVelocity = refRb.maxAngularVelocity;
+                        parentRb.constraints = refRb.constraints;
+                        parentRb.collisionDetectionMode = refRb.collisionDetectionMode;
+                        parentRb.isKinematic = refRb.isKinematic;
+                        refRb.isKinematic = true;
+                    }
+                }
+
+
+                if (rbO != gameObject)
+                {
+                    FractureCollisionEnter fcE = rbO.GetOrAddComponent<FractureCollisionEnter>();
+                    fcE.fractureDaddy = this;
+                }
+            }
+
+            if (parentRb != null) parentRb.mass = Mass * allParts.Count * totalMassMultiplier;
+
+            if (colliderOptimization == ColliderOptimization.none) return;
+
+            //Split all parts with the same bone
+            colCombs.Clear();
+            Transform[] boneTrans = isSkinned != null ? isSkinned.bones : (syncWithThis == false ? new Transform[1] { combinedFilter.transform } : new Transform[1] { FN_setupSyncedWithThis() } );
+            List<Vector3> newLocalPoss = new();
+            List<int> newUsedParts = new();
+            HashSet<int> allUsedParts = new();
+            int colCombsIndexOffset = 0;
+
+            for (int i = 0; i < boneTrans.Length; i += 1)
+            {
+                if (colliderOptimization == ColliderOptimization.mergeAll)
+                {
+                    //merge all cols that uses the same bone
+                    newUsedParts.Clear();
+                    newLocalPoss.Clear();
+
+                    for (int ii = 0; ii < partRefs.Count; ii += 1)
+                    {
+                        if (partRefs[ii].linkedBoneTrans == boneTrans[i])
+                        {
+                            partRefs[ii].linkedColComIndex = i + colCombsIndexOffset;
+                            newUsedParts.Add(ii);
+                            newLocalPoss.AddRange(partRefs[ii].boneLocalBoundWalls);
+                        }
+                    }
+
+                    if (newUsedParts.Count == 0)
+                    {
+                        colCombsIndexOffset -= 1;
+                        continue;
+                    }
+
+                    FN_createNewMergedCol(i);
+                }
+                else
+                {
+                    //merge all cols with the same bone an are next to each other
+                    bool firstAdd = true;
+
+                    for (int ii = 0; ii < partRefs.Count; ii += 1)
+                    {
+                        if (partRefs[ii].linkedBoneTrans == boneTrans[i] && allUsedParts.Contains(ii) == false)
+                        {
+                            if (firstAdd == false) colCombsIndexOffset += 1;
+
+                            newUsedParts.Clear();
+                            newLocalPoss.Clear();
+                            partRefs[ii].linkedColComIndex = i + colCombsIndexOffset;
+                            newUsedParts.Add(ii);
+                            allUsedParts.Add(ii);
+                            newLocalPoss.AddRange(partRefs[ii].boneLocalBoundWalls);
+
+                            for (int iii = 0; iii < partRefs[ii].connectedPartIndexes.Count; iii += 1)
+                            {
+                                if (partRefs[partRefs[ii].connectedPartIndexes[iii]].linkedBoneTrans == boneTrans[i] && allUsedParts.Contains(partRefs[ii].connectedPartIndexes[iii]) == false)
+                                {
+                                    partRefs[partRefs[ii].connectedPartIndexes[iii]].linkedColComIndex = i + colCombsIndexOffset;
+                                    newUsedParts.Add(partRefs[ii].connectedPartIndexes[iii]);
+                                    allUsedParts.Add(partRefs[ii].connectedPartIndexes[iii]);
+                                    newLocalPoss.AddRange(partRefs[partRefs[ii].connectedPartIndexes[iii]].boneLocalBoundWalls);
+                                }
+                            }
+
+                            FN_createNewMergedCol(i);
+                            firstAdd = false;
+                        }
+                    }
+
+                    if (firstAdd == true)
+                    {
+                        colCombsIndexOffset -= 1;
+                    }
+                }
+            }
+
+            void FN_createNewMergedCol(int boneIndex)
+            {
+                //create new merged collider
+                colCombs.Add(new CollisionCombination() { localPoss = new List<Vector3>(newLocalPoss), usedPartIndexes = new List<int>(newUsedParts) });
+
+                if (colliderType == ColliderType.mesh)
+                {
+                    MeshCollider mc = boneTrans[boneIndex].gameObject.AddComponent<MeshCollider>();
+                    mc.convex = true;
+                    colCombs[boneIndex + colCombsIndexOffset].linkedBoneCol = mc;
+                }
+                else if (colliderType == ColliderType.box)
+                {
+                    colCombs[boneIndex + colCombsIndexOffset].linkedBoneCol = boneTrans[boneIndex].gameObject.AddComponent<BoxCollider>();
+                }
+                else
+                {
+                    colCombs[boneIndex + colCombsIndexOffset].linkedBoneCol = boneTrans[boneIndex].gameObject.AddComponent<SphereCollider>();
+                }
+
+                colCombs[boneIndex + colCombsIndexOffset].linkedBoneCol.sharedMaterial = physicsMaterial;
+                FN_mergedColUpdateCol(boneIndex + colCombsIndexOffset);
+            }
+        }
+
+        private void FN_mergedColRemovePart(int partIndexToRemove)
+        {
+            for (int i = 0; i < colCombs[partRefs[partIndexToRemove].linkedColComIndex].localPoss.Count; i += 6)
+            {
+                //we can skip every 6 index because each part always has 6 positions
+                if (partRefs[partIndexToRemove].boneLocalBoundWalls[0] == colCombs[partRefs[partIndexToRemove].linkedColComIndex].localPoss[i] && partRefs[partIndexToRemove].boneLocalBoundWalls[3] == colCombs[partRefs[partIndexToRemove].linkedColComIndex].localPoss[i + 3])
+                {
+                    colCombs[partRefs[partIndexToRemove].linkedColComIndex].localPoss.RemoveRange(i, 6); 
+                    FN_mergedColUpdateCol(partRefs[partIndexToRemove].linkedColComIndex);
+                    break;
+                }
+            }
+        }
+
+        private void FN_mergedColAddPart(int partIndexToAdd)
+        {
+            colCombs[partRefs[partIndexToAdd].linkedColComIndex].localPoss.AddRange(partRefs[partIndexToAdd].boneLocalBoundWalls);
+            FN_mergedColUpdateCol(partRefs[partIndexToAdd].linkedColComIndex);
+        }
+
+        private void FN_mergedColUpdateCol(int mergedColIndexToUpdate)
+        {
+            if (colCombs[mergedColIndexToUpdate].localPoss.Count < 4)
+            {
+                colCombs[mergedColIndexToUpdate].linkedBoneCol.enabled = false;
+                return;
+            }
+
+            colCombs[mergedColIndexToUpdate].linkedBoneCol.enabled = true;
+
+            if (colliderType == ColliderType.mesh)
+            {
+                //update mesh collider
+                FN_getComponentByInstanceID<MeshCollider>(colCombs[mergedColIndexToUpdate].linkedBoneCol.transform, colCombs[mergedColIndexToUpdate].linkedBoneCol.GetInstanceID()).sharedMesh = new Mesh() { vertices = colCombs[mergedColIndexToUpdate].localPoss.ToArray() };
+            }
+            else
+            {
+                //update box and sphere collider
+                Mesh colMesh = new Mesh() { vertices = colCombs[mergedColIndexToUpdate].localPoss.ToArray() };
+                colMesh.RecalculateBounds();
+
+
+                if (colliderType == ColliderType.box)
+                {
+                    BoxCollider bc = FN_getComponentByInstanceID<BoxCollider>(colCombs[mergedColIndexToUpdate].linkedBoneCol.transform, colCombs[mergedColIndexToUpdate].linkedBoneCol.GetInstanceID());
+                    bc.size = (colMesh.bounds.size);
+                    bc.center = (colMesh.bounds.center);
+                }
+                else
+                {
+                    SphereCollider sc = FN_getComponentByInstanceID<SphereCollider>(colCombs[mergedColIndexToUpdate].linkedBoneCol.transform, colCombs[mergedColIndexToUpdate].linkedBoneCol.GetInstanceID());
+                    sc.radius = (colMesh.bounds.size).magnitude / 3.0f;
+                    sc.center = (colMesh.bounds.center);
+                }
+            }
+        }
+
+        private Transform FN_setupSyncedWithThis()
+        {
+            //create the synced object
+            Transform newO = transform.Find("FracSynced_" + transform.name);
+            if (newO == null) newO = new GameObject("FracSynced_" + transform.name).transform;
+
+            newO.SetParent(transform, true);
+            newO.localScale = fracturePartsParent.transform.localScale;
+            newO.SetPositionAndRotation(fracturePartsParent.transform.position, fracturePartsParent.transform.rotation);
+
+            if (colliderOptimization != ColliderOptimization.none) return newO;
+
+            //add colliders to it
+            syncedCols.Clear();
+
+            foreach (Collider col in fracturePartsParent.GetComponentsInChildren<Collider>())
+            {
+                syncedCols.Add(CopyColliderToTransform(col, newO));
+                col.enabled = false;
+            }
+
+            return newO;
+        }
+
+        /// <summary>
+        /// Adds/Copies sourceCol to targetTrans, returns the new collider
+        /// </summary>
+        /// <param name="sourceCollider"></param>
+        /// <param name="targetTransform"></param>
+        /// <returns></returns>
+        private Collider CopyColliderToTransform(Collider sourceCollider, Transform targetTransform)
+        {
+            // Copy the collider type from the source to the target
+            if (sourceCollider is MeshCollider)
+            {
+                MeshCollider targetMeshCollider = targetTransform.gameObject.AddComponent<MeshCollider>();
+                CopyMeshCollider((MeshCollider)sourceCollider, targetMeshCollider);
+                return targetMeshCollider;
+            }
+
+            if (sourceCollider is BoxCollider)
+            {
+                BoxCollider targetBoxCollider = targetTransform.gameObject.AddComponent<BoxCollider>();
+                CopyBoxCollider((BoxCollider)sourceCollider, targetBoxCollider);
+                return targetBoxCollider;
+            }
+            
+            if (sourceCollider is SphereCollider)
+            {
+                SphereCollider targetSphereCollider = targetTransform.gameObject.AddComponent<SphereCollider>();
+                CopySphereCollider((SphereCollider)sourceCollider, targetSphereCollider);
+                return targetSphereCollider;
+            }
+                        
+            if (sourceCollider is CapsuleCollider)
+            {
+                CapsuleCollider targetCapsuleCollider = targetTransform.gameObject.AddComponent<CapsuleCollider>();
+                CopyCapsuleCollider((CapsuleCollider)sourceCollider, targetCapsuleCollider);
+                return targetCapsuleCollider;
+            }
+
+            return null;
+            
+
+            // Function to copy properties of a BoxCollider to another BoxCollider
+            void CopyBoxCollider(BoxCollider source, BoxCollider target)
+            {
+                // Copy relevant properties
+                target.size = source.size;
+                target.center = source.center;
+            }
+
+            // Function to copy properties of a SphereCollider to another SphereCollider
+            void CopySphereCollider(SphereCollider source, SphereCollider target)
+            {
+                // Copy relevant properties
+                target.radius = source.radius;
+                target.center = source.center;
+            }
+
+            // Function to copy properties of a CapsuleCollider to another CapsuleCollider
+            void CopyCapsuleCollider(CapsuleCollider source, CapsuleCollider target)
+            {
+                // Copy relevant properties
+                target.radius = source.radius;
+                target.height = source.height;
+                target.center = source.center;
+                target.direction = source.direction;
+            }
+
+            // Function to copy properties of a MeshCollider to another MeshCollider
+            void CopyMeshCollider(MeshCollider source, MeshCollider target)
+            {
+                // Copy relevant properties
+                target.sharedMesh = source.sharedMesh;
+                target.convex = source.convex;
+            }
+        }
+
+        private T FN_getComponentByInstanceID<T>(Transform root, int targetInstanceID) where T : Component
+        {
+            T[] cOnThis = root.GetComponents<T>();
+
+            for (int i = cOnThis.Length - 1; i >= 0; i -= 1)
+            {
+                if (cOnThis[i].GetInstanceID() == targetInstanceID) return cOnThis[i];
+            }
+
+            return null; // Component not found
+        }
+
+        private int FN_mergedColGetClosestPart(int mergedColIndex, Vector3 pos)
+        {
+            float closeDis = 69420.0f;
+            float cDis;
+            int closeIndex = 0;
+            for (int i = 0; i < colCombs[mergedColIndex].usedPartIndexes.Count; i += 1)
+            {
+                cDis = (pos - allParts[colCombs[mergedColIndex].usedPartIndexes[i]].transform.TransformPoint(allParts[colCombs[mergedColIndex].usedPartIndexes[i]].meshF.sharedMesh.bounds.center)).sqrMagnitude;
+                if (cDis < closeDis)
+                {
+                    closeDis = cDis;
+                    closeIndex = colCombs[mergedColIndex].usedPartIndexes[i];
+                }
+            }
+
+            return closeIndex;
+        }
+
+        private float timeSinceCol = 0.0f;
+        private void OnCollisionEnter(Collision collision)
+        {
+            if (collision.transform.parent != null && collision.transform.parent.gameObject == fracturePartsParent.gameObject) return;
+            FN_desImpactCollision(collision);
+        }
+
+        private void OnCollisionStay(Collision collision)
+        {
+            timeSinceCol = 0.0f;
+        }   
+
+        //#############################END OF REALTIME COLLIDERS#################################
+
+        private int FN_getClosestPart(Vector3 pos)
+        {
+            if (isSkinned != null && (colCombs.Count > 0 || colliderUpdateRate == ColliderUpdate.whenBreak)) FN_realtimeColUpdate();
+
+            float closeDis = 69420.0f;
+            float cDis;
+            int closeIndex = 0;
+            for (int i = 0; i < allParts.Count; i += 1)
+            {
+                if (allParts[i] == null) continue;
+                if (i == 20)
+                {
+                    allParts[i].meshF.sharedMesh.RecalculateBounds();
+                    Debug.DrawLine(allParts[i].transform.TransformPoint(allParts[i].meshF.sharedMesh.bounds.center), allParts[i].transform.TransformPoint(allParts[i].meshF.sharedMesh.bounds.center) + Vector3.up, Color.yellow, 5.0f);
+                
+                }
+
+                cDis = (pos - allParts[i].transform.TransformPoint(allParts[i].meshF.sharedMesh.bounds.center)).sqrMagnitude;
+                if (cDis < closeDis)
+                {
+                    closeDis = cDis;
+                    closeIndex = i;
+                }
+            }
+
+            return closeIndex;
+        }
+
+        //#############################REALTIME DESTRUCTION STUFF#########################################
+
+        private void FN_destructionSetup(Vector3 ogPos, Vector3 ogRot)
+        {
+            totalHealthOg = 0.0f;
+            partRefs.Clear();
+            Vector3[] wVerts;
+            Collider[] hits;
+            int newConIndex;
+
+            for (int i = 0; i < allParts.Count; i += 1)
+            {
+                //get all connected parts
+                fracturePartsParent.transform.position = Vector3.zero;
+                fracturePartsParent.transform.eulerAngles = Vector3.zero;
+                partRefs.Add(new PartRefs() { fPart = allParts[i], partFilter = allParts[i].meshF });
+                wVerts = FN_convertPositionsToWorldSpace(allParts[i].meshF.sharedMesh.vertices, allParts[i].transform);
+
+                for (int ii = 0; ii < wVerts.Length; ii += 1)
+                {
+                    hits = Physics.OverlapSphere(wVerts[ii], 0.001f);
+                    FN_addConnections();
+
+                }
+
+                hits = FN_linecastsBetweenPoints(wVerts).ToArray();
+                FN_addConnections();
+
+                //get if is kinematic
+                fracturePartsParent.transform.position = ogPos;
+                fracturePartsParent.transform.eulerAngles = ogRot;
+                Vector3[] vertices = allParts[i].meshF.sharedMesh.vertices;
+                Vector3 vertexPos = allParts[i].transform.TransformPoint(vertices[0]);
+                Vector3 cPos;
+                RaycastHit nHit;
+                for (int ii = 0; ii < vertices.Length; ii += 1)
+                {
+                    cPos = allParts[i].transform.TransformPoint(vertices[ii]);
+                    if ((ii != 0 && overlappingIsKinematic == true && ((Physics.Linecast(vertexPos, cPos, out nHit) == true && nHit.transform.parent != allParts[i].transform.parent) || (Physics.Linecast(cPos, vertexPos, out nHit) == true && nHit.transform.parent != allParts[i].transform.parent))) || FN_getAllVerticsInsideVolumes(makeKinematicVolumes, allParts[i].meshF.sharedMesh, allParts[i].transform, true).Count > 0)
+                    {
+                        //once for all kinematic parts, get kinematic parts
+                        partRefs[i].isKinematic = true;
+                        break;
+                    }
+                }
+
+                //get part health
+                partRefs[i].healthDefualt = FN_getHealthFromVolume();
+                partRefs[i].healthCurrent = partRefs[i].healthDefualt;
+                totalHealthOg += partRefs[i].healthDefualt;
+
+                float FN_getHealthFromVolume()
+                {
+                    Vector3[] wVer = FN_convertPositionsToWorldSpace(allParts[i].meshF.sharedMesh.vertices, allParts[i].transform);
+
+                    for (int i = 0; i < healthMultiplyVolumes.Count; i += 1)
+                    {
+                        for (int ii = 0; ii < wVer.Length; ii += 1)
+                        {
+                            if (healthMultiplyVolumes[i].boxVolume.ClosestPoint(wVer[i]) == wVer[i])
+                            {
+                                return forceRequiedToBreak * healthMultiplyVolumes[i].healthMultiplier;
+                            }
+                        }
+                    }
+
+                    return forceRequiedToBreak;
+                }
+
+                void FN_addConnections()
+                {
+                    for (int iii = 0; iii < hits.Length; iii += 1)
+                    {
+                        if (hits[iii].gameObject == allParts[i].gameObject || hits[iii].gameObject.TryGetComponent(out FracturePart fP) == false) continue;
+                        newConIndex = FN_getPartIndex(fP.transform);
+                        if (partRefs[i].connectedPartIndexes.Contains(newConIndex) == true) continue;
+
+                        //as all new connections
+                        partRefs[i].connectedPartIndexes.Add(newConIndex);
+                    }
+                }
+            }
+
+            //when done if use merged cols remove all cols on all parts (This is a lazy salution), remove col
+            if (colliderOptimization != ColliderOptimization.none)
+            {
+                for (int i = 0; i < allParts.Count; i += 1)
+                {
+                    DestroyImmediate(allParts[i].GetComponent<Collider>());
+                    //allParts[i].GetComponent<Collider>().enabled = false;
+                }
+            }
+            
+            HashSet<Collider> FN_linecastsBetweenPoints(Vector3[] points)
+            {
+                RaycastHit nHit;
+                HashSet<Collider> hits = new HashSet<Collider>();
+                for (int i = 1; i < points.Length; i += 1)
+                {
+                    for (int ii = 1; ii < points.Length; ii += 1)
+                    {
+                        Physics.Linecast(points[ii], points[i], out nHit);
+                        if (nHit.collider != null) hits.Add(nHit.collider);
+                        Physics.Linecast(points[i], points[ii], out nHit);
+                        if (nHit.collider != null) hits.Add(nHit.collider);
+                    }
+                }
+
+                return hits;
+            }
+        }
+
+        public void FN_desImpactCollision(Collision collision, int partIndex = -1)
+        {
+            if (collision.rigidbody == null && timeSinceCol < 0.5f) return;
+
+            ContactPoint contact = collision.GetContact(0);
+            FN_desImpact(partIndex < 0 ? FN_getClosestPart(contact.point) : partIndex, contact.point, collision.relativeVelocity.normalized, collision.relativeVelocity.magnitude * 0.25f);
+            
+            if (contact.thisCollider.attachedRigidbody != null)
+            {
+                Physics.IgnoreCollision(contact.otherCollider, collision.collider, true);
+                StartCoroutine(FN_desReapplyVel(contact.otherCollider.attachedRigidbody, collision.relativeVelocity / 2.0f));
+            }
+        }
+
+        private IEnumerator FN_desReapplyVel(Rigidbody rb, Vector3 velToGive)
+        {
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+            if (rb != null) rb.velocity = velToGive;
+        }
+
+        public void FN_desImpact(int indexToImpact, Vector3 impactPosition, Vector3 impactDirection, float impactForce, HashSet<int> partsToIgnore = null)
+        {
+            //if (partsToIgnore == null) partsToIgnore = new HashSet<int>();
+            if (partRefs.Count <= indexToImpact || (partsToIgnore != null && partsToIgnore.Add(indexToImpact) == false)
+                || partRefs[indexToImpact].healthCurrent <= 0.0f || (partRefs[indexToImpact].isKinematic == true && kinematicCanBreak == false)) return;
+
+            float newForce;
+            Vector3 thisPartCenter;
+            Vector3 dirToConnect;
+            for (int i = 0; i < partRefs[indexToImpact].connectedPartIndexes.Count; i += 1)
+            {
+                //spread the impact
+                if (allParts[partRefs[indexToImpact].connectedPartIndexes[i]] == null) continue;
+                thisPartCenter = allParts[partRefs[indexToImpact].connectedPartIndexes[i]].transform.TransformPoint(allParts[partRefs[indexToImpact].connectedPartIndexes[i]].meshF.sharedMesh.bounds.center);
+                dirToConnect = thisPartCenter - impactPosition;
+                newForce = (impactForce * Mathf.Clamp01((FN_getDirectionSimularity(impactDirection, dirToConnect.normalized) + Mathf.Clamp01(forceSpreadWidth - 0.5f)) * (forceSpreadWidth + 0.5f))) - (dirToConnect.magnitude * forceSpreadFalloff);
+
+                if (newForce <= 0.0f || partRefs[partRefs[indexToImpact].connectedPartIndexes[i]].healthCurrent < partRefs[indexToImpact].healthCurrent - impactForce) continue;
+                FN_desImpact(partRefs[indexToImpact].connectedPartIndexes[i], thisPartCenter, Vector3.Lerp(impactDirection, dirToConnect.normalized, forceSpreadWidth), newForce, partsToIgnore);
+            }
+
+            //deal damage
+            partRefs[indexToImpact].healthCurrent -= impactForce;
+            if (partRefs[indexToImpact].healthCurrent <= 0.0f) FN_desDestroyPart(indexToImpact, impactDirection, impactForce);
+            if (matUseShared != null) FN_updateCombinedMatDamage(indexToImpact);
+        }
+
+        public void FN_desDestroyPart(int indexToDestroy, Vector3 impactDirection, float impactForce)
+        {
+            if (allParts[indexToDestroy] == null) return;
+
+            //add collider
+            Collider col = null;
+            if (colCombs.Count > 0) FN_addColliderToFracture(allParts[indexToDestroy].meshF, physicsDamagedMaterial);
+            else if (allParts[indexToDestroy].TryGetComponent(out col) == true)
+            {
+                //allParts[indexToDestroy].GetComponent<Collider>().sharedMaterial = physicsDamagedMaterial;
+                col.sharedMaterial = physicsDamagedMaterial;
+            }
+
+            FN_onPartAddedOrDestroyed(indexToDestroy, false, col);
+
+            //set rigidbody
+            Rigidbody rb = allParts[indexToDestroy].GetOrAddComponent<Rigidbody>();
+            rb.isKinematic = false;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.mass = Mass;
+            rb.gameObject.layer = fractureDamagedLayer;
+
+            if (impactForce != 0.0f)
+            {
+                //add force to the rigidbody
+                Vector3 worldSize = allParts[indexToDestroy].transform.TransformVector(allParts[indexToDestroy].meshF.sharedMesh.bounds.extents);
+                Debug.DrawLine(rb.worldCenterOfMass, rb.worldCenterOfMass + (impactDirection * 1.05f * Mathf.Max(worldSize.x, worldSize.y, worldSize.z)), Color.red, 5.0f);
+                Physics.Raycast(rb.worldCenterOfMass, impactDirection, out RaycastHit nHit, 1.05f * Mathf.Max(worldSize.x, worldSize.y, worldSize.z));
+                if (nHit.transform != null)
+                {
+                    impactDirection *= -0.5f;
+                }
+
+                rb.AddForce(0.5f * impactForce * impactDirection, ForceMode.VelocityChange);
+            }
+
+            //set render
+            MeshRenderer mR = allParts[indexToDestroy].GetOrAddComponent<MeshRenderer>();
+
+            //update other
+            FN_changeTotalHealth(-partRefs[indexToDestroy].healthDefualt);
+            if (colCombs.Count > 0) FN_mergedColRemovePart(indexToDestroy);
+            partRefs[indexToDestroy].healthCurrent = 0.0f;
+            FN_updateMaterialDamage(indexToDestroy, false);
+            FN_requestPartToUpdate(indexToDestroy, true);
+
+            //prevent floating stuff
+            FN_desRequestRemoveFloating();
+        }
+
+        private void FN_changeTotalHealth(float healthToAdd)
+        {
+            totalHealthCurrent = Mathf.Clamp(totalHealthCurrent + healthToAdd, 0.0f, totalHealthOg);
+            if (parentRb != null)
+            {
+                parentRb.mass = ogTotalMass * (totalHealthCurrent / totalHealthOg);
+                if (totalHealthCurrent <= 0.0f) parentRb.isKinematic = true;
+                else parentRb.isKinematic = parentRbKinematic;
+
+                parentRb.gameObject.SetActive(false);
+                parentRb.gameObject.SetActive(true);
+            }
+        }
+
+        public void FN_desRequestRemoveFloating()
+        {
+            fixFloating_timer = 0.0f;
+        }
+
+        private Task<HashSet<int>> ThreadRemoveFloating = null;
+        private IEnumerator FN_desRemoveFloating()
+        {
+            ThreadRemoveFloating = Task.Run(() => FN_desRemoveFloating_thread());
+            while (ThreadRemoveFloating.IsCompleted == false && ThreadRemoveFloating.IsFaulted == false) yield return null;
+            if (ThreadRemoveFloating.IsFaulted == true)
+            {
+                ThreadRemoveFloating = null;
+                yield break;
+            }
+
+            HashSet<int> indexesToRemove = ThreadRemoveFloating.Result;
+            ThreadRemoveFloating = null;
+
+            foreach (int indexToRemove in indexesToRemove)
+            {
+                FN_desDestroyPart(indexToRemove, Vector3.zero, 0.0f);
+            }
+        }
+
+        /// <summary>
+        /// Gets all floating parts
+        /// </summary>
+        /// <returns>A list containing all part indexes that are not connected to a kinematic part</returns>
+        private HashSet<int> FN_desRemoveFloating_thread()
+        {
+            HashSet<int> indexesToKeep = new HashSet<int>();
+            List<int> indexesSearched = new List<int>();
+            int[] biggestChunkIndexes = new int[0];
+            HashSet<int> indexesSearchedTotal = new HashSet<int>();
+            bool keepThese;
+
+            for (int i = 0; i < partRefs.Count; i += 1)
+            {
+                //loop all parts
+                if (indexesSearchedTotal.Contains(i) == true || partRefs[i].healthCurrent <= 0.0f) continue;
+                keepThese = false;
+                indexesSearched.Clear();
+                indexesSearched.Add(i);
+
+                for (int ii = 0; ii < indexesSearched.Count; ii += 1)
+                {
+                    //loop all parts connected to this
+                    if (partRefs[indexesSearched[ii]].isKinematic == true) keepThese = true;
+                    
+                    for (int iii = 0; iii < partRefs[indexesSearched[ii]].connectedPartIndexes.Count; iii += 1)
+                    {
+                        if (indexesSearched.Contains(partRefs[indexesSearched[ii]].connectedPartIndexes[iii]) == false && partRefs[partRefs[indexesSearched[ii]].connectedPartIndexes[iii]].fPart != null) indexesSearched.Add(partRefs[indexesSearched[ii]].connectedPartIndexes[iii]);
+                    }
+                }
+
+                //get biggest chunk
+                if (indexesSearched.Count > biggestChunkIndexes.Length && biggestChunkIsNeverLoose == true)
+                {
+                    biggestChunkIndexes = indexesSearched.ToArray();
+                }
+
+                //add the searched parts to the final lists
+                if (keepThese == true)
+                {
+                    for (int ii = 0; ii < indexesSearched.Count; ii += 1)
+                    {
+                        indexesToKeep.Add(indexesSearched[ii]);
+                        indexesSearchedTotal.Add(indexesSearched[ii]);
+                    }
+                }
+                else
+                {
+                    for (int ii = 0; ii < indexesSearched.Count; ii += 1)
+                    {
+                        indexesSearchedTotal.Add(indexesSearched[ii]);
+                    }
+                }
+            }
+
+            if (biggestChunkIsNeverLoose == true) indexesSearchedTotal = indexesSearchedTotal.Except(biggestChunkIndexes).ToHashSet();
+            return new HashSet<int>(indexesSearchedTotal.Except(indexesToKeep)); ;
+        }
+
+        //#############################END OF REALTIME DESTRUCTION#########################################
+
+        private float ogTotalMass;
+        private void Awake()
+        {
+            totalHealthCurrent = totalHealthOg;
+            if (TryGetComponent(out Rigidbody rb) == true) ogTotalMass = rb.mass;
+            else
+            {
+                Rigidbody tempRb = GetComponentInChildren<Rigidbody>();
+                if (tempRb != null) ogTotalMass = tempRb.mass;
+            }
+
+            if (insideDamagedMaterial.HasProperty(materialDamagePropertyName) == true || outsideDamagedMaterial.HasFloat(materialDamagePropertyName) == true) FN_setupCombinedMatDamage();
+            else matUseShared = null;
+
+            if (disableCollisionWithNeighbours == true && colliderOptimization == ColliderOptimization.none)
+            {
+                //disable col with neighbours
+                for (int i = 0; i < allParts.Count; i += 1)
+                {
+                    for (int ii = 0; ii < partRefs[i].connectedPartIndexes.Count; ii += 1)
+                    {
+                        Physics.IgnoreCollision(allParts[i].GetComponent<Collider>(), allParts[partRefs[i].connectedPartIndexes[ii]].GetComponent<Collider>(), true);
+                    }
+                }
+            }
+        }
+
+        private void FN_setupCombinedMatDamage()
+        {
+            Transform combinedTrans = isSkinned == null ? combinedFilter.transform : isSkinned.transform;
+            matUseShared = new Color[allParts.Count];
+            Vector3 newPos;
+            for (int i = 0; i < matUseShared.Length; i += 1)
+            {
+                newPos = combinedTrans.InverseTransformPoint(allParts[i].transform.position);
+                matUseShared[i].r = newPos.x;
+                matUseShared[i].g = newPos.y;
+                matUseShared[i].b = newPos.z;
+                matUseShared[i].a = 0.0f;
+            }
+        }
+
+        private void FN_updateCombinedMatDamage(int indexToSet)
+        {
+            if (indexToSet >= matUseShared.Length) return;
+            if (combinedFilter.TryGetComponent(out Renderer comR) == false) comR = isSkinned.GetComponent<Renderer>();
+
+            //set combined damage property
+            Material[] comM = comR.materials;
+            matUseShared[indexToSet].a = 1.0f - (partRefs[indexToSet].healthCurrent / partRefs[indexToSet].healthDefualt);
+
+            for (int i = 0; i < comM.Length; i += 1)
+            {
+                if (comM[i].HasProperty(materialDamagePropertyName) == true)
+                {
+                    comM[i].SetColorArray(materialDamagePropertyName, matUseShared);
+                }
+            }
+        }
+
+        public Color[] matUseShared = null;
+
+        private void FN_updateMaterialDamage(int indexToSet, bool setInsideOnly)
+        {
+            Renderer mR = allParts[indexToSet].GetComponent<Renderer>();
+            Material[] mats = mR.sharedMaterials;
+            if (mats.Length < 2) mats = new Material[2];
+            float damageAmount = 1.0f - (partRefs[indexToSet].healthCurrent / partRefs[indexToSet].healthDefualt);
+
+            //set materials
+            if (damageAmount > 0.0f && partRefs[indexToSet].damagedSides <= 1)
+            {
+                if (setInsideOnly == true && partRefs[indexToSet].damagedSides == 0)
+                {
+                    if (allParts[indexToSet].meshF.sharedMesh.subMeshCount > 1) mats[1] = insideDamagedMaterial;
+                    partRefs[indexToSet].damagedSides = 1;
+                }
+                else if (setInsideOnly == false)
+                {
+                    mats[0] = outsideDamagedMaterial;
+                    if (allParts[indexToSet].meshF.sharedMesh.subMeshCount > 1) mats[1] = insideDamagedMaterial;
+                    partRefs[indexToSet].damagedSides = 2;
+                }
+            }
+            else if (damageAmount <= 0.0f && partRefs[indexToSet].damagedSides > 0)
+            {
+                mats[0] = outsideMaterial;
+                if (allParts[indexToSet].meshF.sharedMesh.subMeshCount > 1) mats[1] = insideMaterial;
+                partRefs[indexToSet].damagedSides = 0;
+            }
+
+            //assign the new materials
+            if (allParts[indexToSet].meshF.sharedMesh.subMeshCount > 1) mR.sharedMaterials = mats;
+            else mR.sharedMaterial = mats[0];
+        }
+
+        /// <summary>
+        /// Returns 1 if dir2 point in the same direction as dir1, Returns -1 if dir2 point in the opposite direction as dir2
+        /// </summary>
+        /// <param name="dir1"></param>
+        /// <param name="dir2"></param>
+        /// <param name="ignoreY"></param>
+        /// <returns></returns>
+        public float FN_getDirectionSimularity(Vector3 dir1, Vector3 dir2)
+        {
+            return Vector3.Dot(dir1.normalized, dir2.normalized);
+        }
+
+        //##############################RUNTIME REPAIR STUFF##########################################
+        private List<RepairAnim> repairAnims = new List<RepairAnim>();
+        private class RepairAnim
+        {
+            public float repairSpeed;
+            public int partIndex;
+            public Vector3 linkedBoneOffset;
+        }
+
+        private void FN_repAddNewPart(int indexToAddTo, MeshFilter filterToAdd, float repairSpeed)
+        {
+            //add fracturepart script
+            FracturePart fP = filterToAdd.GetOrAddComponent<FracturePart>();
+            fP.fractureDaddy = this;
+            fP.meshF = filterToAdd;
+            if (colliderOptimization != ColliderOptimization.none && fP.TryGetComponent(out Collider col) == true) Destroy(col);
+            if ((colliderUpdateRate != ColliderUpdate.everyFrameAccurate || isSkinned == false || colliderOptimization != ColliderOptimization.none) && fP.TryGetComponent(out Rigidbody rb) == true)  Destroy(rb);
+            else
+            {
+                fP.rb = filterToAdd.GetOrAddComponent<Rigidbody>();
+                fP.rb.isKinematic = true;
+                fP.rb.mass = Mass;
+            }
+
+            //configure partRefs list
+            allParts[indexToAddTo] = fP;
+            partRefs[indexToAddTo].fPart = fP;
+            partRefs[indexToAddTo].healthCurrent = partRefs[indexToAddTo].healthDefualt;
+            FN_changeTotalHealth(partRefs[indexToAddTo].healthDefualt);
+            FN_onPartAddedOrDestroyed(indexToAddTo, true);
+
+            //setup for repair animation
+            repairAnims.Add(new RepairAnim()
+            {
+                partIndex = indexToAddTo,
+                linkedBoneOffset = FN_getPartCenter(),
+                repairSpeed = repairSpeed
+            });
+
+            Vector3 FN_getPartCenter()
+            {
+                Vector3 center = Vector3.zero;
+                for (int i = 0; i < partRefs[indexToAddTo].boneLocalBoundWalls.Length; i += 1)
+                {
+                    center += partRefs[indexToAddTo].boneLocalBoundWalls[i];
+                }
+
+                return (center / partRefs[indexToAddTo].boneLocalBoundWalls.Length);
+            }
+        }
+
+        private void FN_onPartAddedOrDestroyed(int partIndex, bool wasAdded, Collider col = null)
+        {
+            if (col == null) allParts[partIndex].gameObject.TryGetComponent(out col);
+
+            if (syncWithThis == true && isSkinned == null)
+            {
+                allParts[partIndex].gameObject.transform.SetPositionAndRotation(transform.position, transform.rotation);
+                syncedCols[partIndex].enabled = wasAdded;
+                if (col != null) col.enabled = !wasAdded;
+            }
+        }
+
+        private static Bounds TransformBoundsToWorldSpace(Bounds localBounds, Transform transform)
+        {
+            // Transform the bounds center to world space
+            Vector3 center = transform.TransformPoint(localBounds.center);
+
+            // Transform the bounds extents to world space
+            Vector3 extents = localBounds.extents;
+            //float maxScale = Mathf.Max(transform.lossyScale.x, Mathf.Max(transform.lossyScale.y, transform.lossyScale.z));
+            //extents = new Vector3(extents.x * transform.lossyScale.x, extents.y * transform.lossyScale.y, extents.z * transform.lossyScale.z);
+            extents = transform.TransformVector(extents);
+
+            // Create a new bounds in world space
+            Bounds worldBounds = new Bounds(center, extents * 2f);
+
+            return worldBounds;
+        }
+
+        private void FN_repAnimUpdate()
+        {
+            Vector3 targetPos;
+            for (int i = repairAnims.Count - 1; i >= 0; i -= 1)
+            {
+                if (allParts[repairAnims[i].partIndex] == null)
+                {
+                    repairAnims.RemoveAt(i);
+                    continue;
+                }
+
+                targetPos = allParts[repairAnims[i].partIndex].transform.position + (partRefs[repairAnims[i].partIndex].linkedBoneTrans.TransformPoint(repairAnims[i].linkedBoneOffset) - allParts[repairAnims[i].partIndex].transform.TransformPoint(allParts[repairAnims[i].partIndex].meshF.sharedMesh.bounds.center));
+                rotateAroundCenter(allParts[repairAnims[i].partIndex].meshF, Quaternion.RotateTowards(allParts[repairAnims[i].partIndex].transform.rotation, partRefs[repairAnims[i].partIndex].linkedBoneTrans.rotation, repairAnims[i].repairSpeed * 50.0f * Time.deltaTime));
+                allParts[repairAnims[i].partIndex].transform.position = Vector3.MoveTowards(allParts[repairAnims[i].partIndex].transform.position, targetPos, repairAnims[i].repairSpeed * Time.deltaTime);
+                
+                if (matUseShared != null) FN_updateCombinedMatDamage(repairAnims[i].partIndex);
+
+                if (targetPos == allParts[repairAnims[i].partIndex].transform.position)
+                {
+                    //when part reach goal
+                    partRefs[repairAnims[i].partIndex].damagedSides = 0;
+                    FN_requestPartToUpdate(repairAnims[i].partIndex, false);
+                    if (colCombs.Count > 0) FN_mergedColAddPart(repairAnims[i].partIndex);
+                    repairAnims.RemoveAt(i);
+                }
+            }
+
+            void rotateAroundCenter(MeshFilter filter, Quaternion newRot)
+            {
+                Vector3 ogCenter = filter.sharedMesh.bounds.center;
+                filter.transform.rotation = newRot;
+                filter.transform.localPosition += ogCenter - filter.sharedMesh.bounds.center;
+            }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns>A part index that is destroyed and either kinematic or next to a non destroyed part</returns>
+        public int FN_repGetBrokenEdgePart()
+        {
+            for (int i = 0; i < partRefs.Count; i += 1)
+            {
+                if (partRefs[i].fPart == null)
+                {
+                    if (partRefs[i].isKinematic == true) return i;
+                    for (int ii = 0; ii < partRefs[i].connectedPartIndexes.Count; ii += 1)
+                    {
+                        if (partRefs[partRefs[i].connectedPartIndexes[ii]].fPart != null) return i;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        //##############################END OF RUNTIME REPAIR#########################################
+    }
+}

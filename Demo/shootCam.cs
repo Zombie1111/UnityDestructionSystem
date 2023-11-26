@@ -25,10 +25,10 @@ namespace TrueTrace
         private float totalRun = 1.0f;
         private bool StopMovement = true;
         private bool IsPressingT = false;
-        private bool IsLocked = true;
+        //private bool IsLocked = true;
         void Update()
         {
-
+            
             if (Input.GetKeyDown(KeyCode.Mouse0) == true)
             {
                 GameObject newO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
