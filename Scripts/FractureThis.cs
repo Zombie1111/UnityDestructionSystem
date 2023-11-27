@@ -15,6 +15,10 @@ using Unity.Jobs;
 using Unity.Collections;
 using Unity.VisualScripting;
 using System.Data;
+using System.Text.RegularExpressions;
+using UnityEngine.Jobs;
+using System.Threading;
+using System.ComponentModel.Design;
 
 namespace Zombie1111_uDestruction
 {
@@ -68,6 +72,11 @@ namespace Zombie1111_uDestruction
         [SerializeField] private OptPhysicsMain phyMainOptions = new();
 
         [Space(10)]
+        [Header("Destruction")]
+        public float destructionThreshold = 1.0f;
+        [SerializeField] private float minDelay = 0.05f;
+
+        [Space(10)]
         [Header("Material")]
         [SerializeField] private Material matInside_defualt = null;
         [SerializeField] private Material matOutside_defualt = null;
@@ -75,8 +84,21 @@ namespace Zombie1111_uDestruction
         [Space(50)]
         [Header("Debug (Dont touch)")]
         [SerializeField] private OrginalObjData ogData = null;
-        [SerializeField] private List<FracParents> allFracParents = null;
-        [SerializeField] private List<FracParts> allParts = null;
+
+        /// <summary>
+        /// All fractured parts have one of these as its parent
+        /// </summary>
+        [SerializeField] private List<FracParents> allFracParents = new();
+
+        /// <summary>
+        /// All the fractured parts.
+        /// </summary>
+        [SerializeField] private FracParts[] allParts = new FracParts[0];
+
+        /// <summary>
+        /// If MainPhysicsType == overlappingIsKinematic, bool for all parts that is true if the part was is inside a non fractured mesh when generated
+        /// </summary>
+        [SerializeField] private bool[] kinematicPartStatus = new bool[0];
 
         /// <summary>
         /// The renderer used to render the fractured mesh (always skinned)
@@ -95,7 +117,7 @@ namespace Zombie1111_uDestruction
         [System.Serializable]
         private class OptPhysicsMain
         {
-            public bool doMainPhysics = true;
+            public OptMainPhysicsType MainPhysicsType = OptMainPhysicsType.overlappingIsKinematic;
             public bool useGravity = true;
             public float massMultiplier = 0.5f;
             public float drag = 0.0f;
@@ -105,16 +127,25 @@ namespace Zombie1111_uDestruction
             public RigidbodyConstraints constraints;
         }
 
+        private enum OptMainPhysicsType
+        {
+            overlappingIsKinematic,
+            orginalIsKinematic,
+            alwaysDynamic,
+            alwaysKinematic
+        }
+
         [System.Serializable]
         private class FracParents
         {
             public Transform parentTrans;
-            public List<int> partIndexes;
 
             /// <summary>
-            /// Total mass of all children, already multiplied. (childCount * massDensity * phyMainOptions.massMultiplier)
+            /// The parents rigidbody. mass = (childPartCount * massDensity * phyMainOptions.massMultiplier), isKinematic is updated based on phyMainOptions.MainPhysicsType
             /// </summary>
-            public float totalMass;
+            public Rigidbody parentRb;
+            public FractureParent fParent;
+            public List<int> partIndexes;
         }
 
         [System.Serializable]
@@ -128,6 +159,12 @@ namespace Zombie1111_uDestruction
             /// The vertex indexes on the main renderer that is for this part. mainMesh.vertics[rendVertexIndexes[0]] = thisMesh.vertics[0]
             /// </summary>
             public List<int> rendVertexIndexes;
+            public List<int> neighbourParts;
+
+            /// <summary>
+            /// 0.0 = no cracks, 1.0 = completely broken
+            /// </summary>
+            public float partBrokenness;
         }
 
         [System.Serializable]
@@ -179,6 +216,7 @@ namespace Zombie1111_uDestruction
 
             //setup fracture renderer
             Gen_setupRenderer(ref allParts, fracturedMeshes, transform, matInside_defualt, matOutside_defualt);
+
             //log result when done
             if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.Log("(Warning) " + transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
             if (transform.TryGetComponent<Rigidbody>(out _) == true) Debug.Log("(Warning) " + transform.name + " has a rigidbody and it may cause issues. Its recommended to remove it and use the fracture physics options instead");
@@ -203,13 +241,13 @@ namespace Zombie1111_uDestruction
         /// <param name="rendHolder"></param>
         /// <param name="matInside"></param>
         /// <param name="matOutside"></param>
-        private void Gen_setupRenderer(ref List<FracParts> fParts, List<Mesh> partMeshes, Transform rendHolder, Material matInside, Material matOutside)
+        private void Gen_setupRenderer(ref FracParts[] fParts, List<Mesh> partMeshes, Transform rendHolder, Material matInside, Material matOutside)
         {
             //get and setup combined mesh bones
             Mesh comMesh = FractureHelperFunc.ConvertMeshWithMatrix(FractureHelperFunc.CombineMeshes(partMeshes, ref fParts), rendHolder.worldToLocalMatrix);
 
             BoneWeight[] boneW = new BoneWeight[comMesh.vertexCount];
-            for (int i = 0; i < fParts.Count; i += 1)
+            for (int i = 0; i < fParts.Length; i += 1)
             {
                 foreach (int vI in fParts[i].rendVertexIndexes)
                 {
@@ -240,6 +278,9 @@ namespace Zombie1111_uDestruction
 
         private List<Mesh> Gen_setupPartBasics(List<Mesh> meshes, PhysicMaterial phyMatToUse)
         {
+            //save the world space meshes
+            Mesh[] worldMeshes = meshes.ToArray();
+
             //create defualt parent
             Transform pTrans = new GameObject("fracParentBase_" + transform.name).transform;
             pTrans.SetParent(transform);
@@ -247,8 +288,22 @@ namespace Zombie1111_uDestruction
             pTrans.localScale = Vector3.one;
             allFracParents = new() { new() { parentTrans = pTrans, partIndexes = Enumerable.Range(0, meshes.Count).ToList() } };
 
+            //add rigidbody to parent
+            allFracParents[0].parentRb = pTrans.GetOrAddComponent<Rigidbody>();
+            allFracParents[0].parentRb.collisionDetectionMode = phyMainOptions.collisionDetection;
+            allFracParents[0].parentRb.interpolation = phyMainOptions.interpolate;
+            allFracParents[0].parentRb.useGravity = phyMainOptions.useGravity;
+            allFracParents[0].parentRb.drag = phyMainOptions.drag;
+            allFracParents[0].parentRb.angularDrag = phyMainOptions.angularDrag;
+            allFracParents[0].parentRb.constraints = phyMainOptions.constraints;
+
+            //add parent script to parent
+            allFracParents[0].fParent = pTrans.GetOrAddComponent<FractureParent>();
+            allFracParents[0].fParent.fractureDaddy = this;
+
             //create part transforms
-            allParts = new();
+            allParts = new FracParts[meshes.Count];
+
             for (int i = 0; i < meshes.Count; i += 1)
             {
                 Transform newT = new GameObject("Part(" + i + ")_" + transform.name).transform;
@@ -257,30 +312,67 @@ namespace Zombie1111_uDestruction
                 newT.SetPositionAndRotation(FractureHelperFunc.GetMedianPosition(meshes[i].vertices), pTrans.rotation);
                 newT.localScale = Vector3.one;
 
-                meshes[i] = FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(meshes[i]), newT.worldToLocalMatrix); //Instantiate new mesh only done to keep worldSpaceMesh if its needed later
+                meshes[i] = FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(meshes[i]), newT.worldToLocalMatrix); //Instantiate new mesh to keep worldSpaceMeshes
 
                 //the part data is created here
-                FracParts newP = new() { col = Gen_createPartCollider(newT, meshes[i], phyMatToUse), rendVertexIndexes = new() };
-                allParts.Add(newP);
+                FracParts newP = new() { col = Gen_createPartCollider(newT, meshes[i], phyMatToUse), rendVertexIndexes = new(), partBrokenness = 0.0f, neighbourParts = new() };
+                allParts[i] =newP;
             }
 
-            Run_updateParentInfo(0);
+            //setup part neighbours and isKinematic
+            Vector3[] wVerts;
 
-            //add rigidbody to parent
-            if (phyMainOptions.doMainPhysics == true)
+            float worldDis = worldScale * 0.01f;
+            if (phyMainOptions.MainPhysicsType == OptMainPhysicsType.overlappingIsKinematic) kinematicPartStatus = new bool[allParts.Length];
+            else kinematicPartStatus = new bool[0];
+
+            for (int i = 0; i < allParts.Length; i += 1)
             {
-                Rigidbody newRb = pTrans.GetOrAddComponent<Rigidbody>();
-                newRb.collisionDetectionMode = phyMainOptions.collisionDetection;
-                newRb.interpolation = phyMainOptions.interpolate;
-                newRb.mass = allFracParents[0].totalMass;
-                newRb.useGravity = phyMainOptions.useGravity;
-                newRb.drag = phyMainOptions.drag;
-                newRb.angularDrag = phyMainOptions.angularDrag;
-                newRb.constraints = phyMainOptions.constraints;
+                wVerts = worldMeshes[i].vertices;
+
+                for (int ii = 0; ii < wVerts.Length; ii += 1)
+                {
+                    Gen_getKinematicAndNeighboursFromTrans(Physics.OverlapSphere(wVerts[ii], worldDis).Select(col => col.transform).ToArray(), i);
+                }
+
+                Gen_getKinematicAndNeighboursFromTrans(FractureHelperFunc.LinecastsBetweenPositions(wVerts).Select(col => col.transform).ToArray(), i);
             }
+
+            //update parent info
+            Run_updateParentInfo(0);
 
             //return meshes since it has been converted to parent localspace
             return meshes;
+
+            void Gen_getKinematicAndNeighboursFromTrans(Transform[] transs, int ogPi)
+            {
+                FractureThis pFracThis;
+                int nearI;
+
+                for (int i = 0; i < transs.Length; i += 1)
+                {
+                    //get part index from hit trans
+                    pFracThis = transs[i].GetComponentInParent<FractureThis>();
+
+                    nearI = Run_tryGetPartIndexFromTrans(transs[i], false);
+                    if (nearI == ogPi) continue;
+
+                    if (nearI < 0)
+                    {
+                        //hit is not a neighbour part
+                        if (kinematicPartStatus.Length > 0 && pFracThis == null)
+                        {
+                            kinematicPartStatus[ogPi] = true; 
+                        }
+                    }
+                    else if (allParts[ogPi].neighbourParts.Contains(nearI) == false && pFracThis == this)
+                    {
+                        //Hit is a new neighbour part, add to neighbour part list
+                        print(nearI + " " + ogPi);
+                        allParts[ogPi].neighbourParts.Add(nearI);
+                    }
+                }
+            }
 
             Collider Gen_createPartCollider(Transform partTrans, Mesh partMesh, PhysicMaterial phyMat)
             {
@@ -398,17 +490,14 @@ namespace Zombie1111_uDestruction
             }
 
             //destroy all frac parents
-            if (allFracParents != null)
+            for (int i = 0; i < allFracParents.Count; i += 1)
             {
-                for (int i = 0; i < allFracParents.Count; i += 1)
-                {
-                    if (allFracParents[i].parentTrans == null) continue;
-                    DestroyImmediate(allFracParents[i].parentTrans.gameObject);
-                }
-
-                allFracParents = null;
-                allParts = null;
+                if (allFracParents[i].parentTrans == null) continue;
+                DestroyImmediate(allFracParents[i].parentTrans.gameObject);
             }
+
+            allFracParents.Clear();
+            allParts = new FracParts[0];
 
             if (doSave == false) return;
 
@@ -682,16 +771,148 @@ namespace Zombie1111_uDestruction
         }
 
         //############################RUNTIME########################################
-        private void Update()
-        {
-            //update renderer bounds
-            fracRend.bounds = FractureHelperFunc.ToBounds(allParts.Select(part => part.col.transform.position));
-        }
-
         private void Run_updateParentInfo(int pIndex)
         {
             //update parent total mass
-            allFracParents[pIndex].totalMass = allFracParents[pIndex].parentTrans.childCount * massDensity * phyMainOptions.massMultiplier;
+            allFracParents[pIndex].parentRb.mass = allFracParents[pIndex].partIndexes.Count * massDensity * phyMainOptions.massMultiplier;
+
+            //update isKinematic
+            if (phyMainOptions.MainPhysicsType == OptMainPhysicsType.alwaysDynamic)
+            {
+                allFracParents[pIndex].parentRb.isKinematic = false;
+            }
+            else if (phyMainOptions.MainPhysicsType == OptMainPhysicsType.alwaysKinematic)
+            {
+                allFracParents[pIndex].parentRb.isKinematic = true;
+            }
+            else if (phyMainOptions.MainPhysicsType == OptMainPhysicsType.orginalIsKinematic)
+            {
+                allFracParents[pIndex].parentRb.isKinematic = pIndex == 0;
+            }
+            else
+            {
+                bool pIsKin = false;
+
+                foreach (int pI in allFracParents[pIndex].partIndexes)
+                {
+                    if (kinematicPartStatus[pI] == true)
+                    {
+                        pIsKin = true;
+                        break;
+                    }
+                }
+
+                allFracParents[pIndex].parentRb.isKinematic = pIsKin;
+            }
+
+        }
+
+        /// <summary>
+        /// Returns the given trans part index, -1 if not a part
+        /// </summary>
+        /// <param name="trans"></param>
+        /// <param name="verifyScript">If true, also checks if the fracture script exists in any parent</param>
+        /// <returns></returns>
+        public int Run_tryGetPartIndexFromTrans(Transform trans, bool verifyScript = false)
+        {
+            if (verifyScript == true)
+            {
+                //verify script
+                if (trans.GetComponentInParent<FractureThis>() != this) return -1;
+            }
+
+            //The part index is stored in the transform name
+            Match match = Regex.Match(trans.name, @"Part\((\d+)\)");
+
+            if (match.Success == true && int.TryParse(match.Groups[1].Value, out int partId) == true) return partId;
+
+            return -1;
+        }
+
+        float currentDelayTime = 0.0f;
+
+        private void Update()
+        {
+            if (allParts.Length == 0) return;
+
+            //update renderer bounds
+            fracRend.bounds = FractureHelperFunc.ToBounds(allParts.Select(part => part.col.transform.position));
+
+            //calculate destruction
+            if (impact_totalForce > 0.0f)
+            {
+                if (currentDelayTime >= minDelay && ThreadCalcDes == null)
+                {
+                    currentDelayTime = 0.0f;
+                    StartCoroutine(CalculateDestruction());
+                }
+
+                currentDelayTime += Time.deltaTime;
+            }
+        }
+
+        private struct DestructionData
+        {
+
+        }
+
+        private List<Vector3> impact_positions = new();
+        private float impact_totalForce = 0.0f;
+        private Vector3 impact_Direction = Vector3.zero;
+
+        /// <summary>
+        /// Calculates destruction to apply the parent as soon as possible
+        /// </summary>
+        /// <param name="parentIndex"></param>
+        /// <param name="impactPositions"></param>
+        /// <param name="impactTotalForce"></param>
+        /// <param name="impactDirection"></param>
+        /// <returns></returns>
+        //public void RequestDestruction(Vector3[] impPositions, float impTotalForce, Vector3 impDirection)
+        public void RequestDestruction(Vector3 impPosition, float impTotalForce, Vector3 impDirection)
+        {
+            if (impact_totalForce <= 0.0f) currentDelayTime = 0.0f;
+
+            impact_positions.Add(impPosition);
+            impact_totalForce += impTotalForce;
+            if (impact_Direction == Vector3.zero) impact_Direction = impDirection;
+            else impact_Direction = Vector3.Lerp(impact_Direction, impDirection, impTotalForce / impact_totalForce).normalized;
+        }
+
+        Task<DestructionData> ThreadCalcDes = null;
+
+        private IEnumerator CalculateDestruction()
+        {
+            print("destruction");
+
+            foreach (Vector3 pos in impact_positions)
+            {
+                Debug.DrawLine(pos, pos + impact_Direction, Color.red, 0.5f, false);
+            }
+
+            Vector3[] partPoss = allParts.Select(part => part.col.transform.position).ToArray();
+            ThreadCalcDes = Task.Run(() => CalculateDestructionThread(allParts.ToArray(), partPoss, impact_positions.ToArray(), impact_totalForce, impact_Direction));
+            while (ThreadCalcDes.IsCompleted == false && ThreadCalcDes.IsFaulted == false) yield return null;
+            if (ThreadCalcDes.IsFaulted == true)
+            {
+                //when error accure, dont reset so it will try to destroy again
+                ThreadCalcDes = null;
+                yield break;
+            }
+
+            //apply the destruction
+            DestructionData desData = ThreadCalcDes.Result;
+
+            //reset when done
+            ThreadCalcDes = null;
+            impact_positions.Clear();
+            impact_totalForce = 0.0f;
+            impact_Direction = Vector3.zero;
+        }
+
+        private DestructionData CalculateDestructionThread(FracParts[] fParts, Vector3[] fPartsPos, Vector3[] impPoss, float impTotalF, Vector3 impDir)
+        {
+            return new();
         }
     }
 }

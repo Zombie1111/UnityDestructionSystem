@@ -482,7 +482,7 @@ namespace Zombie1111_uDestruction
         /// <param name="fracMeshes">Must have same lenght as fracParts</param>
         /// <param name="fracParts"></param>
         /// <returns></returns>
-        public static Mesh CombineMeshes(List<Mesh> fracMeshes, ref List<FractureThis.FracParts> fracParts)
+        public static Mesh CombineMeshes(List<Mesh> fracMeshes, ref FractureThis.FracParts[] fracParts)
         {
             List<Vector3> combinedVertices = new List<Vector3>();
             List<Vector3> combinedNormals = new List<Vector3>();
@@ -553,6 +553,31 @@ namespace Zombie1111_uDestruction
             }
 
             return midPos / positions.Length;
+        }
+
+        /// <summary>
+        /// Performs a linecast for all positions between all positions
+        /// </summary>
+        /// <param name="poss"></param>
+        /// <returns></returns>
+        public static HashSet<Collider> LinecastsBetweenPositions(Vector3[] poss)
+        {
+            RaycastHit nHit;
+            HashSet<Collider> hits = new();
+            for (int i = 1; i < poss.Length; i += 1)
+            {
+                for (int ii = 1; ii < poss.Length; ii += 1)
+                {
+                    if (ii == i) continue;
+
+                    Physics.Linecast(poss[ii], poss[i], out nHit);
+                    if (nHit.collider != null) hits.Add(nHit.collider);
+                    //Physics.Linecast(poss[i], poss[ii], out nHit);
+                    //if (nHit.collider != null) hits.Add(nHit.collider);
+                }
+            }
+
+            return hits;
         }
 
 #if UNITY_EDITOR
