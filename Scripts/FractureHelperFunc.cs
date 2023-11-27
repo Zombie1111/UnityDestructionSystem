@@ -428,11 +428,35 @@ namespace Zombie1111_uDestruction
                 List<int> trisAtPos = new List<int>();
                 for (int i = 0; i < tris.Length; i += 3)
                 {
-                    if (Vector3.Distance(vers[tris[i]], pos) < verDisTol || Vector3.Distance(vers[tris[i + 1]], pos) < verDisTol || Vector3.Distance(vers[tris[i + 2]], pos) < verDisTol) trisAtPos.Add(i);
+                    //if (Vector3.Distance(vers[tris[i]], pos) < verDisTol || Vector3.Distance(vers[tris[i + 1]], pos) < verDisTol || Vector3.Distance(vers[tris[i + 2]], pos) < verDisTol) trisAtPos.Add(i);
+                    if (Vector3.SqrMagnitude(vers[tris[i]] - pos) < verDisTol || Vector3.SqrMagnitude(vers[tris[i + 1]] - pos) < verDisTol || Vector3.SqrMagnitude(vers[tris[i + 2]] - pos) < verDisTol) trisAtPos.Add(i);
                 }
 
                 return trisAtPos;
             }
+        }
+
+        /// <summary>
+        /// Returns all vertics that is close to the given position. (Always excluding vertex index vIndexToIgnore)
+        /// </summary>
+        /// <param name="mesh"></param>
+        /// <param name="pos"></param>
+        /// <param name="verDisTol"></param>
+        /// <param name="vIndexToIgnore"></param>
+        /// <returns></returns>
+        public static List<int> GetAllVertexIndexesAtPos(Vector3[] vertics, Vector3 pos, float verDisTol = 0.0001f, int vIndexToIgnore = -1)
+        {
+            List<int> vAtPos = new();
+
+            for (int i = 0; i < vertics.Length; i += 1)
+            {
+                if ((vertics[i] - pos).sqrMagnitude < verDisTol && i != vIndexToIgnore)
+                {
+                    vAtPos.Add(i);
+                }
+            }
+
+            return vAtPos;
         }
 
         public static Mesh ConvertMeshWithMatrix(Mesh mesh, Matrix4x4 lTwMatrix)
@@ -560,13 +584,13 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="poss"></param>
         /// <returns></returns>
-        public static HashSet<Collider> LinecastsBetweenPositions(Vector3[] poss)
+        public static HashSet<Collider> LinecastsBetweenPositions(List<Vector3> poss)
         {
             RaycastHit nHit;
             HashSet<Collider> hits = new();
-            for (int i = 1; i < poss.Length; i += 1)
+            for (int i = 1; i < poss.Count; i += 1)
             {
-                for (int ii = 1; ii < poss.Length; ii += 1)
+                for (int ii = 1; ii < poss.Count; ii += 1)
                 {
                     if (ii == i) continue;
 

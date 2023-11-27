@@ -10,16 +10,17 @@ namespace Zombie1111_uDestruction
         public int actualContactCount = 0;
         public ContactPoint[] contacts = new ContactPoint[4];
         public FractureThis fractureDaddy = null;
+        public int thisParentIndex = -1;
 
         private void OnCollisionEnter(Collision collision)
         {
             OnCollision(collision);
         }
 
-        private void OnCollisionStay(Collision collision)
-        {
-            OnCollision(collision);
-        }
+        //private void OnCollisionStay(Collision collision)
+        //{
+        //    OnCollision(collision);
+        //}
 
         private void OnCollision(Collision collision)
         {
@@ -36,7 +37,12 @@ namespace Zombie1111_uDestruction
             //}
 
             //fractureDaddy.RequestDestruction(contacts.Take(actualContactCount).Select(contact => contact.point).ToArray(), totalForce, collision.relativeVelocity.normalized);
-            fractureDaddy.RequestDestruction(collision.GetContact(0).point, totalForce, collision.relativeVelocity.normalized);
+            DoImpactAtPosition(collision.GetContact(0).point, collision.relativeVelocity.normalized, totalForce);
+        }
+
+        public void DoImpactAtPosition(Vector3 impPosition, Vector3 impDirection, float impForce)
+        {
+            fractureDaddy.RequestDestruction(impPosition, impDirection, impForce, thisParentIndex);
         }
     }
 }
