@@ -330,13 +330,16 @@ namespace Zombie1111_uDestruction
             sRend.bones = fParts.Select(part => part.col.transform).ToArray();
             sRend.sharedMaterials = new Material[2] { matInside, matOutside };
             sRend.sharedMesh = comMesh;
-            ////combine all meshes and assign to mesh filter
-            //MeshFilter mF = rendHolder.GetOrAddComponent<MeshFilter>();
-            //mF.sharedMesh = FractureHelperFunc.CombineMeshes(partMeshes, ref fParts);
-            //
-            ////set renderer
-            //MeshRenderer mR = rendHolder.GetOrAddComponent<MeshRenderer>();
-            //mR.sharedMaterials = new Material[2] { matInside, matOutside };
+
+            //setup verticsPartThreaded
+            verticsPartThreaded = new int[vertics.Length];
+            for (int i = 0; i < allParts.Length; i += 1)
+            {
+                foreach (int vI in allParts[i].rendVertexIndexes)
+                {
+                    verticsPartThreaded[vI] = i;
+                }
+            }
         }
 
         private List<Mesh> Gen_setupPartBasics(List<Mesh> meshes, PhysicMaterial phyMatToUse)
@@ -959,6 +962,9 @@ namespace Zombie1111_uDestruction
             public List<Vector3> poss = new();
             public int pIndex = 0;
             public float totalForce = 0.0f;
+            /// <summary>
+            /// The impact direction, always normalized
+            /// </summary>
             public Vector3 forceDir = Vector3.zero;
         }
 
@@ -1004,6 +1010,10 @@ namespace Zombie1111_uDestruction
             fracRend.sharedMesh.GetVertices(verticsOrginalThreaded);
             verticsForceThreaded = new float[verticsOrginalThreaded.Count];
 
+            //get bone matrixes
+            verticsBonesThreaded = fracRend.sharedMesh.boneWeights.Select(bone => bone.boneIndex0).ToArray();
+            boneMatrixsThreaded = fracRend.sharedMesh.bindposes.ToList();
+
             //disable collision with neighbours
             if (disableCollisionWithNeighbours == true)
             {
@@ -1019,6 +1029,9 @@ namespace Zombie1111_uDestruction
 
         private Mesh bakedMesh;
         private List<Vector3> verticsCurrentThreaded;
+        /// <summary>
+        /// Contains all vertics of the skinned mesh (Is created on awake)
+        /// </summary>
         private List<Vector3> verticsOrginalThreaded;
         private float[] verticsForceThreaded;
 
@@ -1027,6 +1040,16 @@ namespace Zombie1111_uDestruction
         /// </summary>
         [System.NonSerialized] public IntList[] verticsLinkedThreaded = new IntList[0];
         [System.NonSerialized] public float[] partsOgResistanceThreaded = new float[0];
+        /// <summary>
+        /// Contains all vertics and the index of the part they are a part of
+        /// </summary>
+        [System.NonSerialized] public int[] verticsPartThreaded = new int[0];
+        /// <summary>
+        /// The index of the bone each vertex uses
+        /// </summary>
+        private int[] verticsBonesThreaded = new int[0];
+        private List<Matrix4x4> boneMatrixsThreaded = new();
+        private List<Matrix4x4> boneMatrixsCurrentThreaded = new();
         private Task<DestructionData> ThreadCalcDes = null;
 
         [System.Serializable]
@@ -1049,24 +1072,27 @@ namespace Zombie1111_uDestruction
             Vector3[] partPoss = allParts.Select(part => part.col.transform.position).ToArray();
             fracRend.BakeMesh(bakedMesh);
             bakedMesh.GetVertices(verticsCurrentThreaded);
+            Matrix4x4 lTWMatrix = fracRend.transform.localToWorldMatrix;
+            //fracRend.sharedMesh.GetBindposes(boneMatrixsThreaded);
+            boneMatrixsCurrentThreaded = allParts.Select(part => part.col.transform.localToWorldMatrix).ToList();
 
             //run destruction compute thread
-            //ThreadCalcDes = Task.Run(() => CalculateDestructionThread(allParts.ToArray(), partPoss, impact_data.ToArray(), allFracParents.Select(fParent => fParent.partIndexes.ToList()).ToArray(), fracRend.transform.localToWorldMatrix));
-            //while (ThreadCalcDes.IsCompleted == false && ThreadCalcDes.IsFaulted == false) yield return null;
-            //
-            //if (ThreadCalcDes.IsFaulted == true)
-            //{
-            //    //when error accure, dont reset so it will try to destroy again
-            //    ThreadCalcDes = null;
-            //    yield break;
-            //}
+            ThreadCalcDes = Task.Run(() => CalculateDestructionThread(allParts.ToArray(), partPoss, impact_data.ToArray(), allFracParents.Select(fParent => fParent.partIndexes.ToList()).ToArray(), lTWMatrix));
+            while (ThreadCalcDes.IsCompleted == false && ThreadCalcDes.IsFaulted == false) yield return null;
+            
+            if (ThreadCalcDes.IsFaulted == true)
+            {
+                //when error accure, dont reset so it will try to destroy again
+                ThreadCalcDes = null;
+                yield break;
+            }
 
             //apply the destruction
             fracRend.sharedMesh.SetVertices(verticsOrginalThreaded);
 
-            //DestructionData desData = ThreadCalcDes.Result;
-            DestructionData desData = CalculateDestructionThread(allParts.ToArray(), partPoss, impact_data.ToArray(), allFracParents.Select(fParent => fParent.partIndexes.ToList()).ToArray(), fracRend.transform.localToWorldMatrix);
-            yield return null;
+            DestructionData desData = ThreadCalcDes.Result;
+            //DestructionData desData = CalculateDestructionThread(allParts.ToArray(), partPoss, impact_data.ToArray(), allFracParents.Select(fParent => fParent.partIndexes.ToList()).ToArray(), fracRend.transform.localToWorldMatrix);
+            //yield return null;
 
             //apply updated brokeness
             for (int i = 0; i < desData.partsBrokenness.Length; i += 1)
@@ -1243,6 +1269,10 @@ namespace Zombie1111_uDestruction
             float[] partsBrokenness = fParts.Select(part => part.partBrokenness).ToArray();
             List<int> partsLeftToSearch = new();
             List<int> conParts = new();
+            float brokennessToAdd;
+            float vertexBrokennessToAdd;
+            Vector3 localImpactDir;
+            Vector3 verImpactDir;
 
             //loop all parents and calculate their destruction
             for (int i = 0; i < impData.Length; i += 1)
@@ -1296,7 +1326,6 @@ namespace Zombie1111_uDestruction
                     CalcDesPart(parentIndex, i);
                 }
 
-                //This system for some reason cause random parts to fall off on damage
                 //if parent has disconnected parts, request new parent for them
                 partsLeftToSearch = new(parentPartIndexes[parentIndex]);
                 bool firstLoop = true;
@@ -1342,16 +1371,38 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            void CalcIfNewParent(int partIndex, int parentIndex)
-            {
-                //get all connected parts and adds them to conParts list, also clears setClosed
-
-            }
-
             void CalcDesPart(int parentIndex, int openIndex)
             {
+                //get brokenness to add
+                brokennessToAdd = setOpen[openIndex].force / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
+
+                //calculate vertics force
+                //localImpactDir = lToWMatrix.inverse.MultiplyVector(iD.forceDir);
+
+                foreach (int vI in fParts[setOpen[openIndex].partIndex].rendVertexIndexes)
+                {
+                    vertexBrokennessToAdd = Mathf.Clamp(brokennessToAdd, 0.0f, 1.0f - verticsForceThreaded[vI]);
+                    if (vertexBrokennessToAdd <= 0.0f) continue;
+
+                    verticsForceThreaded[vI] += vertexBrokennessToAdd;
+
+                    foreach (int vIi in verticsLinkedThreaded[vI].intList)
+                    {
+                        if (partsBrokenness[verticsPartThreaded[vIi]] >= 1.0f || fParts[verticsPartThreaded[vIi]].parentIndex != parentIndex) continue;
+
+                        verImpactDir = boneMatrixsCurrentThreaded[verticsBonesThreaded[vIi]].inverse.MultiplyVector(iD.forceDir);
+                        verImpactDir.Scale(boneMatrixsCurrentThreaded   [verticsBonesThreaded[vIi]].inverse.lossyScale);
+
+                        verImpactDir *= vertexDisplacementStenght * vertexBrokennessToAdd;
+
+                        verticsForceThreaded[vIi] = verticsForceThreaded[vI];
+                        verticsOrginalThreaded[vIi] += verImpactDir;
+                    }
+                }
+
                 //get if this part should break
-                partsBrokenness[setOpen[openIndex].partIndex] += setOpen[openIndex].force / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
+                partsBrokenness[setOpen[openIndex].partIndex] += brokennessToAdd;
+
                 if (partsBrokenness[setOpen[openIndex].partIndex] >= 1.0f)
                 {
                     dData.partsToBreak.Add(setOpen[openIndex].partIndex);
@@ -1392,5 +1443,6 @@ namespace Zombie1111_uDestruction
         [SerializeField] private AnimationCurve forceSpreadCurve = AnimationCurve.EaseInOut(0.0f, 0.0f, 1.0f, 1.0f);
         [SerializeField] private float distanceFalloffStrenght = 2.0f;
         [SerializeField] private float distanceFalloffPower = 2.0f;
+        [SerializeField] private float vertexDisplacementStenght = 0.6f;
     }
 }

@@ -29,6 +29,7 @@ namespace Zombie1111_uDestruction
             public float[] saved_partsOgResistanceThreaded = new float[0];
             public FractureThis.FracParts[] saved_allParts = new FractureThis.FracParts[0];
             public bool[] saved_kinematicPartStatus = new bool[0];
+            public int[] saved_verticsPartThreaded = new int[0];
         }
 
         /// <summary>
@@ -55,6 +56,7 @@ namespace Zombie1111_uDestruction
             fracturesSavedData[idIndex].saved_verticsLinkedThreaded = saveFrom.verticsLinkedThreaded.ToArray();
             fracturesSavedData[idIndex].saved_allParts = saveFrom.allParts.ToArray();
             fracturesSavedData[idIndex].saved_partsOgResistanceThreaded = saveFrom.partsOgResistanceThreaded.ToArray();
+            fracturesSavedData[idIndex].saved_verticsPartThreaded = saveFrom.verticsPartThreaded.ToArray();
 
             //because ScriptableObject cannot save actual components we save it on FractureThis
             saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Length];
@@ -92,6 +94,7 @@ namespace Zombie1111_uDestruction
                 loadTo.verticsLinkedThreaded = fracturesSavedData[idIndex].saved_verticsLinkedThreaded.ToArray();
                 loadTo.allParts = fracturesSavedData[idIndex].saved_allParts.ToArray();
                 loadTo.partsOgResistanceThreaded = fracturesSavedData[idIndex].saved_partsOgResistanceThreaded.ToArray();
+                loadTo.verticsPartThreaded = fracturesSavedData[idIndex].saved_verticsPartThreaded.ToArray();
 
                 //Restore saved colliders to the allParts array
                 for (int i = 0; i < loadTo.allParts.Length; i++)
