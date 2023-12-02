@@ -10,6 +10,7 @@ using Time = UnityEngine.Time;
 using Component = UnityEngine.Component;
 using System.Data;
 using System.Text.RegularExpressions;
+using UnityEngine.Timeline;
 
 namespace Zombie1111_uDestruction
 {
@@ -82,6 +83,9 @@ namespace Zombie1111_uDestruction
         [Space(50)]
         [Header("Debug (Dont touch)")]
         [SerializeField] private OrginalObjData ogData = null;
+        [SerializeField] private FractureSaveAsset saveAsset = null;
+        public Collider[] saved_allPartsCol = new Collider[0];
+        public int saved_fracId = -1;
         /// <summary>
         /// Add a parent index here to update the parents info within a few frames
         /// </summary>
@@ -95,12 +99,12 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// All the fractured parts.
         /// </summary>
-        [SerializeField] private FracParts[] allParts = new FracParts[0];
+        [System.NonSerialized] public FracParts[] allParts = new FracParts[0];
 
         /// <summary>
         /// If MainPhysicsType == overlappingIsKinematic, bool for all parts that is true if the part was is inside a non fractured mesh when generated
         /// </summary>
-        [SerializeField] private bool[] kinematicPartStatus = new bool[0];
+        [System.NonSerialized] public bool[] kinematicPartStatus = new bool[0];
 
         /// <summary>
         /// The renderer used to render the fractured mesh (always skinned)
@@ -253,6 +257,9 @@ namespace Zombie1111_uDestruction
 
             //setup fracture renderer, setup renderer
             Gen_setupRenderer(ref allParts, fracturedMeshes, transform, matInside_defualt, matOutside_defualt);
+
+            //save to save asset
+            SaveOrLoadAsset(true);
 
             //log result when done
             if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.Log("(Warning) " + transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
@@ -570,6 +577,9 @@ namespace Zombie1111_uDestruction
             verticsLinkedThreaded = new IntList[0];
             allParts = new FracParts[0];
             partsOgResistanceThreaded = new float[0];
+
+            //clear save asset
+            SaveOrLoadAsset(false, true);
 
             if (doSave == false) return;
 
@@ -984,6 +994,9 @@ namespace Zombie1111_uDestruction
 
         private void Awake()
         {
+            //load from save aset
+            SaveOrLoadAsset(false);
+
             //assign variabels for mesh updating
             bakedMesh = new();
             verticsOrginalThreaded = new();
@@ -1012,12 +1025,12 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Contains all vertics and all other vertex indexes that share the ~same position as X (Including self)
         /// </summary>
-        [SerializeField] private IntList[] verticsLinkedThreaded = new IntList[0];
-        [SerializeField] private float[] partsOgResistanceThreaded = new float[0];
-        [SerializeField] private Task<DestructionData> ThreadCalcDes = null;
+        [System.NonSerialized] public IntList[] verticsLinkedThreaded = new IntList[0];
+        [System.NonSerialized] public float[] partsOgResistanceThreaded = new float[0];
+        private Task<DestructionData> ThreadCalcDes = null;
 
         [System.Serializable]
-        private struct IntList
+        public struct IntList
         {
             public List<int> intList;
         }
@@ -1360,6 +1373,20 @@ namespace Zombie1111_uDestruction
                     setOpen.Add(newOpen);
                 }
             }
+        }
+
+        private void SaveOrLoadAsset(bool doSave, bool removeAsset = false)
+        {
+            if (saveAsset == null) saveAsset = Resources.Load<FractureSaveAsset>("fractureSaveAsset");
+
+            if (removeAsset == true)
+            {
+                saveAsset.RemoveSavedData(this, saved_fracId);
+                return;
+            }
+
+            if (doSave == true) saved_fracId = saveAsset.Save(this, saved_fracId);
+            else saveAsset.Load(this, saved_fracId);
         }
 
         [SerializeField] private AnimationCurve forceSpreadCurve = AnimationCurve.EaseInOut(0.0f, 0.0f, 1.0f, 1.0f);
