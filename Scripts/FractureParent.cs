@@ -25,7 +25,7 @@ namespace Zombie1111_uDestruction
         private void OnCollision(Collision collision)
         {
             float totalForce = collision.relativeVelocity.magnitude;
-            if (totalForce < fractureDaddy.destructionThreshold) return;
+            if (totalForce < fractureDaddy.destructionThreshold || fractureDaddy.Run_isTransSelfTransform(collision.transform) == true) return;
             //print(totalForce + " " + collision.GetContact(0).thisCollider.transform.name);
             //if (dontUpdateColData != 1) return;
 
