@@ -81,10 +81,11 @@ namespace Zombie1111_uDestruction
         [SerializeField] private float distanceFalloffPower = 1.0f;
 
         [Space(10)]
-        [Header("Displacement")]
+        [Header("Mesh")]
         [SerializeField] private float vertexDisplacementStenght = 1.0f;
         [SerializeField] private bool displacementIgnoresWidth = true;
         [SerializeField] private bool limitDisplacement = true;
+        [SerializeField] private bool doVertexColors = false;
 
         [Space(10)]
         [Header("Material")]
@@ -339,6 +340,9 @@ namespace Zombie1111_uDestruction
             comMesh.boneWeights = boneW;
             //comMesh.bindposes = fParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
             comMesh.bindposes = fParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
+
+            //setup vertex colors
+            if (doVertexColors == true) comMesh.colors = Enumerable.Repeat(new Color(1.0f, 1.0f, 1.0f, 0.0f), comMesh.vertexCount).ToArray();
 
             //set renderer
             SkinnedMeshRenderer sRend = rendHolder.GetOrAddComponent<SkinnedMeshRenderer>();
@@ -1021,7 +1025,7 @@ namespace Zombie1111_uDestruction
             SaveOrLoadAsset(false);
 
             //assign variabels for mesh updating
-            if (vertexDisplacementStenght > 0.0f)
+            if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
             {
                 bakedMesh = new();
                 verticsOrginalThreaded = new();
@@ -1029,6 +1033,10 @@ namespace Zombie1111_uDestruction
                 fracRend.sharedMesh.GetVertices(verticsOrginalThreaded);
                 verticsForceThreaded = new float[verticsOrginalThreaded.Count];
                 verticsBonesThreaded = fracRend.sharedMesh.boneWeights.Select(bone => bone.boneIndex0).ToArray();
+
+                //set vertex color
+                verticsColorThreaded = new();
+                fracRend.sharedMesh.GetColors(verticsColorThreaded);
             }
 
             //disable collision with neighbours
@@ -1061,6 +1069,7 @@ namespace Zombie1111_uDestruction
         /// Contains all vertics and the index of the part they are a part of
         /// </summary>
         [System.NonSerialized] public int[] verticsPartThreaded = new int[0];
+        private List<Color> verticsColorThreaded = new();
         /// <summary>
         /// The index of the bone each vertex uses
         /// </summary>
@@ -1085,7 +1094,7 @@ namespace Zombie1111_uDestruction
             //}
 
             //get all data that we can only access on the main thread
-            if (vertexDisplacementStenght > 0.0f)
+            if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
             {
                 fracRend.BakeMesh(bakedMesh);
                 bakedMesh.GetVertices(verticsCurrentThreaded);
@@ -1120,6 +1129,7 @@ namespace Zombie1111_uDestruction
 
             //apply vertex deformation
             if (vertexDisplacementStenght > 0.0f) fracRend.sharedMesh.SetVertices(verticsOrginalThreaded);
+            if (doVertexColors == true) fracRend.sharedMesh.SetColors(verticsColorThreaded);
 
             //apply updated brokeness
             for (int i = 0; i < desData.partsBrokenness.Length; i += 1)
@@ -1349,7 +1359,7 @@ namespace Zombie1111_uDestruction
                 setClosed = setOpen.Select(sO => sO.partIndex).ToHashSet();
 
                 //calculate the force to apply to the parts and vertics deformation
-                if (limitDisplacement == false && vertexDisplacementStenght > 0.0f) Array.Clear(verticsForceThreaded, 0, verticsForceThreaded.Length);
+                if (limitDisplacement == false && (vertexDisplacementStenght > 0.0f || doVertexColors == true)) Array.Clear(verticsForceThreaded, 0, verticsForceThreaded.Length);
 
                 if (destructionSpreadMode == DestructionSpreadMode.path)
                 {
@@ -1431,7 +1441,7 @@ namespace Zombie1111_uDestruction
                 }
 
                 //get vertics force
-                if (vertexDisplacementStenght > 0.0f)
+                if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
                 {
                     foreach (int vI in fParts[setOpen[openIndex].partIndex].rendVertexIndexes)
                     {
@@ -1456,6 +1466,8 @@ namespace Zombie1111_uDestruction
 
                             //verticsForceThreaded[vIi] = 1.0f;
                             verticsForceThreaded[vIi] += vertexBrokennessToAdd;
+                            //verticsColorThreaded[vIi].SetAlpha(Math.Min(verticsForceThreaded[vIi], 1.0f));
+                            verticsColorThreaded[vIi] = new Color(verticsColorThreaded[vIi].r, verticsColorThreaded[vIi].g, verticsColorThreaded[vIi].b, Math.Min(verticsForceThreaded[vIi], 1.0f));
                             verticsOrginalThreaded[vIi] += verImpactDir;
                         }
                     }
@@ -1504,14 +1516,14 @@ namespace Zombie1111_uDestruction
                 brokennessToAdd = setOpen[openIndex].force / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
 
                 //calculate vertics force
-                if (vertexDisplacementStenght > 0.0f)
+                if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
                 {
                     foreach (int vI in fParts[setOpen[openIndex].partIndex].rendVertexIndexes)
                     {
                         vertexBrokennessToAdd = Mathf.Clamp(brokennessToAdd, 0.0f, 1.0f - verticsForceThreaded[vI]);
                         if (vertexBrokennessToAdd <= 0.0f) continue;
 
-                        verticsForceThreaded[vI] += vertexBrokennessToAdd;
+                        verticsForceThreaded[vI] = Math.Min(verticsForceThreaded[vI] + vertexBrokennessToAdd, 1.0f);
 
                         foreach (int vIi in verticsLinkedThreaded[vI].intList)
                         {
@@ -1523,6 +1535,7 @@ namespace Zombie1111_uDestruction
                             verImpactDir *= vertexDisplacementStenght * vertexBrokennessToAdd;
 
                             verticsForceThreaded[vIi] = verticsForceThreaded[vI];
+                            verticsColorThreaded[vIi] = new Color(verticsColorThreaded[vIi].r, verticsColorThreaded[vIi].g, verticsColorThreaded[vIi].b, verticsForceThreaded[vI]);
                             verticsOrginalThreaded[vIi] += verImpactDir;
                         }
                     }
