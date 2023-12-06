@@ -11,6 +11,8 @@ using Component = UnityEngine.Component;
 using System.Data;
 using System.Text.RegularExpressions;
 using UnityEngine.Timeline;
+using Unity.VisualScripting.Antlr3.Runtime;
+using JetBrains.Annotations;
 
 namespace Zombie1111_uDestruction
 {
@@ -874,6 +876,25 @@ namespace Zombie1111_uDestruction
 
         private void Run_updateParentInfo(int parentIndex)
         {
+            //remove parent if no kids
+            if (allFracParents[parentIndex].partIndexes.Count <= 0)
+            {
+                allFracParents[parentIndex].parentRb.isKinematic = true;
+                return;
+
+                //if (parentIndex == 0)
+                //{
+                //    //never remove base parent
+                //    allFracParents[parentIndex].parentRb.isKinematic = true;
+                //    return;
+                //}
+                //
+                //allFracParents.RemoveAt(parentIndex);
+                //Destroy(allFracParents[parentIndex].parentTrans.gameObject);
+                //
+                //return;
+            }
+
             //update parent total mass
             allFracParents[parentIndex].parentRb.mass = allFracParents[parentIndex].partIndexes.Count * massDensity * phyMainOptions.massMultiplier;
 
@@ -958,7 +979,16 @@ namespace Zombie1111_uDestruction
                     Run_repairUpdate(rep_partsToRepair[i]);
                 }
 
-                if (repairSupport == DestructionRepairSupport.fullHigh) fracRend.sharedMesh.SetVertices(verticsOrginalThreaded);
+                if (repairSupport == DestructionRepairSupport.fullHigh)
+                {
+                    fracRend.sharedMesh.SetVertices(verticsOrginalThreaded);
+
+                    if (recalculateOnDisplacement != NormalRecalcMode.none)
+                    {
+                        fracRend.sharedMesh.RecalculateNormals();
+                        if (recalculateOnDisplacement == NormalRecalcMode.normalsAndTagents) fracRend.sharedMesh.RecalculateTangents();
+                    }
+                }
             }
 
             //update parent info
@@ -1165,6 +1195,13 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         private int Run_createNewParent()
         {
+            //If empty parent exists, use it as new parent (excluding base parent)
+            for (int i = 1; i < allFracParents.Count; i += 1)
+            {
+                parentIndexesToUpdate.Add(i);
+                if (allFracParents[i].partIndexes.Count <= 0) return i;
+            }
+
             //create the parent transform
             Transform pTrans = new GameObject("fracParent" + allFracParents.Count + "_" + transform.name).transform;
             pTrans.SetParent(transform);
@@ -1236,7 +1273,7 @@ namespace Zombie1111_uDestruction
             }
 
             //set new parent
-            if (allParts[partIndex].col.attachedRigidbody != null) Destroy(allParts[partIndex].col.attachedRigidbody);
+            if (allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].col.transform) Destroy(allParts[partIndex].col.attachedRigidbody);
             allParts[partIndex].col.transform.SetParent(allFracParents[parentIndex].parentTrans, true);
             allFracParents[parentIndex].partIndexes.Add(partIndex);
             allParts[partIndex].parentIndex = parentIndex;
@@ -1292,7 +1329,7 @@ namespace Zombie1111_uDestruction
 
         private DestructionData CalculateDestructionThread(FracParts[] fParts, Vector3[] fPartsPos, List<ImpactData> impData, List<int>[] parentPartIndexes, Matrix4x4 lToWMatrix)
         {
-            //create variabels used for calculations
+            //create variabels used for calculations, calc destruction
             DestructionData dData = new() { partsToBreak = new(), partsToBreakVelocity = new(), newParentParts = new() };
             ImpactData iD;
             HashSet<int> setClosed = new();
@@ -1301,7 +1338,6 @@ namespace Zombie1111_uDestruction
             float[] partsBrokenness = fParts.Select(part => part.partBrokenness).ToArray();
             List<int> partsLeftToSearch = new();
             List<int> conParts = new();
-            float brokennessToAdd;
             float vertexBrokennessToAdd;
             Vector3 verImpactDir;
             Vector3 closestImpPos;
@@ -1467,6 +1503,11 @@ namespace Zombie1111_uDestruction
                 //get force to apply to part
                 partsBrokenness[setOpen[openIndex].partIndex] += Math.Max(0.0f, parentForce - GetForceAtPosition(fPartsPos[setOpen[openIndex].partIndex])) / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
 
+                foreach (int pI in fParts[setOpen[openIndex].partIndex].neighbourParts)
+                {
+                    if (partsBrokenness[pI] <= 0.0f) partsBrokenness[pI] = 0.01f;
+                }
+
                 float GetForceAtPosition(Vector3 pos)
                 {
                     dirToImpPos = pos - closestImpPos;
@@ -1520,7 +1561,8 @@ namespace Zombie1111_uDestruction
 
         public void Run_requestRepairPart(int partToRepair)
         {
-            if (partToRepair < 0 || allParts[partToRepair].partBrokenness == 0.0f || repairSupport == DestructionRepairSupport.dontSupportRepair || rep_partsToRepair.Contains(partToRepair) == true) return;
+            //if (partToRepair < 0 || allParts[partToRepair].partBrokenness == 0.0f || repairSupport == DestructionRepairSupport.dontSupportRepair || rep_partsToRepair.Contains(partToRepair) == true) return;
+            if (partToRepair < 0 || repairSupport == DestructionRepairSupport.dontSupportRepair || rep_partsToRepair.Contains(partToRepair) == true) return;
 
             Run_setPartParent(partToRepair, 0);
             rep_speedScaled = repairSpeed * allFracParents[0].parentTrans.lossyScale.magnitude;
@@ -1538,6 +1580,12 @@ namespace Zombie1111_uDestruction
                 foreach (int nI in allParts[partI].neighbourParts)
                 {
                     if (allParts[nI].partBrokenness > 0.0f && rep_partsToRepair.Contains(nI) == false) return nI;
+
+                    //foreach (int vI in allParts[nI].rendVertexIndexes)
+                    //{
+                    //    //if (verticsForceThreaded[vI] > 0.0f) print(vI + " " + nI);
+                    //    if (verticsForceThreaded[vI] > 0.0f) return nI;
+                    //}
                 }
             }
 
@@ -1550,17 +1598,17 @@ namespace Zombie1111_uDestruction
 
             //restore part bone transform
             Vector3 tempVec = rep_orginalLocalPartPoss[partIndex] - allParts[partIndex].col.transform.localPosition;
+            if (tempVec.sqrMagnitude > 0.0001f) hasRestoredAll = false;
             allParts[partIndex].col.transform.localPosition += Vector3.ClampMagnitude(tempVec, rep_speedScaled * Time.deltaTime);
-            if (tempVec.sqrMagnitude > 0.001f) hasRestoredAll = false;
 
             //allParts[partIndex].col.transform.localPosition = Vector3.MoveTowards(allParts[partIndex].col.transform.localPosition, rep_orginalLocalPartPoss[partIndex], rep_speedScaled * Time.deltaTime);
-            allParts[partIndex].col.transform.localRotation = Quaternion.RotateTowards(allParts[partIndex].col.transform.localRotation, Quaternion.identity, rep_speedScaled * 3.0f * Time.deltaTime);
-            if (Quaternion.Angle(allParts[partIndex].col.transform.localRotation, Quaternion.identity) > 2.0f) hasRestoredAll = false;
+            allParts[partIndex].col.transform.localRotation = Quaternion.RotateTowards(allParts[partIndex].col.transform.localRotation, Quaternion.identity, rep_speedScaled * 100.0f * Time.deltaTime);
+            if (Quaternion.Angle(allParts[partIndex].col.transform.localRotation, Quaternion.identity) > 0.0001f) hasRestoredAll = false;
 
             //allParts[partIndex].col.transform.localScale = Vector3.MoveTowards(allParts[partIndex].col.transform.localScale, Vector3.one, rep_speedScaled * 0.4f * Time.deltaTime);
             tempVec = Vector3.one - allParts[partIndex].col.transform.localScale;
+            if (tempVec.sqrMagnitude > 0.0001f) hasRestoredAll = false;
             allParts[partIndex].col.transform.localScale += Vector3.ClampMagnitude(tempVec, rep_speedScaled * Time.deltaTime);
-            if (tempVec.sqrMagnitude > 0.001f) hasRestoredAll = false;
 
             //restore part vertics
             if (repairSupport == DestructionRepairSupport.fullHigh)
@@ -1569,14 +1617,19 @@ namespace Zombie1111_uDestruction
                 {
                     //verticsOrginalThreaded[vI] = Vector3.MoveTowards(verticsOrginalThreaded[vI], rep_verticsOrginal[vI], rep_speedScaled * Time.deltaTime);
                     tempVec = rep_verticsOrginal[vI] - verticsOrginalThreaded[vI];
+                    if (tempVec.sqrMagnitude > 0.0001f) hasRestoredAll = false;
                     verticsOrginalThreaded[vI] += Vector3.ClampMagnitude(tempVec, rep_speedScaled * Time.deltaTime);
-                    if (tempVec.sqrMagnitude > 0.001f) hasRestoredAll = false;
                 }
             }
 
             //when part gets restored
             if (hasRestoredAll == true)
             {
+                foreach (int vI in allParts[partIndex].rendVertexIndexes)
+                {
+                    verticsForceThreaded[vI] = 0.0f;
+                }
+
                 allParts[partIndex].partBrokenness = 0.0f;
                 rep_partsToRepair.Remove(partIndex);
             }
