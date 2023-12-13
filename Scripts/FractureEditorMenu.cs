@@ -43,11 +43,17 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         public static IEnumerator FractureAll(byte fractureQuality)
         {
-            FractureThis[] allFracs = GameObject.FindObjectsOfType<FractureThis>();
+            FractureThis[] allFracs = GameObject.FindObjectsOfType<FractureThis>(false);
             int fracturedCount = 0;
 
             foreach (FractureThis frac in allFracs)
             {
+                if (frac.enabled == false)
+                {
+                    fracturedCount += 1;
+                    continue;
+                }
+
                 FractureThis.GenerationQuality ogQuality = frac.generationQuality;
 
                 frac.generationQuality = (FractureThis.GenerationQuality)fractureQuality;

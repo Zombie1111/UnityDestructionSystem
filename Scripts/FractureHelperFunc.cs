@@ -200,11 +200,12 @@ namespace Zombie1111_uDestruction
             return localDirs;
         }
 
-        public static Vector3[] ConvertPositionsToWorldspace_noScale(Vector3[] localposs, Transform trans)
+        public static Vector3[] ConvertPositionsWithMatrix_noScale(Vector3[] localposs, Matrix4x4 lTwMat)
         {
+            Vector3 pos = lTwMat.GetPosition();
             for (int i = 0; i < localposs.Length; i++)
             {
-                localposs[i] = (trans.rotation * localposs[i]) + trans.position;
+                localposs[i] = (lTwMat.rotation * localposs[i]) + pos;
             }
 
             return localposs;
@@ -461,6 +462,7 @@ namespace Zombie1111_uDestruction
 
         public static Mesh ConvertMeshWithMatrix(Mesh mesh, Matrix4x4 lTwMatrix)
         {
+            //mesh.SetVertices(ConvertPositionsWithMatrix(mesh.vertices, lTwMatrix));
             mesh.SetVertices(ConvertPositionsWithMatrix(mesh.vertices, lTwMatrix));
             mesh.SetNormals(ConvertDirectionsWithMatrix(mesh.normals, lTwMatrix));
             return mesh;
@@ -513,7 +515,7 @@ namespace Zombie1111_uDestruction
             List<Vector2> combinedUVs = new List<Vector2>();
             List<int> combinedTrianglesA = new List<int>();
             List<int> combinedTrianglesB = new List<int>();
-            List<BoneWeight> combinedBones = new List<BoneWeight>();
+            //List<BoneWeight> combinedBones = new List<BoneWeight>();
             int vertexOffset = 0;
 
             for (int i = 0; i < fracMeshes.Count; i += 1)
@@ -524,7 +526,7 @@ namespace Zombie1111_uDestruction
                 Vector3[] vertices = mesh.vertices;
                 Vector3[] normals = mesh.normals;
                 Vector2[] uvs = mesh.uv;
-                BoneWeight[] bones = mesh.boneWeights;
+                //BoneWeight[] bones = mesh.boneWeights;
 
                 //link combined vertices to fracture part
                 for (int ii = 0; ii < vertices.Length; ii += 1)
@@ -536,7 +538,7 @@ namespace Zombie1111_uDestruction
                 combinedVertices.AddRange(vertices);
                 combinedNormals.AddRange(normals);
                 combinedUVs.AddRange(uvs);
-                combinedBones.AddRange(bones);
+                //combinedBones.AddRange(bones);
 
                 int[] trianglesA = mesh.GetTriangles(0);
                 int[] trianglesB = new int[0];
@@ -564,7 +566,7 @@ namespace Zombie1111_uDestruction
             combinedMesh.subMeshCount = 2;
             combinedMesh.SetTriangles(combinedTrianglesA.ToArray(), 0);
             combinedMesh.SetTriangles(combinedTrianglesB.ToArray(), 1);
-            combinedMesh.boneWeights = combinedBones.ToArray();
+            //combinedMesh.boneWeights = combinedBones.ToArray(); //if no 0 we get error, (Must implement og bones to fractured mesh bones)
             return combinedMesh;
         }
 
@@ -578,6 +580,66 @@ namespace Zombie1111_uDestruction
 
             return midPos / positions.Length;
         }
+
+        public static Vector3 ClosestPointOnTriangle(Vector3 pointA, Vector3 pointB, Vector3 pointC, Vector3 queryPoint)
+        {
+            // Calculate triangle normal
+            Vector3 triNorm = Vector3.Cross(pointA - pointB, pointA - pointC);
+
+            // Calculate the projection of the query point onto the triangle plane
+            Plane triPlane = new(pointA, triNorm);
+            triPlane.Set3Points(pointA, pointB, pointC);
+            Vector3 projectedPoint = triPlane.ClosestPointOnPlane(queryPoint);
+
+            // Check if the projected point is inside the triangle
+            if (IsPointInTriangle(projectedPoint, pointA, pointB, pointC))
+            {
+                return projectedPoint;
+            }
+            else
+            {
+                // If not, find the closest point on each triangle edge
+                Vector3 closestOnAB = ClosestPointOnSegment(pointA, pointB, queryPoint);
+                Vector3 closestOnBC = ClosestPointOnSegment(pointB, pointC, queryPoint);
+                Vector3 closestOnCA = ClosestPointOnSegment(pointC, pointA, queryPoint);
+
+                // Find the closest point among these three
+                float distAB = Vector3.Distance(queryPoint, closestOnAB);
+                float distBC = Vector3.Distance(queryPoint, closestOnBC);
+                float distCA = Vector3.Distance(queryPoint, closestOnCA);
+
+                if (distAB < distBC && distAB < distCA)
+                    return closestOnAB;
+                else if (distBC < distCA)
+                    return closestOnBC;
+                else
+                    return closestOnCA;
+            }
+
+
+            bool IsPointInTriangle(Vector3 point, Vector3 A, Vector3 B, Vector3 C)
+            {
+                // Check if the point is inside the triangle using barycentric coordinates
+                float alpha = ((B - C).y * (point.x - C.x) + (C - B).x * (point.y - C.y)) /
+                              ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
+
+                float beta = ((C - A).y * (point.x - C.x) + (A - C).x * (point.y - C.y)) /
+                             ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
+
+                float gamma = 1.0f - alpha - beta;
+
+                return alpha > 0 && beta > 0 && gamma > 0;
+            }
+
+            Vector3 ClosestPointOnSegment(Vector3 start, Vector3 end, Vector3 queryPoint)
+            {
+                // Find the closest point on a line segment
+                Vector3 direction = end - start;
+                float t = Mathf.Clamp01(Vector3.Dot(queryPoint - start, direction) / direction.sqrMagnitude);
+                return start + t * direction;
+            }
+        }
+
 
         /// <summary>
         /// Performs a linecast for all positions between all positions
