@@ -62,7 +62,8 @@ namespace Zombie1111_uDestruction
                 frac.generationQuality = ogQuality;
 
                 fracturedCount += 1;
-                Debug.Log("Fracture Progress: " + fracturedCount + "/" + allFracs.Length);
+                if (fracturedCount >= allFracs.Length) Debug.Log("Fracture Progress: " + fracturedCount + "/" + allFracs.Length + " (Done)");
+                else Debug.Log("Fracture Progress: " + fracturedCount + "/" + allFracs.Length);
 
                 yield return new WaitForSecondsRealtime(0.01f);
             }

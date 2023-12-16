@@ -212,6 +212,100 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns the closest position index
+        /// </summary>
+        /// <param name="positions">The positions to check against</param>
+        /// <param name="pos">Closest position to this</param>
+        /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
+        /// <returns></returns>
+        public static int GetClosestPointInArray(Vector3[] positions, Vector3 pos, float preExitTolerance = 0.01f)
+        {
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float currentD;
+
+            for (int i = 0; i < positions.Length; i += 1)
+            {
+                currentD = (pos - positions[i]).sqrMagnitude;
+
+                if (currentD < bestD)
+                {
+                    bestD = currentD;
+                    bestI = i;
+
+                    if (currentD < preExitTolerance) break;
+                }
+            }
+
+            return bestI;
+        }
+
+        /// <summary>
+        /// Returns the closest triangel index on the mesh
+        /// </summary>
+        /// <param name="meshWorldVers">The mesh vertics in world space</param>
+        /// <param name="meshTris">The mesh triangels</param>
+        /// <param name="pos">Closest point to this</param>
+        /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
+        /// <returns></returns>
+        public static int GetClosestPointOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3 pos, float preExitTolerance = 0.01f)
+        {
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float currentD;
+
+            for (int i = 0; i < meshTris.Length; i += 3)
+            {
+                currentD = (pos - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], pos)).sqrMagnitude;
+
+                if (currentD < bestD)
+                {
+                    bestD = currentD;
+                    bestI = i;
+
+                    if (currentD < preExitTolerance) break;
+                }
+            }
+
+            return bestI;
+        }
+
+        /// <summary>
+        /// Returns the closest triangel index on the mesh
+        /// </summary>
+        /// <param name="meshWorldVers">The mesh vertics in world space</param>
+        /// <param name="meshTris">The mesh triangels</param>
+        /// <param name="pos">Closest triangel to these</param>
+        /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
+        /// <returns></returns>
+        public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3[] poss, float preExitTolerance = 0.01f)
+        {
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float currentD;
+
+            for (int i = 0; i < meshTris.Length; i += 3)
+            {
+                //if (Vector3.Dot(meshWorldNors[meshTris[i]].normalized, nor.normalized) < 0.5f) continue;
+                //Debug.DrawLine(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i]] + (meshWorldNors[meshTris[i]].normalized * 0.01f), Color.red, 10.0f);
+                //Debug.DrawLine(poss[0], poss[0] + (nor * 0.01f), Color.yellow, 10.0f);
+
+                currentD = 0.0f;
+                for (int ii = 0; ii < poss.Length; ii += 1) currentD += (poss[ii] - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], poss[ii])).sqrMagnitude;
+
+                if (currentD < bestD)
+                {
+                    bestD = currentD;
+                    bestI = i;
+
+                    if (currentD < preExitTolerance) break;
+                }
+            }
+
+            return bestI;
+        }
+
+        /// <summary>
         /// Returns true if the mesh is valid for fracturing
         /// </summary>
         /// <param name="mesh"></param>
@@ -666,6 +760,74 @@ namespace Zombie1111_uDestruction
             return hits;
         }
 
+        // Function to find the most similar triangle in the mesh
+        public static int FindMostSimilarTriangle(Mesh mesh, Vector3[] worldTriangle)
+        {
+            int triangleCount = mesh.triangles.Length / 3;
+            int mostSimilarTriangleIndex = -1;
+            float minDifference = float.MaxValue;
+
+            for (int i = 0; i < triangleCount; i++)
+            {
+                Vector3[] meshTriangle = GetTriangleVertices(mesh, i);
+
+                // Calculate some similarity metric (e.g., distance, orientation, shape)
+                float difference = CalculateTriangleDifference(worldTriangle, meshTriangle);
+
+                // Update the most similar triangle if the current one is more similar
+                if (difference < minDifference)
+                {
+                    minDifference = difference;
+                    mostSimilarTriangleIndex = i;
+                }
+            }
+
+            return mostSimilarTriangleIndex;
+        }
+
+        // Function to get the vertices of a triangle in the mesh
+        public static Vector3[] GetTriangleVertices(Mesh mesh, int triangleIndex)
+        {
+            int startIndex = triangleIndex * 3;
+            Vector3[] vertices = new Vector3[3];
+
+            for (int i = 0; i < 3; i++)
+            {
+                int vertexIndex = mesh.triangles[startIndex + i];
+                vertices[i] = mesh.vertices[vertexIndex];
+            }
+
+            return vertices;
+        }
+
+        // Function to calculate the difference between two triangles
+        public static float CalculateTriangleDifference(Vector3[] triangle1, Vector3[] triangle2)
+        {
+            // Implement your similarity metric here
+            // Example: calculate the distance between corresponding vertices
+            float difference = 0;
+
+            for (int i = 0; i < 3; i++)
+            {
+                difference += Vector3.Distance(triangle1[i], triangle2[i]);
+            }
+
+            return difference;
+        }
+
+        public  static int FindTriangleIndexWithVertex(int[] triangles, int vertexIndex)
+        {
+            for (int i = 0; i < triangles.Length; i += 3)
+            {
+                if (triangles[i] == vertexIndex || triangles[i + 1] == vertexIndex || triangles[i + 2] == vertexIndex)
+                {
+                    return i; // Return the triangle index
+                }
+            }
+
+            return -1; // Vertex is not part of any triangle
+        }
+
 #if UNITY_EDITOR
         /// <summary>
         /// Draw line between all vertics in the worldspace mesh. 
@@ -706,6 +868,38 @@ namespace Zombie1111_uDestruction
                     Debug.DrawLine(vertex, endPos, Color.yellow, durration);
                 }
             }
+        }
+
+        public static void Debug_drawBox(Vector3 position, float size, Color color, float duration = 0.1f)
+        {
+            Vector3 halfSize = 0.5f * size * Vector3.one;
+
+            // Calculate the corners of the box
+            Vector3[] corners = new Vector3[8];
+            corners[0] = position + new Vector3(-halfSize.x, -halfSize.y, -halfSize.z);
+            corners[1] = position + new Vector3(halfSize.x, -halfSize.y, -halfSize.z);
+            corners[2] = position + new Vector3(halfSize.x, -halfSize.y, halfSize.z);
+            corners[3] = position + new Vector3(-halfSize.x, -halfSize.y, halfSize.z);
+            corners[4] = position + new Vector3(-halfSize.x, halfSize.y, -halfSize.z);
+            corners[5] = position + new Vector3(halfSize.x, halfSize.y, -halfSize.z);
+            corners[6] = position + new Vector3(halfSize.x, halfSize.y, halfSize.z);
+            corners[7] = position + new Vector3(-halfSize.x, halfSize.y, halfSize.z);
+
+            // Draw lines between corners to form the box
+            Debug.DrawLine(corners[0], corners[1], color, duration);
+            Debug.DrawLine(corners[1], corners[2], color, duration);
+            Debug.DrawLine(corners[2], corners[3], color, duration);
+            Debug.DrawLine(corners[3], corners[0], color, duration);
+
+            Debug.DrawLine(corners[4], corners[5], color, duration);
+            Debug.DrawLine(corners[5], corners[6], color, duration);
+            Debug.DrawLine(corners[6], corners[7], color, duration);
+            Debug.DrawLine(corners[7], corners[4], color, duration);
+
+            Debug.DrawLine(corners[0], corners[4], color, duration);
+            Debug.DrawLine(corners[1], corners[5], color, duration);
+            Debug.DrawLine(corners[2], corners[6], color, duration);
+            Debug.DrawLine(corners[3], corners[7], color, duration);
         }
     }
 #endif

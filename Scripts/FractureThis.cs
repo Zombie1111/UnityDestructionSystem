@@ -306,7 +306,7 @@ namespace Zombie1111_uDestruction
                 //fracRend.BakeMesh(bMesh, true);
                 //Gen_setupSkinnedMesh(bMesh, ogSkinBones, fracRend.transform.localToWorldMatrix, worldScaleDis);
                 //Gen_setupSkinnedMesh(Instantiate(fracRend.sharedMesh), ogSkinBones, fracRend.transform.localToWorldMatrix, worldScaleDis);
-                Gen_setupSkinnedMesh(ogDefualtSkin.ogMesh, ogDefualtSkin.ogBones, ogDefualtSkin.ogRootBone.localToWorldMatrix, worldScaleDis);
+                Gen_setupSkinnedMesh(ogDefualtSkin.ogMesh, ogDefualtSkin.ogBones, ogDefualtSkin.ogRootBone.localToWorldMatrix);
             }
 
             //save to save asset
@@ -334,26 +334,56 @@ namespace Zombie1111_uDestruction
            Vector3[] vers = FractureHelperFunc.ConvertPositionsWithMatrix(bMesh.vertices, sRend.transform.localToWorldMatrix);
            BoneWeight[] wes = sRend.sharedMesh.boneWeights;
 
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float cD;
+
             for (int i = 0; i < vers.Length; i += 1)
             {
-               Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex1].position, Color.blue, 0.1f);
-               //Debug.DrawLine(vers[i], fracRend.bones[wes[i].boneIndex2].position, Color.blue, 0.1f);
+                cD = (debugTrans.transform.position - vers[i]).sqrMagnitude;
+                if (cD < bestD)
+                {
+                    bestI = i;
+                    bestD = cD;
+                }
+
+               //if (wes[i].weight0 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex0].position, Color.blue, 0.1f);
+               //if (wes[i].weight1 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex1].position, Color.blue, 0.1f);
+               //if (wes[i].weight2 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex2].position, Color.blue, 0.1f);
+               //if (wes[i].weight3 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex3].position, Color.blue, 0.1f);
             }
+
+            Debug.DrawLine(debugTrans.transform.position, vers[bestI], Color.magenta, 0.1f);
+            //print(wes[bestI].boneIndex0 + "  " + sRend.bones[wes[bestI].boneIndex0].name + " " + wes[bestI].weight0 + " " + wes[bestI].weight1 + " " + wes[bestI].weight2 + " " + wes[bestI].weight3);
+
            //int[] tris = bMesh.triangles;
            //Vector3 point = FractureHelperFunc.ClosestPointOnTriangle(vers[tris[triIndex]], vers[tris[triIndex + 1]], vers[tris[triIndex + 2]], debugTrans.position);
            //Debug.DrawLine(point, debugTrans.position, Color.blue, 0.1f);
        }
 
+        private class boneWeData
+        {
+            public float weight = 0.0f;
+            public int boneIndex = 0;
+        }
+
         /// <summary>
         /// Only called if real skinned mesh to copy its animated bones to fractured mesh
         /// </summary>
-        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW, float worldScaleDis)
+        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW)
         {
             //################No vertex uses trail bone 3 after fracture. And way less uses trail bone 5
+            float worldDis = worldScale * 0.0001f;
+
             //add bind poses and bone transforms from real skinned rend
             int boneIShift = fracRend.bones.Length;
             List<Transform> newBones = fracRend.bones.ToList();
             List<Matrix4x4> newMatrixs = fracRend.sharedMesh.bindposes.ToList();
+            float b_verDisTotal;
+            List<float> b_verDisPer = new();
+            List<boneWeData> b_wePer = new();
+            List<boneWeData> b_actualWePer = new();
+            float b_weTotal;
 
             //newMatrixs = newMatrixs.Select(mat => fracRend.transform.localToWorldMatrix * mat).ToList();
 
@@ -373,177 +403,166 @@ namespace Zombie1111_uDestruction
             skinMesh = FractureHelperFunc.ConvertMeshWithMatrix(skinMesh, skinLtW);
             BoneWeight[] skinBoneWe = skinMesh.boneWeights.ToArray();
             Vector3[] skinWVer = skinMesh.vertices;
+            //Vector3[] skinWNor = skinMesh.normals;
             int[] skinTris = skinMesh.triangles;
+            int[] fracTris = fracRend.sharedMesh.triangles;
             BoneWeight[] fracBoneWe = fracRend.sharedMesh.boneWeights.ToArray();
             BoneWeight[] newBoneWe = new BoneWeight[fracBoneWe.Length];
             Vector3[] fracWVer = FractureHelperFunc.ConvertPositionsWithMatrix(fracRend.sharedMesh.vertices, fracRend.transform.localToWorldMatrix);
+            //Vector3[] fracWNor = FractureHelperFunc.ConvertDirectionsWithMatrix(fracRend.sharedMesh.normals, fracRend.transform.localToWorldMatrix);
             List<int> unusedVers = Enumerable.Range(0, fracWVer.Length).ToList();
 
             //FractureHelperFunc.Debug_drawMesh(skinMesh, false, 10.0f);
             //FractureHelperFunc.Debug_drawMesh(FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(fracRend.sharedMesh), fracRend.transform.localToWorldMatrix), false, 10.0f);
 
-            //loop all vertics on fractured mesh to link their bone weights
-            float bestD;
-            int bestI;
-            float nowD;
+            //link vertics bone weights with best weight on skinned mesh
+            int verI;
 
-            for (int i = 0; i < fracWVer.Length; i += 1)
+            while (unusedVers.Count > 0)
             {
-                //get nearest skin vertex
-                bestD = float.MaxValue;
-                bestI = 0;
+                verI = unusedVers[0];
+                unusedVers.RemoveAt(0);
 
-                for (int ii = 0; ii < skinWVer.Length; ii += 1)
+                BoneWeight newWe = GetBestWeightForVertex(verI);
+                newBoneWe[verI] = newWe;
+
+                foreach (int vIi in verticsLinkedThreaded[verI].intList)
                 {
-                    nowD = (fracWVer[i] - skinWVer[ii]).sqrMagnitude;
+                    //if (Vector3.Dot(fracWNor[verI].normalized, fracWNor[vIi].normalized) < 0.8f) continue;
 
-                    if (nowD < bestD)
-                    {
-                        bestD = nowD;
-                        bestI = ii;
-                    }
+                    unusedVers.Remove(vIi);
+                    newBoneWe[vIi] = newWe;
                 }
-
-                newBoneWe[i].boneIndex0 = fracBoneWe[i].boneIndex0;
-                //newBoneWe[i].weight0 = fracBoneWe[i].weight0;
-                newBoneWe[i].weight0 = 0.0f;
-
-
-                newBoneWe[i].boneIndex1 = skinBoneWe[bestI].boneIndex0 + boneIShift;
-                newBoneWe[i].weight1 = skinBoneWe[bestI].weight0;
-                newBoneWe[i].boneIndex2 = skinBoneWe[bestI].boneIndex1 + boneIShift;
-                newBoneWe[i].weight2 = skinBoneWe[bestI].weight1;
-                newBoneWe[i].boneIndex3 = skinBoneWe[bestI].boneIndex2 + boneIShift;
-                newBoneWe[i].weight3 = skinBoneWe[bestI].weight2;
-
-                //newBoneWe[i].weight1 = 0.0f;
-                //newBoneWe[i].weight2 = 0.0f;
-                //newBoneWe[i].weight3 = 0.0f;
             }
-
-            //int verI;
-            //
-            //while (unusedVers.Count > 0)
-            //{
-            //    verI = unusedVers[0];
-            //    unusedVers.RemoveAt(0);
-            //
-            //    BoneWeight newBWe = GetBestBoneWeightForFracVertex(verI);
-            //
-            //    foreach (int vIi in verticsLinkedThreaded[verI].intList)
-            //    {
-            //        fracBoneWe[vIi] = newBWe;
-            //        unusedVers.Remove(vIi);
-            //    }
-            //}
 
             //assign updated data to mesh and renderer
             fracRend.bones = newBones.ToArray();
             fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
             fracRend.sharedMesh.boneWeights = newBoneWe;
 
-            float bestTriD;
-            int bestTriI;
-            float currentTriD;
-
-            BoneWeight GetBestBoneWeightForFracVertex(int vI)
+            BoneWeight GetBestWeightForVertex(int fracVi)
             {
-                //get nearest skin triangel
-                bestTriD = float.MaxValue;
-                bestTriI = 0;
+                //get the closest skinned triangel and its total bones and their total weight
+                BoneWeight newWe = new();
 
-                for (int i = 0; i < skinTris.Length; i += 3)
-                {
-                    currentTriD = (FractureHelperFunc.ClosestPointOnTriangle(skinWVer[skinTris[i]], skinWVer[skinTris[i + 1]], skinWVer[skinTris[i + 2]], fracWVer[vI]) - fracWVer[vI]).sqrMagnitude;
+                int fracTriTemp = FractureHelperFunc.FindTriangleIndexWithVertex(fracTris, fracVi);
+                //int closeSkinTriI = FractureHelperFunc.GetClosestPointOnMesh(skinWVer, skinTris, fracWVer[fracVi], worldDis);
+                int closeSkinTriI = FractureHelperFunc.GetClosestTriOnMesh(skinWVer, skinTris,
+                    new Vector3[3] { fracWVer[fracTris[fracTriTemp]], fracWVer[fracTris[fracTriTemp + 1]],
+                        fracWVer[fracTris[fracTriTemp + 2]] }, worldDis);
 
-                    if (currentTriD < bestTriD)
-                    {
-                        bestTriD = currentTriD;
-                        bestTriI = i;
-                    }
-                }
-
-                //Debug.DrawLine(fracWVer[vI], skinWVer[skinTris[bestTriI]], Color.red, 10.0f);
-
-                //get best bone weight to use
-                List<BoneWeight1> newBoneWe = GetBestBoneWeightsFromSkinTri(bestTriI, vI);
-                BoneWeight boneWe = new();
-
-                //boneWe.weight0 = fracBoneWe[vI].weight0;
-                boneWe.weight0 = 0.0f;
-                boneWe.boneIndex0 = fracBoneWe[vI].boneIndex0;
-                boneWe.weight1 = newBoneWe[0].weight;
-                boneWe.boneIndex1 = newBoneWe[0].boneIndex + boneIShift;
-                //print(boneWe.boneIndex1 + " " + newBoneWe[0].boneIndex + " " + boneIShift + " " + newMatrixs.Count + " " + newBones.Count);
-
-                if (newBoneWe.Count > 1)
-                {
-                    boneWe.weight2 = newBoneWe[1].weight;
-                    boneWe.boneIndex2 = newBoneWe[1].boneIndex + boneIShift;
-
-                    if (newBoneWe.Count > 2)
-                    {
-                        boneWe.weight3 = newBoneWe[2].weight;
-                        boneWe.boneIndex3 = newBoneWe[2].boneIndex + boneIShift;
-                    }
-                    else
-                    {
-                        boneWe.weight3 = 0.0f;
-                        boneWe.boneIndex3 = boneWe.boneIndex2;
-                    }
-                }
-                else
-                {
-                    boneWe.weight2 = 0.0f;
-                    boneWe.boneIndex2 = boneWe.boneIndex1;
-                    boneWe.weight3 = 0.0f;
-                    boneWe.boneIndex3 = boneWe.boneIndex1;
-                }
-
-                return boneWe;
-            }
-
-            float bestVerD;
-            int bestVerI;
-            float currentVerD;
-
-            List<BoneWeight1> GetBestBoneWeightsFromSkinTri(int triIndex, int fromVerIndex)
-            {
-                List<BoneWeight1> tempBoneWe = new();
-
-                //get nearest vertex in triangel
-                bestVerD = float.MaxValue;
-                bestVerI = 0;
-
-                for (int i = triIndex; i < triIndex + 3; i++)
-                {
-                    currentVerD = (skinWVer[skinTris[i]] - fracWVer[fromVerIndex]).sqrMagnitude;
-                
-                    if (currentVerD < bestVerD)
-                    {
-                        bestVerD = currentVerD;
-                        bestVerI = skinTris[i];
-                    }
-                }
-
-                //for (int i = 0; i < skinWVer.Length; i += 1)
-                //{
-                //    currentVerD = (skinWVer[i] - fracWVer[fromVerIndex]).sqrMagnitude;
+                //int closeSkinTriI = FractureHelperFunc.FindMostSimilarTriangle(skinMesh, new Vector3[3] { fracWVer[fracTris[fracTriTemp]], fracWVer[fracTris[fracTriTemp + 1]], fracWVer[fracTris[fracTriTemp + 2]] });
+                int closeSkinTriAdd = FractureHelperFunc.GetClosestPointInArray(new Vector3[3] { skinWVer[skinTris[closeSkinTriI]], skinWVer[skinTris[closeSkinTriI + 1]], skinWVer[skinTris[closeSkinTriI + 2]] }, fracWVer[fracVi], worldDis);
+                newWe = skinBoneWe[skinTris[closeSkinTriI + closeSkinTriAdd]];
+                newWe.boneIndex0 += boneIShift;
+                newWe.boneIndex1 += boneIShift;
+                newWe.boneIndex2 += boneIShift;
+                newWe.boneIndex3 += boneIShift;
+                //b_weTotal = 0.0f;
+                //b_verDisTotal = 0.0f;
+                //b_verDisPer.Clear();
+                //b_wePer.Clear();
+                //int tempI;
                 //
-                //    if (currentVerD < bestVerD)
+                //AddSkinVerWeToBStuff(skinTris[closeSkinTriI], fracVi);
+                //AddSkinVerWeToBStuff(skinTris[closeSkinTriI + 1], fracVi);
+                //AddSkinVerWeToBStuff(skinTris[closeSkinTriI + 2], fracVi);
+                //
+                ////normalize total bones weight and multiply with their distance
+                //for (int i = 0; i < b_verDisPer.Count; i += 1)
+                //{
+                //    b_verDisPer[i] /= b_verDisTotal;
+                //    b_weTotal -= (b_wePer[i].weight * 2.0f) * b_verDisPer[i];
+                //    b_wePer[i].weight -= (b_wePer[i].weight * 2.0f) * b_verDisPer[i];
+                //}
+                //
+                //for (int i = 0; i < b_wePer.Count; i += 1)
+                //{
+                //    b_wePer[i].weight /= b_weTotal;
+                //}
+                //
+                ////get actual bone weights
+                //b_actualWePer.Clear();
+                //
+                //for (int i = 0; i < b_wePer.Count; i += 1)
+                //{
+                //    tempI = b_actualWePer.FindIndex(we => we.boneIndex == b_wePer[i].boneIndex);
+                //    if (tempI < 0)
                 //    {
-                //        bestVerD = currentVerD;
-                //        bestVerI = i;
+                //        tempI = b_actualWePer.Count;
+                //        b_actualWePer.Add(new() { boneIndex = b_wePer[i].boneIndex + boneIShift, weight = 0.0f });
+                //    }
+                //
+                //    b_actualWePer[tempI].weight += b_wePer[i].weight;
+                //}
+                //
+                //b_actualWePer = b_actualWePer.OrderByDescending(item => item.weight).ToList();
+                //
+                ////assign updated weighs
+                //newWe.weight0 = b_actualWePer[0].weight;
+                //newWe.boneIndex0 = b_actualWePer[0].boneIndex;
+                //
+                //if (b_actualWePer.Count > 1)
+                //{
+                //    newWe.weight1 = b_actualWePer[1].weight;
+                //    newWe.boneIndex1 = b_actualWePer[1].boneIndex;
+                //
+                //    if (b_actualWePer.Count > 2)
+                //    {
+                //        newWe.weight2 = b_actualWePer[2].weight;
+                //        newWe.boneIndex2 = b_actualWePer[2].boneIndex;
+                //
+                //        if (b_actualWePer.Count > 3)
+                //        {
+                //            newWe.weight3 = b_actualWePer[3].weight;
+                //            newWe.boneIndex3 = b_actualWePer[3].boneIndex;
+                //        }
                 //    }
                 //}
 
-                //get and return bone weights
-                if (skinBoneWe[bestVerI].weight0 > 0.0f) tempBoneWe.Add(new() { boneIndex = skinBoneWe[bestVerI].boneIndex0, weight = skinBoneWe[bestVerI].weight0 });
-                if (skinBoneWe[bestVerI].weight1 > 0.0f) tempBoneWe.Add(new() { boneIndex = skinBoneWe[bestVerI].boneIndex1, weight = skinBoneWe[bestVerI].weight1 });
-                if (skinBoneWe[bestVerI].weight2 > 0.0f) tempBoneWe.Add(new() { boneIndex = skinBoneWe[bestVerI].boneIndex2, weight = skinBoneWe[bestVerI].weight2 });
-                if (skinBoneWe[bestVerI].weight3 > 0.0f && tempBoneWe.Count < 3) tempBoneWe.Add(new() { boneIndex = skinBoneWe[bestVerI].boneIndex3, weight = skinBoneWe[bestVerI].weight3 });
+                return newWe;
+            }
 
-                return tempBoneWe;
+            void AddSkinVerWeToBStuff(int skinVi, int fracVi)
+            {
+                int tempI;
+                float tempDis;
+                tempDis = Vector3.Distance(fracWVer[fracVi], skinWVer[skinVi]);
+                float weight = 0.0f;
+                int boneIndex = -1;
+
+                for (int i = 0; i < 4; i++)
+                {
+                    switch (i)
+                    {
+                        case 0:
+                            weight = skinBoneWe[skinVi].weight0;
+                            boneIndex = skinBoneWe[skinVi].boneIndex0;
+                            break;
+
+                        case 1:
+                            weight = skinBoneWe[skinVi].weight1;
+                            boneIndex = skinBoneWe[skinVi].boneIndex1;
+                            break;
+
+                        case 2:
+                            weight = skinBoneWe[skinVi].weight2;
+                            boneIndex = skinBoneWe[skinVi].boneIndex2;
+                            break;
+
+                        case 3:
+                            weight = skinBoneWe[skinVi].weight3;
+                            boneIndex = skinBoneWe[skinVi].boneIndex3;
+                            break;
+                    }
+
+                    if (weight <= 0.0f) return;
+                    
+                    b_verDisTotal += tempDis;
+                    b_verDisPer.Add(tempDis);
+                    b_wePer.Add(new() { weight = weight, boneIndex = boneIndex });
+                    b_weTotal += weight;
+                }
             }
         }
 
@@ -562,7 +581,7 @@ namespace Zombie1111_uDestruction
 
             Vector3[] vertics = comMesh.vertices;
             verticsLinkedThreaded = new IntList[vertics.Length];
-            float worldDis = worldScale * 0.01f;
+            float worldDis = worldScale * 0.01f;//0.01??
 
             Parallel.For(0, verticsLinkedThreaded.Length, i =>
             {
@@ -972,11 +991,13 @@ namespace Zombie1111_uDestruction
 
                 byte maxAttempts = 20;
                 bool meshIsValid;
+                List<Mesh> newMeshesTemp = new();
 
                 while (maxAttempts > 0)
                 {
                     maxAttempts--;
                     meshIsValid = true;
+                    newMeshesTemp.Clear();
 
                     //execute nvBlast
                     var fractureTool = new NvFractureTool();
@@ -991,8 +1012,8 @@ namespace Zombie1111_uDestruction
                     int meshCount = fractureTool.getChunkCount();
                     for (var i = 1; i < meshCount; i++)
                     {
-                        newMeshes.Add(ExtractChunkMesh(fractureTool, i));
-                        if (FractureHelperFunc.IsMeshValid(newMeshes[^1], worldScaleDis) == false)
+                        newMeshesTemp.Add(ExtractChunkMesh(fractureTool, i));
+                        if (FractureHelperFunc.IsMeshValid(newMeshesTemp[^1], worldScaleDis) == false)
                         {
                             print("New frac attempt");
                             meshIsValid = false;
@@ -1001,6 +1022,8 @@ namespace Zombie1111_uDestruction
                     }
 
                     if (meshIsValid == false) continue;
+
+                    newMeshes.AddRange(newMeshesTemp);
 
                     break;
                 }
