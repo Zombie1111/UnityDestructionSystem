@@ -279,6 +279,7 @@ namespace Zombie1111_uDestruction
         /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
         /// <returns></returns>
         public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3[] poss, float preExitTolerance = 0.01f)
+        //public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshVerIds, int[] meshTris, Vector3[] poss, int id, float preExitTolerance = 0.01f)
         {
             int bestI = 0;
             float bestD = float.MaxValue;
@@ -289,6 +290,8 @@ namespace Zombie1111_uDestruction
                 //if (Vector3.Dot(meshWorldNors[meshTris[i]].normalized, nor.normalized) < 0.5f) continue;
                 //Debug.DrawLine(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i]] + (meshWorldNors[meshTris[i]].normalized * 0.01f), Color.red, 10.0f);
                 //Debug.DrawLine(poss[0], poss[0] + (nor * 0.01f), Color.yellow, 10.0f);
+
+                //if (meshVerIds[meshTris[i]] != id) continue;
 
                 currentD = 0.0f;
                 for (int ii = 0; ii < poss.Length; ii += 1) currentD += (poss[ii] - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], poss[ii])).sqrMagnitude;
@@ -303,6 +306,61 @@ namespace Zombie1111_uDestruction
             }
 
             return bestI;
+        }
+
+        public static Mesh MergeVerticesInMesh(Mesh originalMesh)
+        {
+            var verts = originalMesh.vertices;
+            var normals = originalMesh.normals;
+            var uvs = originalMesh.uv;
+            Dictionary<Vector3, int> duplicateHashTable = new Dictionary<Vector3, int>();
+            List<int> newVerts = new List<int>();
+            int[] map = new int[verts.Length];
+
+            //create mapping and find duplicates, dictionaries are like hashtables, mean fast
+            for (int i = 0; i < verts.Length; i++)
+            {
+                if (!duplicateHashTable.ContainsKey(verts[i]))
+                {
+                    duplicateHashTable.Add(verts[i], newVerts.Count);
+                    map[i] = newVerts.Count;
+                    newVerts.Add(i);
+                }
+                else
+                {
+                    map[i] = duplicateHashTable[verts[i]];
+                }
+            }
+
+            //create new vertices
+            var verts2 = new Vector3[newVerts.Count];
+            var normals2 = new Vector3[newVerts.Count];
+            var uvs2 = new Vector2[newVerts.Count];
+            for (int i = 0; i < newVerts.Count; i++)
+            {
+                int a = newVerts[i];
+                verts2[i] = verts[a];
+                normals2[i] = normals[a];
+                uvs2[i] = uvs[a];
+            }
+
+            //map the triangle to the new vertices
+            int subMeshCount = originalMesh.subMeshCount;
+            for (int submeshIndex = 0; submeshIndex < subMeshCount; submeshIndex++)
+            {
+                var tris = originalMesh.GetTriangles(submeshIndex);
+                for (int i = 0; i < tris.Length; i++)
+                {
+                    tris[i] = map[tris[i]];
+                }
+                originalMesh.SetTriangles(tris, submeshIndex);
+            }
+
+            originalMesh.SetVertices(verts2);
+            originalMesh.SetNormals(normals2);
+            originalMesh.uv = uvs2;
+
+            return originalMesh;
         }
 
         /// <summary>
@@ -534,7 +592,6 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns all vertics that is close to the given position. (Always excluding vertex index vIndexToIgnore)
         /// </summary>
-        /// <param name="mesh"></param>
         /// <param name="pos"></param>
         /// <param name="verDisTol"></param>
         /// <param name="vIndexToIgnore"></param>
@@ -546,6 +603,29 @@ namespace Zombie1111_uDestruction
             for (int i = 0; i < vertics.Length; i += 1)
             {
                 if ((vertics[i] - pos).sqrMagnitude < verDisTol && i != vIndexToIgnore)
+                {
+                    vAtPos.Add(i);
+                }
+            }
+
+            return vAtPos;
+        }
+
+        /// <summary>
+        /// Returns all vertics that is close to the given position and has the same id. (Always excluding vertex index vIndexToIgnore)
+        /// </summary>
+        /// <param name="pos"></param>
+        /// <param name="verDisTol"></param>
+        /// <param name="vIndexToIgnore"></param>
+        /// <param name="verticsIds">Must have the same lenght as vertics</param>
+        /// <returns></returns>
+        public static List<int> GetAllVertexIndexesAtPos_id(Vector3[] vertics, int[] verticsIds, Vector3 pos, int id, float verDisTol = 0.0001f, int vIndexToIgnore = -1)
+        {
+            List<int> vAtPos = new();
+
+            for (int i = 0; i < vertics.Length; i += 1)
+            {
+                if ((vertics[i] - pos).sqrMagnitude < verDisTol && i != vIndexToIgnore && verticsIds[i] == id)
                 {
                     vAtPos.Add(i);
                 }
@@ -826,6 +906,61 @@ namespace Zombie1111_uDestruction
             }
 
             return -1; // Vertex is not part of any triangle
+        }
+
+        public static Collider CopyColliderToTransform(Collider ogCol, Transform targetTrans)
+        {
+            // Instantiate a new collider of the same type
+            Collider newCollider = null;
+
+            if (ogCol is MeshCollider)
+            {
+                MeshCollider ogMeshCol = (MeshCollider)ogCol;
+                MeshCollider newMeshCol = targetTrans.gameObject.AddComponent<MeshCollider>();
+
+                // Copy properties from the original collider to the new collider
+                newMeshCol.convex = ogMeshCol.convex;
+                newMeshCol.cookingOptions = ogMeshCol.cookingOptions;
+                newMeshCol.sharedMesh = new() { vertices = FractureHelperFunc.ConvertPositionsWithMatrix(FractureHelperFunc.ConvertPositionsWithMatrix(ogMeshCol.sharedMesh.vertices, ogCol.transform.localToWorldMatrix), targetTrans.worldToLocalMatrix) };
+                newCollider = newMeshCol;
+            }
+            else if (ogCol is BoxCollider)
+            {
+                BoxCollider originalBoxCollider = (BoxCollider)ogCol;
+                BoxCollider newBoxCollider = targetTrans.gameObject.AddComponent<BoxCollider>();
+
+                // Copy properties from the original collider to the new collider
+                newBoxCollider.center = originalBoxCollider.center;
+                newBoxCollider.size = originalBoxCollider.size;
+                newCollider = newBoxCollider;
+            }
+            else if (ogCol is SphereCollider)
+            {
+                SphereCollider originalSphereCollider = (SphereCollider)ogCol;
+                SphereCollider newSphereCollider = targetTrans.gameObject.AddComponent<SphereCollider>();
+
+                // Copy properties from the original collider to the new collider
+                newSphereCollider.center = originalSphereCollider.center;
+                newSphereCollider.radius = originalSphereCollider.radius;
+                newCollider = newSphereCollider;
+            }
+            else if (ogCol is CapsuleCollider)
+            {
+                CapsuleCollider originalCapsuleCollider = (CapsuleCollider)ogCol;
+                CapsuleCollider newCapsuleCollider = targetTrans.gameObject.AddComponent<CapsuleCollider>();
+
+                // Copy properties from the original collider to the new collider
+                newCapsuleCollider.center = originalCapsuleCollider.center;
+                newCapsuleCollider.radius = originalCapsuleCollider.radius;
+                newCapsuleCollider.height = originalCapsuleCollider.height;
+                newCapsuleCollider.direction = originalCapsuleCollider.direction;
+                newCollider = newCapsuleCollider;
+            }
+
+            newCollider.contactOffset = ogCol.contactOffset;
+            newCollider.isTrigger = ogCol.isTrigger;
+            newCollider.sharedMaterial = ogCol.sharedMaterial;
+            return newCollider;
         }
 
 #if UNITY_EDITOR

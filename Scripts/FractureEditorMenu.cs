@@ -9,16 +9,16 @@ namespace Zombie1111_uDestruction
 {
     public class FractureEditorMenu : Editor
     {
+        [MenuItem("Tools/Fracture/Fracture All")]
+        private static void FractureAll_medium()
+        {
+            EditorCoroutineUtility.StartCoroutineOwnerless(FractureAll(69));
+        }
+
         [MenuItem("Tools/Fracture/Fracture All Low")]
         private static void FractureAll_low()
         {
             EditorCoroutineUtility.StartCoroutineOwnerless(FractureAll(0));
-        }
-
-        [MenuItem("Tools/Fracture/Fracture All Medium")]
-        private static void FractureAll_medium()
-        {
-            EditorCoroutineUtility.StartCoroutineOwnerless(FractureAll(1));
         }
 
         [MenuItem("Tools/Fracture/Fracture All High")]
@@ -39,7 +39,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Fractures all meshes with the given fracture quality
         /// </summary>
-        /// <param name="fractureQuality">0 = low, 1 = medium, 2 = high</param>
+        /// <param name="fractureQuality">0 = low, 1 = medium, 2 = high (above 2 = defualt)</param>
         /// <returns></returns>
         public static IEnumerator FractureAll(byte fractureQuality)
         {
@@ -56,7 +56,7 @@ namespace Zombie1111_uDestruction
 
                 FractureThis.GenerationQuality ogQuality = frac.generationQuality;
 
-                frac.generationQuality = (FractureThis.GenerationQuality)fractureQuality;
+                if (fractureQuality <= 2) frac.generationQuality = (FractureThis.GenerationQuality)fractureQuality;
                 frac.Gen_fractureObject();
 
                 frac.generationQuality = ogQuality;

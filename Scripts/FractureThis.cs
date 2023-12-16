@@ -126,6 +126,15 @@ namespace Zombie1111_uDestruction
         /// </summary>
         [SerializeField] private SkinnedMeshRenderer fracRend = null;
 
+        /// <summary>
+        /// Contains the collider on the skinned bone for all parts (Only if real skinned)
+        /// </summary>
+        [SerializeField] private Collider[] allSkinPartCols = new Collider[0];
+
+        private int[] tempFracVerOgMeshId = null; //only set during the mesh fracturing process
+        private List<int> tempPartOgMeshId = null; //only set during the mesh fracturing process
+        private OrginalObjData tempOgRealSkin = null; //only set during the mesh fracturing process
+
         private enum DestructionRepairSupport
         {
             fullHigh,
@@ -240,6 +249,11 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public float partBrokenness;
             public int parentIndex;
+
+            /// <summary>
+            /// The part trans
+            /// </summary>
+            public Transform trans;
         }
 
         [System.Serializable]
@@ -276,12 +290,13 @@ namespace Zombie1111_uDestruction
 
             //Get the meshes to fracture
             float worldScaleDis = worldScale * 0.0001f;
-            OrginalObjData ogDefualtSkin = new();
+            tempOgRealSkin = new();
 
-            List<MeshData> meshesToFracture = Gen_getMeshesToFracture(objectToFracture, ref ogDefualtSkin, worldScaleDis);
+            List<MeshData> meshesToFracture = Gen_getMeshesToFracture(objectToFracture, worldScaleDis);
             if (meshesToFracture == null) return;
 
             //Fracture the meshes into pieces
+            tempPartOgMeshId = new();
             List<Mesh> fracturedMeshes = Gen_fractureMeshes(meshesToFracture, fractureCount, dynamicFractureCount, worldScaleDis, seed, false);
             if (fracturedMeshes == null) return;
 
@@ -306,8 +321,12 @@ namespace Zombie1111_uDestruction
                 //fracRend.BakeMesh(bMesh, true);
                 //Gen_setupSkinnedMesh(bMesh, ogSkinBones, fracRend.transform.localToWorldMatrix, worldScaleDis);
                 //Gen_setupSkinnedMesh(Instantiate(fracRend.sharedMesh), ogSkinBones, fracRend.transform.localToWorldMatrix, worldScaleDis);
-                Gen_setupSkinnedMesh(ogDefualtSkin.ogMesh, ogDefualtSkin.ogBones, ogDefualtSkin.ogRootBone.localToWorldMatrix);
+                Gen_setupSkinnedMesh(tempOgRealSkin.ogMesh, tempOgRealSkin.ogBones, tempOgRealSkin.ogRootBone.localToWorldMatrix, fracturedMeshes);
             }
+
+            tempPartOgMeshId = null;
+            tempFracVerOgMeshId = null;
+            tempOgRealSkin = null;
 
             //save to save asset
             SaveOrLoadAsset(true);
@@ -370,24 +389,16 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Only called if real skinned mesh to copy its animated bones to fractured mesh
         /// </summary>
-        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW)
+        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW, List<Mesh> partMeshesWorld)
         {
-            //################No vertex uses trail bone 3 after fracture. And way less uses trail bone 5
             float worldDis = worldScale * 0.0001f;
 
             //add bind poses and bone transforms from real skinned rend
             int boneIShift = fracRend.bones.Length;
             List<Transform> newBones = fracRend.bones.ToList();
             List<Matrix4x4> newMatrixs = fracRend.sharedMesh.bindposes.ToList();
-            float b_verDisTotal;
-            List<float> b_verDisPer = new();
-            List<boneWeData> b_wePer = new();
-            List<boneWeData> b_actualWePer = new();
-            float b_weTotal;
 
-            //newMatrixs = newMatrixs.Select(mat => fracRend.transform.localToWorldMatrix * mat).ToList();
-
-            // Assuming skinBones is a List<Transform> containing the new bones
+            //Assuming skinBones is a List<Transform> containing the new bones
             for (int i = 0; i < skinBones.Length; i++)
             {
                 // Add new bone and its bind pose matrix
@@ -395,25 +406,16 @@ namespace Zombie1111_uDestruction
                 newMatrixs.Add(skinMesh.bindposes[i]);
             }
 
-            //fracRend.bones = newBones.ToArray();
-            //fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
-            //fracRend.sharedMesh.boneWeights = fracBoneWe;
-
             //set boneWeights
             skinMesh = FractureHelperFunc.ConvertMeshWithMatrix(skinMesh, skinLtW);
             BoneWeight[] skinBoneWe = skinMesh.boneWeights.ToArray();
             Vector3[] skinWVer = skinMesh.vertices;
-            //Vector3[] skinWNor = skinMesh.normals;
             int[] skinTris = skinMesh.triangles;
             int[] fracTris = fracRend.sharedMesh.triangles;
             BoneWeight[] fracBoneWe = fracRend.sharedMesh.boneWeights.ToArray();
             BoneWeight[] newBoneWe = new BoneWeight[fracBoneWe.Length];
             Vector3[] fracWVer = FractureHelperFunc.ConvertPositionsWithMatrix(fracRend.sharedMesh.vertices, fracRend.transform.localToWorldMatrix);
-            //Vector3[] fracWNor = FractureHelperFunc.ConvertDirectionsWithMatrix(fracRend.sharedMesh.normals, fracRend.transform.localToWorldMatrix);
             List<int> unusedVers = Enumerable.Range(0, fracWVer.Length).ToList();
-
-            //FractureHelperFunc.Debug_drawMesh(skinMesh, false, 10.0f);
-            //FractureHelperFunc.Debug_drawMesh(FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(fracRend.sharedMesh), fracRend.transform.localToWorldMatrix), false, 10.0f);
 
             //link vertics bone weights with best weight on skinned mesh
             int verI;
@@ -428,8 +430,6 @@ namespace Zombie1111_uDestruction
 
                 foreach (int vIi in verticsLinkedThreaded[verI].intList)
                 {
-                    //if (Vector3.Dot(fracWNor[verI].normalized, fracWNor[vIi].normalized) < 0.8f) continue;
-
                     unusedVers.Remove(vIi);
                     newBoneWe[vIi] = newWe;
                 }
@@ -440,129 +440,89 @@ namespace Zombie1111_uDestruction
             fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
             fracRend.sharedMesh.boneWeights = newBoneWe;
 
+            //add colliders to real skinned bones
+            List<boneWeData> colBoneWe = new();
+            float weight = 0.0f;
+            int boneIndex = 0;
+            int weListI;
+            
+            allSkinPartCols = new Collider[allParts.Length];
+            
+            for (int i = 0; i < allParts.Length; i += 1)
+            {
+                foreach (int vI in allParts[i].rendVertexIndexes)
+                {
+                    for (int ii = 0; ii < 4; ii++)
+                    {
+                        switch (ii)
+                        {
+                            case 0:
+                                weight = newBoneWe[vI].weight0;
+                                boneIndex = newBoneWe[vI].boneIndex0;
+                                break;
+            
+                            case 1:
+                                weight = newBoneWe[vI].weight1;
+                                boneIndex = newBoneWe[vI].boneIndex1;
+                                break;
+            
+                            case 2:
+                                weight = newBoneWe[vI].weight2;
+                                boneIndex = newBoneWe[vI].boneIndex2;
+                                break;
+            
+                            case 3:
+                                weight = newBoneWe[vI].weight3;
+                                boneIndex = newBoneWe[vI].boneIndex3;
+                                break;
+                        }
+            
+                        if (weight <= 0.01f) continue;
+            
+                        weListI = colBoneWe.FindIndex(we => we.boneIndex == boneIndex);
+                        if (weListI < 0)
+                        {
+                            colBoneWe.Add(new() { boneIndex = boneIndex, weight = weight });
+                            continue;
+                        }
+            
+                        colBoneWe[weListI].weight += weight;
+                    }
+                }
+                 
+                colBoneWe = colBoneWe.OrderByDescending(item => item.weight).ToList();
+                allSkinPartCols[i] = FractureHelperFunc.CopyColliderToTransform(allParts[i].col, newBones[colBoneWe[0].boneIndex]);
+                allParts[i].col.enabled = false;
+                
+                colBoneWe.Clear();
+            }
+
+            //combine all real colliders that uses the same bone
+            List<Collider> thisBoneCols;
+            for (int i = 0; i < newBones.Count; i += 1)
+            {
+                thisBoneCols = allSkinPartCols.Where(col => col.transform == newBones[i]).ToList();
+                
+            }
+
             BoneWeight GetBestWeightForVertex(int fracVi)
             {
                 //get the closest skinned triangel and its total bones and their total weight
-                BoneWeight newWe = new();
+                BoneWeight newWe;
 
                 int fracTriTemp = FractureHelperFunc.FindTriangleIndexWithVertex(fracTris, fracVi);
-                //int closeSkinTriI = FractureHelperFunc.GetClosestPointOnMesh(skinWVer, skinTris, fracWVer[fracVi], worldDis);
                 int closeSkinTriI = FractureHelperFunc.GetClosestTriOnMesh(skinWVer, skinTris,
                     new Vector3[3] { fracWVer[fracTris[fracTriTemp]], fracWVer[fracTris[fracTriTemp + 1]],
                         fracWVer[fracTris[fracTriTemp + 2]] }, worldDis);
 
-                //int closeSkinTriI = FractureHelperFunc.FindMostSimilarTriangle(skinMesh, new Vector3[3] { fracWVer[fracTris[fracTriTemp]], fracWVer[fracTris[fracTriTemp + 1]], fracWVer[fracTris[fracTriTemp + 2]] });
                 int closeSkinTriAdd = FractureHelperFunc.GetClosestPointInArray(new Vector3[3] { skinWVer[skinTris[closeSkinTriI]], skinWVer[skinTris[closeSkinTriI + 1]], skinWVer[skinTris[closeSkinTriI + 2]] }, fracWVer[fracVi], worldDis);
                 newWe = skinBoneWe[skinTris[closeSkinTriI + closeSkinTriAdd]];
                 newWe.boneIndex0 += boneIShift;
                 newWe.boneIndex1 += boneIShift;
                 newWe.boneIndex2 += boneIShift;
                 newWe.boneIndex3 += boneIShift;
-                //b_weTotal = 0.0f;
-                //b_verDisTotal = 0.0f;
-                //b_verDisPer.Clear();
-                //b_wePer.Clear();
-                //int tempI;
-                //
-                //AddSkinVerWeToBStuff(skinTris[closeSkinTriI], fracVi);
-                //AddSkinVerWeToBStuff(skinTris[closeSkinTriI + 1], fracVi);
-                //AddSkinVerWeToBStuff(skinTris[closeSkinTriI + 2], fracVi);
-                //
-                ////normalize total bones weight and multiply with their distance
-                //for (int i = 0; i < b_verDisPer.Count; i += 1)
-                //{
-                //    b_verDisPer[i] /= b_verDisTotal;
-                //    b_weTotal -= (b_wePer[i].weight * 2.0f) * b_verDisPer[i];
-                //    b_wePer[i].weight -= (b_wePer[i].weight * 2.0f) * b_verDisPer[i];
-                //}
-                //
-                //for (int i = 0; i < b_wePer.Count; i += 1)
-                //{
-                //    b_wePer[i].weight /= b_weTotal;
-                //}
-                //
-                ////get actual bone weights
-                //b_actualWePer.Clear();
-                //
-                //for (int i = 0; i < b_wePer.Count; i += 1)
-                //{
-                //    tempI = b_actualWePer.FindIndex(we => we.boneIndex == b_wePer[i].boneIndex);
-                //    if (tempI < 0)
-                //    {
-                //        tempI = b_actualWePer.Count;
-                //        b_actualWePer.Add(new() { boneIndex = b_wePer[i].boneIndex + boneIShift, weight = 0.0f });
-                //    }
-                //
-                //    b_actualWePer[tempI].weight += b_wePer[i].weight;
-                //}
-                //
-                //b_actualWePer = b_actualWePer.OrderByDescending(item => item.weight).ToList();
-                //
-                ////assign updated weighs
-                //newWe.weight0 = b_actualWePer[0].weight;
-                //newWe.boneIndex0 = b_actualWePer[0].boneIndex;
-                //
-                //if (b_actualWePer.Count > 1)
-                //{
-                //    newWe.weight1 = b_actualWePer[1].weight;
-                //    newWe.boneIndex1 = b_actualWePer[1].boneIndex;
-                //
-                //    if (b_actualWePer.Count > 2)
-                //    {
-                //        newWe.weight2 = b_actualWePer[2].weight;
-                //        newWe.boneIndex2 = b_actualWePer[2].boneIndex;
-                //
-                //        if (b_actualWePer.Count > 3)
-                //        {
-                //            newWe.weight3 = b_actualWePer[3].weight;
-                //            newWe.boneIndex3 = b_actualWePer[3].boneIndex;
-                //        }
-                //    }
-                //}
 
                 return newWe;
-            }
-
-            void AddSkinVerWeToBStuff(int skinVi, int fracVi)
-            {
-                int tempI;
-                float tempDis;
-                tempDis = Vector3.Distance(fracWVer[fracVi], skinWVer[skinVi]);
-                float weight = 0.0f;
-                int boneIndex = -1;
-
-                for (int i = 0; i < 4; i++)
-                {
-                    switch (i)
-                    {
-                        case 0:
-                            weight = skinBoneWe[skinVi].weight0;
-                            boneIndex = skinBoneWe[skinVi].boneIndex0;
-                            break;
-
-                        case 1:
-                            weight = skinBoneWe[skinVi].weight1;
-                            boneIndex = skinBoneWe[skinVi].boneIndex1;
-                            break;
-
-                        case 2:
-                            weight = skinBoneWe[skinVi].weight2;
-                            boneIndex = skinBoneWe[skinVi].boneIndex2;
-                            break;
-
-                        case 3:
-                            weight = skinBoneWe[skinVi].weight3;
-                            boneIndex = skinBoneWe[skinVi].boneIndex3;
-                            break;
-                    }
-
-                    if (weight <= 0.0f) return;
-                    
-                    b_verDisTotal += tempDis;
-                    b_verDisPer.Add(tempDis);
-                    b_wePer.Add(new() { weight = weight, boneIndex = boneIndex });
-                    b_weTotal += weight;
-                }
             }
         }
 
@@ -576,16 +536,27 @@ namespace Zombie1111_uDestruction
         /// <param name="matOutside"></param>
         private void Gen_setupRenderer(ref FracParts[] fParts, List<Mesh> partMeshes, Transform rendHolder, Material matInside, Material matOutside)
         {
-            //combine meshes and assign verticsLinkedThreaded
+            //combine meshes
             Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshes, ref fParts);
 
             Vector3[] vertics = comMesh.vertices;
             verticsLinkedThreaded = new IntList[vertics.Length];
             float worldDis = worldScale * 0.01f;//0.01??
 
+            //get all vertics ogMesh id
+            tempFracVerOgMeshId = new int[vertics.Length]; 
+            for (int i = 0; i < fParts.Length; i += 1)
+            {
+                foreach (int vI in fParts[i].rendVertexIndexes)
+                {
+                    tempFracVerOgMeshId[vI] = tempPartOgMeshId[i];
+                }
+            }
+
+            //get all vertics at the ~same position using the same ogMesh
             Parallel.For(0, verticsLinkedThreaded.Length, i =>
             {
-                List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos(vertics, vertics[i], worldDis, -1);
+                List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(vertics, tempFracVerOgMeshId, vertics[i], tempFracVerOgMeshId[i], worldDis, -1);
 
                 lock (verticsLinkedThreaded)
                 {
@@ -655,7 +626,7 @@ namespace Zombie1111_uDestruction
                 meshes[i] = FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(meshes[i]), newT.worldToLocalMatrix); //Instantiate new mesh to keep worldSpaceMeshes
 
                 //the part data is created here
-                FracParts newP = new() { col = Gen_createPartCollider(newT, meshes[i], phyMatToUse), rendVertexIndexes = new(), partBrokenness = 0.0f, neighbourParts = new(), parentIndex = 0 };
+                FracParts newP = new() { trans = newT, col = Gen_createPartCollider(newT, meshes[i], phyMatToUse), rendVertexIndexes = new(), partBrokenness = 0.0f, neighbourParts = new(), parentIndex = 0 };
                 allParts[i] = newP;
             }
 
@@ -726,12 +697,17 @@ namespace Zombie1111_uDestruction
 
             Collider Gen_createPartCollider(Transform partTrans, Mesh partMesh, PhysicMaterial phyMat)
             {
+                partMesh = FractureHelperFunc.MergeVerticesInMesh(Instantiate(partMesh));
+                partMesh.uv = new Vector2[0];
+                partMesh.normals = new Vector3[0];
+                partMesh.triangles = new int[0];
+
                 if (colliderType == ColliderType.mesh)
                 {
                     //mesh
                     MeshCollider newCol = partTrans.GetOrAddComponent<MeshCollider>();
-                    newCol.sharedMesh = partMesh;
                     newCol.convex = true;
+                    newCol.sharedMesh = partMesh;
                     newCol.sharedMaterial = phyMat;
                     return newCol;
                 }
@@ -849,9 +825,36 @@ namespace Zombie1111_uDestruction
             for (int i = 0; i < allFracParents.Count; i += 1)
             {
                 if (allFracParents[i].parentTrans == null) continue;
+                if (i == 0 && isRealSkinnedM == true)
+                {
+
+                    DestroyImmediate(allFracParents[i].parentRb);
+                    DestroyImmediate(allFracParents[i].fParent);
+
+                    for (int ii = 0; ii < allFracParents[i].partIndexes.Count; ii += 1)
+                    {
+                        if (saved_allPartsCol.Length <= 0)
+                        {
+                            Debug.LogError(transform.name + " parts list was for some weird reason cleared before parts was removed (You should delete them manually)");
+                            break;
+                        }
+
+                        if (saved_allPartsCol[allFracParents[i].partIndexes[ii]] != null) DestroyImmediate(saved_allPartsCol[allFracParents[i].partIndexes[ii]].gameObject);
+                    }
+
+                    continue;
+                }
+
                 DestroyImmediate(allFracParents[i].parentTrans.gameObject);
             }
 
+            //remove real skin bone cols
+            for (int i = 0; i < allSkinPartCols.Length; i += 1)
+            {
+                DestroyImmediate(allSkinPartCols[i]);
+            }
+
+            allSkinPartCols = new Collider[0];
             allFracParents.Clear();
             verticsLinkedThreaded = new IntList[0];
             allParts = new FracParts[0];
@@ -951,6 +954,7 @@ namespace Zombie1111_uDestruction
         private List<Mesh> Gen_fractureMeshes(List<MeshData> meshesToFracture, int totalChunkCount, bool dynamicChunkCount, float worldScaleDis = 0.0001f, int seed = -1, bool useMeshBounds = false)
         {
             //get random seed
+            int nextOgMeshId = 0;
             if (seed < 0) seed = UnityEngine.Random.Range(0, int.MaxValue);
 
             //get per mesh scale, so each mesh can get ~equally sized
@@ -963,6 +967,7 @@ namespace Zombie1111_uDestruction
             for (int i = 0; i < meshesToFracture.Count; i += 1)
             {
                 Gen_fractureMesh(meshesToFracture[i].mesh, ref meshes, Mathf.RoundToInt(totalChunkCount * meshScales[i]));
+                nextOgMeshId += 1;
             }
 
             //return the result
@@ -973,6 +978,7 @@ namespace Zombie1111_uDestruction
                 //fractures the given mesh into pieces and adds the new pieces to the newMeshes list
                 if (chunkCount <= 1)
                 {
+                    tempPartOgMeshId.Add(nextOgMeshId);
                     newMeshes.Add(meshToFrac);
                     return;
                 }
@@ -990,7 +996,7 @@ namespace Zombie1111_uDestruction
                 );
 
                 byte maxAttempts = 20;
-                bool meshIsValid;
+                bool meshIsValid = false;
                 List<Mesh> newMeshesTemp = new();
 
                 while (maxAttempts > 0)
@@ -1015,7 +1021,6 @@ namespace Zombie1111_uDestruction
                         newMeshesTemp.Add(ExtractChunkMesh(fractureTool, i));
                         if (FractureHelperFunc.IsMeshValid(newMeshesTemp[^1], worldScaleDis) == false)
                         {
-                            print("New frac attempt");
                             meshIsValid = false;
                             break;
                         }
@@ -1024,8 +1029,17 @@ namespace Zombie1111_uDestruction
                     if (meshIsValid == false) continue;
 
                     newMeshes.AddRange(newMeshesTemp);
+                    for (int i = 0; i < newMeshesTemp.Count; i += 1)
+                    {
+                        tempPartOgMeshId.Add(nextOgMeshId);
+                    }
 
                     break;
+                }
+
+                if (meshIsValid == false)
+                {
+                    Debug.LogError("Unable to fracture chunk " + nextOgMeshId + " of " + transform.name + " (Some parts of the mesh may be missing)");
                 }
             }
 
@@ -1046,7 +1060,7 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="obj"></param>
         /// <returns></returns>
-        private List<MeshData> Gen_getMeshesToFracture(GameObject obj, ref OrginalObjData ogDefualtSkin, float worldScaleDis = 0.0001f)
+        private List<MeshData> Gen_getMeshesToFracture(GameObject obj, float worldScaleDis = 0.0001f)
         {
             //Get all the meshes to fracture
             bool hasSkinned = false;
@@ -1081,9 +1095,10 @@ namespace Zombie1111_uDestruction
                         }
                     }
 
-                    ogDefualtSkin.ogBones = skinnedR.bones;
-                    ogDefualtSkin.ogRootBone = skinnedR.transform;
-                    ogDefualtSkin.ogMesh = Instantiate(skinnedR.sharedMesh);
+                    tempOgRealSkin.ogBones = skinnedR.bones;
+                    tempOgRealSkin.ogRootBone = skinnedR.transform;
+                    tempOgRealSkin.ogMesh = Instantiate(skinnedR.sharedMesh);
+                    tempOgRealSkin.ogCompData = new() { new() { comp = skinnedR.rootBone.parent } };
                     //skinnedR.BakeMesh(ogDefualtSkin.ogMesh, true);
                     //ogDefualtSkin.ogMesh.bindposes = skinnedR.sharedMesh.bindposes.ToArray();
                     //ogDefualtSkin.ogMesh.boneWeights = skinnedR.sharedMesh.boneWeights.ToArray();
@@ -1211,6 +1226,7 @@ namespace Zombie1111_uDestruction
             else if (phyMainOptions.mainPhysicsType == OptMainPhysicsType.orginalIsKinematic)
             {
                 allFracParents[parentIndex].parentRb.isKinematic = parentIndex == 0;
+                allFracParents[parentIndex].parentRb.interpolation = parentIndex == 0 ? RigidbodyInterpolation.None : phyMainOptions.interpolate;
             }
             else
             {
@@ -1226,6 +1242,7 @@ namespace Zombie1111_uDestruction
                 }
 
                 allFracParents[parentIndex].parentRb.isKinematic = pIsKin;
+                allFracParents[parentIndex].parentRb.interpolation = pIsKin == true ? RigidbodyInterpolation.None : phyMainOptions.interpolate;
             }
         }
 
@@ -1258,7 +1275,20 @@ namespace Zombie1111_uDestruction
             if (allParts.Length == 0) return;
 
             //update renderer bounds
-            fracRend.bounds = FractureHelperFunc.ToBounds(allParts.Select(part => part.col.transform.position));
+            //fracRend.bounds = FractureHelperFunc.ToBounds();
+            //allParts.Select(part => part.col.transform.position).ToArray();
+            var min = Vector3.one * float.MaxValue;
+            var max = Vector3.one * float.MinValue;
+            Vector3 tempPos;
+
+            for (int i = 0; i < allParts.Length; i += 1)
+            {
+                tempPos = allParts[i].trans.position;
+                min = Vector3.Min(min, tempPos);
+                max = Vector3.Max(max, tempPos);
+            }
+
+            fracRend.bounds = new Bounds((max - min) / 2 + min, max - min);
 
             //calculate destruction
             if (impact_data.Count > 0)
@@ -1374,7 +1404,7 @@ namespace Zombie1111_uDestruction
             //assign variabels for repair system
             if (repairSupport != DestructionRepairSupport.dontSupportRepair)
             {
-                rep_orginalLocalPartPoss = allParts.Select(part => part.col.transform.localPosition).ToArray();
+                rep_orginalLocalPartPoss = allParts.Select(part => part.trans.localPosition).ToArray();
                 if (repairSupport != DestructionRepairSupport.partsOnly) rep_verticsOrginal = verticsOrginalThreaded.ToArray();
             }
 
@@ -1430,10 +1460,10 @@ namespace Zombie1111_uDestruction
             {
                 fracRend.BakeMesh(bakedMesh);
                 bakedMesh.GetVertices(verticsCurrentThreaded);
-                boneMatrixsCurrentThreaded = allParts.Select(part => part.col.transform.localToWorldMatrix).ToList();
+                boneMatrixsCurrentThreaded = allParts.Select(part => part.trans.localToWorldMatrix).ToList();
             }
 
-            Vector3[] partPoss = allParts.Select(part => part.col.transform.position).ToArray();
+            Vector3[] partPoss = allParts.Select(part => part.trans.position).ToArray();
             Matrix4x4 lTWMatrix = fracRend.transform.localToWorldMatrix;
 
             //run destruction compute thread
@@ -1509,10 +1539,21 @@ namespace Zombie1111_uDestruction
             }
 
             //create the parent transform
-            Transform pTrans = new GameObject("fracParent" + allFracParents.Count + "_" + transform.name).transform;
-            pTrans.SetParent(transform);
-            pTrans.SetPositionAndRotation(transform.position, transform.rotation);
-            pTrans.localScale = Vector3.one;
+            Transform pTrans;
+
+            if (allFracParents.Count == 0 && isRealSkinnedM == true)
+            {
+                pTrans = (Transform)tempOgRealSkin.ogCompData[0].comp;
+                //pTrans.name = "fracParent" + allFracParents.Count + "_" + transform.name;
+            }
+            else
+            {
+                pTrans = new GameObject("fracParent" + allFracParents.Count + "_" + transform.name).transform;
+                pTrans.SetParent(transform);
+                pTrans.SetPositionAndRotation(transform.position, transform.rotation);
+                pTrans.localScale = Vector3.one;
+            }
+
             int newParentIndex = allFracParents.Count;
             allFracParents.Add( new() { parentTrans = pTrans, partIndexes = new() } );
 
@@ -1564,7 +1605,7 @@ namespace Zombie1111_uDestruction
             //if (parentIndex == allParts[partIndex].parentIndex || rep_partsToRepair.Contains(partIndex) == true)
             if (parentIndex == allParts[partIndex].parentIndex || rep_partsToRepair.Any(part => part.partIndex == partIndex) == true)
             {
-                if (allParts[partIndex].parentIndex >= 0 && allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].col.transform) Destroy(allParts[partIndex].col.attachedRigidbody);
+                if (allParts[partIndex].parentIndex >= 0 && allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].trans) Destroy(allParts[partIndex].col.attachedRigidbody);
                 return;
             }
 
@@ -1578,14 +1619,14 @@ namespace Zombie1111_uDestruction
             if (parentIndex < 0)
             {
                 //remove parent
-                allParts[partIndex].col.transform.SetParent(transform, true);
+                allParts[partIndex].trans.SetParent(transform, true);
                 allParts[partIndex].parentIndex = -1;
                 return;
             }
 
             //set new parent
-            if (allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].col.transform) Destroy(allParts[partIndex].col.attachedRigidbody);
-            allParts[partIndex].col.transform.SetParent(allFracParents[parentIndex].parentTrans, true);
+            if (allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].trans) Destroy(allParts[partIndex].col.attachedRigidbody);
+            allParts[partIndex].trans.SetParent(allFracParents[parentIndex].parentTrans, true);
             allFracParents[parentIndex].partIndexes.Add(partIndex);
             allParts[partIndex].parentIndex = parentIndex;
             parentIndexesToUpdate.Add(allParts[partIndex].parentIndex);
@@ -1914,7 +1955,7 @@ namespace Zombie1111_uDestruction
             Run_setPartParent(partToRepair, 0);
             rep_speedScaled = repairSpeed * allFracParents[0].parentTrans.lossyScale.magnitude;
             rep_partsToRepair.Add(new() { partIndex = partToRepair, partOgDis = Math.Max(1.0f,  
-                Vector3.Distance(allParts[partToRepair].col.transform.position, allFracParents[0].parentTrans.TransformPoint(rep_orginalLocalPartPoss[partToRepair])) - repairSpeed) });
+                Vector3.Distance(allParts[partToRepair].trans.position, allFracParents[0].parentTrans.TransformPoint(rep_orginalLocalPartPoss[partToRepair])) - repairSpeed) });
 
             allParts[partToRepair].col.enabled = false;
             allParts[partToRepair].col.sharedMaterial = phyMat_defualt;
@@ -1956,18 +1997,18 @@ namespace Zombie1111_uDestruction
             bool hasRestoredAll = true;
 
             //restore part bone transform
-            Vector3 tempVec = rep_orginalLocalPartPoss[partIndex] - allParts[partIndex].col.transform.localPosition;
+            Vector3 tempVec = rep_orginalLocalPartPoss[partIndex] - allParts[partIndex].trans.localPosition;
             if (tempVec.sqrMagnitude > 0.0001f) hasRestoredAll = false;
-            allParts[partIndex].col.transform.localPosition += Vector3.ClampMagnitude(tempVec, rep_speedScaled * rep_partsToRepair[repIndex].partOgDis * Time.deltaTime);
+            allParts[partIndex].trans.localPosition += Vector3.ClampMagnitude(tempVec, rep_speedScaled * rep_partsToRepair[repIndex].partOgDis * Time.deltaTime);
 
             //allParts[partIndex].col.transform.localPosition = Vector3.MoveTowards(allParts[partIndex].col.transform.localPosition, rep_orginalLocalPartPoss[partIndex], rep_speedScaled * Time.deltaTime);
-            if (Quaternion.Angle(allParts[partIndex].col.transform.localRotation, Quaternion.identity) > 0.0001f) hasRestoredAll = false;
-            allParts[partIndex].col.transform.localRotation = Quaternion.RotateTowards(allParts[partIndex].col.transform.localRotation, Quaternion.identity, rep_speedScaled * 80.0f * Time.deltaTime);
+            if (Quaternion.Angle(allParts[partIndex].trans.localRotation, Quaternion.identity) > 0.0001f) hasRestoredAll = false;
+            allParts[partIndex].trans.localRotation = Quaternion.RotateTowards(allParts[partIndex].trans.localRotation, Quaternion.identity, rep_speedScaled * 80.0f * Time.deltaTime);
 
             //allParts[partIndex].col.transform.localScale = Vector3.MoveTowards(allParts[partIndex].col.transform.localScale, Vector3.one, rep_speedScaled * 0.4f * Time.deltaTime);
-            tempVec = Vector3.one - allParts[partIndex].col.transform.localScale;
+            tempVec = Vector3.one - allParts[partIndex].trans.localScale;
             if (tempVec.sqrMagnitude > 0.0001f) hasRestoredAll = false;
-            allParts[partIndex].col.transform.localScale += Vector3.ClampMagnitude(tempVec, rep_speedScaled * Time.deltaTime);
+            allParts[partIndex].trans.localScale += Vector3.ClampMagnitude(tempVec, rep_speedScaled * Time.deltaTime);
 
             //restore part vertics
             if (repairSupport == DestructionRepairSupport.fullHigh)
@@ -2003,8 +2044,8 @@ namespace Zombie1111_uDestruction
                 allParts[partIndex].col.enabled = true;
 
                 //set position and rotation
-                allParts[partIndex].col.transform.localRotation = Quaternion.identity;
-                allParts[partIndex].col.transform.localPosition = rep_orginalLocalPartPoss[partIndex];
+                allParts[partIndex].trans.localRotation = Quaternion.identity;
+                allParts[partIndex].trans.localPosition = rep_orginalLocalPartPoss[partIndex];
 
                 if (repairSupport == DestructionRepairSupport.fullLow)
                 {
