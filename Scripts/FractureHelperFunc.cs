@@ -363,6 +363,19 @@ namespace Zombie1111_uDestruction
             return originalMesh;
         }
 
+        public static void MergeSimilarVectors(ref List<Vector3> vectors, float tolerance = 0.001f)
+        {
+            for (int i = 0; i < vectors.Count; i += 1)
+            {
+                for (int ii = i + 1; ii < vectors.Count; ii += 1)
+                {
+                    if ((vectors[i] - vectors[ii]).sqrMagnitude > tolerance) continue;
+
+                    vectors.RemoveAt(ii);
+                }
+            }
+        }
+
         /// <summary>
         /// Returns true if the mesh is valid for fracturing
         /// </summary>
@@ -963,6 +976,49 @@ namespace Zombie1111_uDestruction
             return newCollider;
         }
 
+        /// <summary>
+        /// Modifies to given collider mesh/size/radius based on the given positions as good as possible
+        /// </summary>
+        /// <param name="col"></param>
+        /// <param name="possWorld"></param>
+        public static void SetColliderFromFromPoints(Collider col, Transform colTrans, Vector3[] possWorld, bool allowMovingTrans = true, bool preferTooSmall = false)
+        {
+            if (allowMovingTrans == true) colTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(possWorld);
+
+            if (col is MeshCollider mCol)
+            {
+                mCol.convex = true;
+                mCol.sharedMesh = new() { vertices = FractureHelperFunc.ConvertPositionsWithMatrix(possWorld, colTrans.worldToLocalMatrix) };
+                mCol.enabled = !mCol.enabled;
+                mCol.enabled = !mCol.enabled;
+            }
+            else if (col is BoxCollider)
+            {
+
+            }
+        }
+
+        /// <summary>
+        /// Returns the geometric/(not average) center of given positions
+        /// </summary>
+        /// <param name="positions"></param>
+        /// <returns></returns>
+        public static Vector3 GetGeometricCenterOfPositions(Vector3[] positions)
+        {
+            Vector3 min = positions[0];
+            Vector3 max = positions[0];
+
+            // Find the minimum and maximum coordinates along each axis
+            for (int i = 1; i < positions.Length; i++)
+            {
+                min = Vector3.Min(min, positions[i]);
+                max = Vector3.Max(max, positions[i]);
+            }
+
+            // Calculate the geometric center as the midpoint of the bounding box
+            return (min + max) * 0.5f;
+        }
+
 #if UNITY_EDITOR
         /// <summary>
         /// Draw line between all vertics in the worldspace mesh. 
@@ -1036,6 +1092,6 @@ namespace Zombie1111_uDestruction
             Debug.DrawLine(corners[2], corners[6], color, duration);
             Debug.DrawLine(corners[3], corners[7], color, duration);
         }
-    }
 #endif
+    }
 }

@@ -15,6 +15,9 @@ namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
     {
+
+        #region EditorAndOptions
+
 #if UNITY_EDITOR
         //########################Custom Editor######################################
         [CustomEditor(typeof(FractureThis))]
@@ -50,6 +53,7 @@ namespace Zombie1111_uDestruction
 
         //fracture settings
         [Header("Fracture")]
+        [SerializeField] private bool halfUpdateRate = true;
         [SerializeField] private float worldScale = 1.0f;
         [SerializeField] private int fractureCount = 15;
         [SerializeField] private bool dynamicFractureCount = true;
@@ -93,47 +97,6 @@ namespace Zombie1111_uDestruction
         [Header("Material")]
         [SerializeField] private Material matInside_defualt = null;
         [SerializeField] private Material matOutside_defualt = null;
-
-        [Space(50)]
-        [Header("Debug (Dont touch)")]
-        [SerializeField] private OrginalObjData ogData = null;
-        [SerializeField] private FractureSaveAsset saveAsset = null;
-        public Collider[] saved_allPartsCol = new Collider[0];
-        public int saved_fracId = -1;
-        [SerializeField] private bool isRealSkinnedM = false;
-        /// <summary>
-        /// Add a parent index here to update the parents info within a few frames
-        /// </summary>
-        private HashSet<int> parentIndexesToUpdate = new();
-
-        /// <summary>
-        /// All fractured parts have one of these as its parent
-        /// </summary>
-        [SerializeField] private List<FracParents> allFracParents = new();
-
-        /// <summary>
-        /// All the fractured parts.
-        /// </summary>
-        [System.NonSerialized] public FracParts[] allParts = new FracParts[0];
-
-        /// <summary>
-        /// If MainPhysicsType == overlappingIsKinematic, bool for all parts that is true if the part was is inside a non fractured mesh when generated
-        /// </summary>
-        [System.NonSerialized] public bool[] kinematicPartStatus = new bool[0];
-
-        /// <summary>
-        /// The renderer used to render the fractured mesh (always skinned)
-        /// </summary>
-        [SerializeField] private SkinnedMeshRenderer fracRend = null;
-
-        /// <summary>
-        /// Contains the collider on the skinned bone for all parts (Only if real skinned)
-        /// </summary>
-        [SerializeField] private Collider[] allSkinPartCols = new Collider[0];
-
-        private int[] tempFracVerOgMeshId = null; //only set during the mesh fracturing process
-        private List<int> tempPartOgMeshId = null; //only set during the mesh fracturing process
-        private OrginalObjData tempOgRealSkin = null; //only set during the mesh fracturing process
 
         private enum DestructionRepairSupport
         {
@@ -201,7 +164,7 @@ namespace Zombie1111_uDestruction
         }
 
         private enum OptPartPhysicsType
-        { 
+        {
             rigidbody_high,
             rigidbody_medium,
             particle_high,
@@ -217,6 +180,247 @@ namespace Zombie1111_uDestruction
             alwaysDynamic,
             alwaysKinematic
         }
+
+        #endregion EditorAndOptions
+
+
+
+
+
+
+        #region SaveLoadFractureSystem
+
+        [Space(50)]
+        [Header("Debug (Dont touch)")]
+        [SerializeField] private OrginalObjData ogData = null;
+        [SerializeField] private FractureSaveAsset saveAsset = null;
+        public Collider[] saved_allPartsCol = new Collider[0];
+        public int saved_fracId = -1;
+
+        [System.Serializable]
+        private class OrginalCompData
+        {
+            public Component comp;
+            public bool wasEnabled;
+        }
+
+        [System.Serializable]
+        private class OrginalObjData
+        {
+            public List<OrginalCompData> ogCompData = new();
+            public Material[] ogMats = new Material[0];
+            public Transform[] ogBones = new Transform[0];
+            public Transform ogRootBone = null;
+            public Mesh ogMesh = null;
+            public bool ogEnable = true;
+            public bool hadRend = false;
+            public bool rendWasSkinned = false;
+        }
+
+        private void SaveOrLoadAsset(bool doSave, bool removeAsset = false)
+        {
+            if (saveAsset == null) saveAsset = Resources.Load<FractureSaveAsset>("fractureSaveAsset");
+
+            if (removeAsset == true)
+            {
+                saveAsset.RemoveSavedData(this, saved_fracId);
+                return;
+            }
+
+            if (doSave == true) saved_fracId = saveAsset.Save(this, saved_fracId);
+            else saveAsset.Load(this, saved_fracId);
+        }
+
+        /// <summary>
+        /// Restores all components on the previous saved objToUse
+        /// </summary>
+        /// <param name="objToUse"></param>
+        /// <param name="doSave">If true, objToUse og data will be saved</param>
+        public void Gen_loadAndMaybeSaveOgData(bool doSave = false)
+        {
+            //load/restore og object
+            GameObject objToUse = gameObject;
+
+            if (ogData != null)
+            {
+                //load og components
+                foreach (OrginalCompData ogD in ogData.ogCompData)
+                {
+                    if (ogD.comp == null || ogD.comp.gameObject == null) continue;
+
+                    Type targetType = ogD.comp.GetType();
+                    if (IsValidType(targetType) == false) continue;
+
+                    var enabledProperty = targetType.GetProperty("enabled");
+
+                    if (enabledProperty == null || enabledProperty.PropertyType != typeof(bool)) continue;
+
+                    enabledProperty.SetValue(ogD.comp, ogD.wasEnabled, null);
+                }
+
+                //load og renderer
+                if (ogData.hadRend == true && fracRend != null)
+                {
+                    if (ogData.rendWasSkinned == false)
+                    {
+                        MeshRenderer mRend = transform.GetOrAddComponent<MeshRenderer>();
+                        CopyRendProperties(fracRend, mRend, ogData.ogMats, ogData.ogEnable);
+                        DestroyImmediate(fracRend);
+                    }
+                    else
+                    {
+                        SkinnedMeshRenderer sRend = transform.GetOrAddComponent<SkinnedMeshRenderer>();
+                        sRend.sharedMesh = ogData.ogMesh;
+                        sRend.bones = ogData.ogBones;
+                        sRend.rootBone = ogData.ogRootBone;
+                        CopyRendProperties(fracRend, sRend, ogData.ogMats, ogData.ogEnable);
+                        if (transform != fracRend.transform) DestroyImmediate(fracRend);
+                    }
+                }
+                else if (fracRend != null)
+                {
+                    DestroyImmediate(fracRend);
+                }
+
+                ogData = null;
+            }
+
+            //destroy all frac parents
+            for (int i = 0; i < allFracParents.Count; i += 1)
+            {
+                if (allFracParents[i].parentTrans == null) continue;
+                if (i == 0 && isRealSkinnedM == true)
+                {
+
+                    DestroyImmediate(allFracParents[i].parentRb);
+                    DestroyImmediate(allFracParents[i].fParent);
+
+                    for (int ii = 0; ii < allFracParents[i].partIndexes.Count; ii += 1)
+                    {
+                        if (saved_allPartsCol.Length <= 0)
+                        {
+                            Debug.LogError(transform.name + " parts list was for some weird reason cleared before parts was removed (You should delete them manually)");
+                            break;
+                        }
+
+                        if (saved_allPartsCol[allFracParents[i].partIndexes[ii]] != null) DestroyImmediate(saved_allPartsCol[allFracParents[i].partIndexes[ii]].gameObject);
+                    }
+
+                    continue;
+                }
+
+                DestroyImmediate(allFracParents[i].parentTrans.gameObject);
+            }
+
+            //remove real skin bone cols
+            for (int i = 0; i < allSkinPartCols.Length; i += 1)
+            {
+                DestroyImmediate(allSkinPartCols[i]);
+            }
+
+            allSkinPartCols = new Collider[0];
+            allFracParents.Clear();
+            verticsLinkedThreaded = new IntList[0];
+            allParts = new FracParts[0];
+            partsOgResistanceThreaded = new float[0];
+            boneWe_broken = new BoneWeight[0];
+
+            //clear save asset
+            SaveOrLoadAsset(false, true);
+
+            if (doSave == false) return;
+
+            //save og object
+            //save og renderer
+            ogData = new();
+
+            Renderer rend = transform.GetComponent<Renderer>();
+            if (rend != null)
+            {
+                ogData.hadRend = true;
+                ogData.ogEnable = rend.enabled;
+                ogData.ogMats = rend.sharedMaterials;
+
+                SkinnedMeshRenderer sRend = transform.GetComponent<SkinnedMeshRenderer>();
+                if (sRend != null)
+                {
+                    ogData.ogMesh = sRend.sharedMesh;
+                    ogData.ogBones = sRend.bones;
+                    ogData.ogRootBone = sRend.rootBone;
+                    ogData.rendWasSkinned = true;
+                }
+                else ogData.rendWasSkinned = false;
+            }
+            else ogData.hadRend = false;
+
+            fracRend = transform.GetOrAddComponent<SkinnedMeshRenderer>();
+            if (rend != null) CopyRendProperties(rend, fracRend, new Material[2] { matInside_defualt, matOutside_defualt }, true);
+
+            //save og components
+            bool newBoolValue;
+
+            foreach (Component comp in objToUse.GetComponentsInChildren<Component>())
+            {
+                OrginalCompData newOgD = new();
+                Type targetType = comp.GetType();
+                if (IsValidType(targetType) == false) continue;
+
+                newBoolValue = false;
+
+                var enabledProperty = targetType.GetProperty("enabled");
+
+                if (enabledProperty == null || enabledProperty.PropertyType != typeof(bool)) continue;
+
+                newOgD.wasEnabled = (bool)enabledProperty.GetValue(comp);
+                newOgD.comp = comp;
+                enabledProperty.SetValue(comp, newBoolValue, null);
+
+                ogData.ogCompData.Add(newOgD);
+            }
+
+            bool IsValidType(Type typeToCheck)
+            {
+                return typeof(Renderer).IsAssignableFrom(typeToCheck) == true || typeof(Collider).IsAssignableFrom(typeToCheck) == true;
+            }
+
+            void CopyRendProperties(Renderer source, Renderer target, Material[] targetMats, bool targetEnable)
+            {
+                target.enabled = targetEnable;
+                target.sharedMaterials = targetMats;
+                target.allowOcclusionWhenDynamic = source.allowOcclusionWhenDynamic;
+                target.shadowCastingMode = source.shadowCastingMode;
+                target.receiveShadows = source.receiveShadows;
+                target.lightProbeUsage = source.lightProbeUsage;
+                target.lightProbeProxyVolumeOverride = source.lightProbeProxyVolumeOverride;
+                target.motionVectorGenerationMode = source.motionVectorGenerationMode;
+                target.probeAnchor = source.probeAnchor;
+                target.realtimeLightmapIndex = source.realtimeLightmapIndex;
+                target.realtimeLightmapScaleOffset = source.realtimeLightmapScaleOffset;
+                //target.rayTracingMode = source.rayTracingMode;
+                target.staticShadowCaster = source.staticShadowCaster;
+                target.reflectionProbeUsage = source.reflectionProbeUsage;
+                target.sortingLayerID = source.sortingLayerID;
+                target.sortingLayerName = source.sortingLayerName;
+                target.sortingLayerID = source.sortingLayerID;
+                target.lightmapScaleOffset = source.lightmapScaleOffset;
+                target.lightmapIndex = source.lightmapIndex;
+                target.ResetBounds();
+                target.ResetLocalBounds();
+            }
+        }
+
+        #endregion SaveLoadFractureSystem
+
+
+
+
+
+
+        #region GenerateFractureSystem
+
+        private int[] tempFracVerOgMeshId = null; //only set during the mesh fracturing process
+        private List<int> tempPartOgMeshId = null; //only set during the mesh fracturing process
+        private OrginalObjData tempOgRealSkin = null; //only set during the mesh fracturing process
 
         [System.Serializable]
         private class FracParents
@@ -254,26 +458,6 @@ namespace Zombie1111_uDestruction
             /// The part trans
             /// </summary>
             public Transform trans;
-        }
-
-        [System.Serializable]
-        private class OrginalCompData
-        {
-            public Component comp;
-            public bool wasEnabled;
-        }
-
-        [System.Serializable]
-        private class OrginalObjData
-        {
-            public List<OrginalCompData> ogCompData = new();
-            public Material[] ogMats = new Material[0];
-            public Transform[] ogBones = new Transform[0];
-            public Transform ogRootBone = null;
-            public Mesh ogMesh = null;
-            public bool ogEnable = true;
-            public bool hadRend = false;
-            public bool rendWasSkinned = false;
         }
 
         /// <summary>
@@ -340,190 +524,10 @@ namespace Zombie1111_uDestruction
         public int triIndex = 0;
         public Transform debugTrans = null;
 
-       private void OnDrawGizmos()
-       {
-            SkinnedMeshRenderer sRend = fracRend;
-            if (sRend == null) sRend = transform.GetComponentInChildren<SkinnedMeshRenderer>();
-
-           if (debugTrans == null || sRend == null) return;
-       
-           Mesh bMesh = new();
-            sRend.BakeMesh(bMesh, true);
-           //Vector3[] vers = FractureHelperFunc.ConvertPositionsWithMatrix(bMesh.vertices, fracRend.transform.localToWorldMatrix);
-           Vector3[] vers = FractureHelperFunc.ConvertPositionsWithMatrix(bMesh.vertices, sRend.transform.localToWorldMatrix);
-           BoneWeight[] wes = sRend.sharedMesh.boneWeights;
-
-            int bestI = 0;
-            float bestD = float.MaxValue;
-            float cD;
-
-            for (int i = 0; i < vers.Length; i += 1)
-            {
-                cD = (debugTrans.transform.position - vers[i]).sqrMagnitude;
-                if (cD < bestD)
-                {
-                    bestI = i;
-                    bestD = cD;
-                }
-
-               //if (wes[i].weight0 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex0].position, Color.blue, 0.1f);
-               //if (wes[i].weight1 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex1].position, Color.blue, 0.1f);
-               //if (wes[i].weight2 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex2].position, Color.blue, 0.1f);
-               //if (wes[i].weight3 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex3].position, Color.blue, 0.1f);
-            }
-
-            Debug.DrawLine(debugTrans.transform.position, vers[bestI], Color.magenta, 0.1f);
-            //print(wes[bestI].boneIndex0 + "  " + sRend.bones[wes[bestI].boneIndex0].name + " " + wes[bestI].weight0 + " " + wes[bestI].weight1 + " " + wes[bestI].weight2 + " " + wes[bestI].weight3);
-
-           //int[] tris = bMesh.triangles;
-           //Vector3 point = FractureHelperFunc.ClosestPointOnTriangle(vers[tris[triIndex]], vers[tris[triIndex + 1]], vers[tris[triIndex + 2]], debugTrans.position);
-           //Debug.DrawLine(point, debugTrans.position, Color.blue, 0.1f);
-       }
-
         private class boneWeData
         {
             public float weight = 0.0f;
             public int boneIndex = 0;
-        }
-
-        /// <summary>
-        /// Only called if real skinned mesh to copy its animated bones to fractured mesh
-        /// </summary>
-        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW, List<Mesh> partMeshesWorld)
-        {
-            float worldDis = worldScale * 0.0001f;
-
-            //add bind poses and bone transforms from real skinned rend
-            int boneIShift = fracRend.bones.Length;
-            List<Transform> newBones = fracRend.bones.ToList();
-            List<Matrix4x4> newMatrixs = fracRend.sharedMesh.bindposes.ToList();
-
-            //Assuming skinBones is a List<Transform> containing the new bones
-            for (int i = 0; i < skinBones.Length; i++)
-            {
-                // Add new bone and its bind pose matrix
-                newBones.Add(skinBones[i]);
-                newMatrixs.Add(skinMesh.bindposes[i]);
-            }
-
-            //set boneWeights
-            skinMesh = FractureHelperFunc.ConvertMeshWithMatrix(skinMesh, skinLtW);
-            BoneWeight[] skinBoneWe = skinMesh.boneWeights.ToArray();
-            Vector3[] skinWVer = skinMesh.vertices;
-            int[] skinTris = skinMesh.triangles;
-            int[] fracTris = fracRend.sharedMesh.triangles;
-            BoneWeight[] fracBoneWe = fracRend.sharedMesh.boneWeights.ToArray();
-            BoneWeight[] newBoneWe = new BoneWeight[fracBoneWe.Length];
-            Vector3[] fracWVer = FractureHelperFunc.ConvertPositionsWithMatrix(fracRend.sharedMesh.vertices, fracRend.transform.localToWorldMatrix);
-            List<int> unusedVers = Enumerable.Range(0, fracWVer.Length).ToList();
-
-            //link vertics bone weights with best weight on skinned mesh
-            int verI;
-
-            while (unusedVers.Count > 0)
-            {
-                verI = unusedVers[0];
-                unusedVers.RemoveAt(0);
-
-                BoneWeight newWe = GetBestWeightForVertex(verI);
-                newBoneWe[verI] = newWe;
-
-                foreach (int vIi in verticsLinkedThreaded[verI].intList)
-                {
-                    unusedVers.Remove(vIi);
-                    newBoneWe[vIi] = newWe;
-                }
-            }
-
-            //assign updated data to mesh and renderer
-            fracRend.bones = newBones.ToArray();
-            fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
-            fracRend.sharedMesh.boneWeights = newBoneWe;
-
-            //add colliders to real skinned bones
-            List<boneWeData> colBoneWe = new();
-            float weight = 0.0f;
-            int boneIndex = 0;
-            int weListI;
-            
-            allSkinPartCols = new Collider[allParts.Length];
-            
-            for (int i = 0; i < allParts.Length; i += 1)
-            {
-                foreach (int vI in allParts[i].rendVertexIndexes)
-                {
-                    for (int ii = 0; ii < 4; ii++)
-                    {
-                        switch (ii)
-                        {
-                            case 0:
-                                weight = newBoneWe[vI].weight0;
-                                boneIndex = newBoneWe[vI].boneIndex0;
-                                break;
-            
-                            case 1:
-                                weight = newBoneWe[vI].weight1;
-                                boneIndex = newBoneWe[vI].boneIndex1;
-                                break;
-            
-                            case 2:
-                                weight = newBoneWe[vI].weight2;
-                                boneIndex = newBoneWe[vI].boneIndex2;
-                                break;
-            
-                            case 3:
-                                weight = newBoneWe[vI].weight3;
-                                boneIndex = newBoneWe[vI].boneIndex3;
-                                break;
-                        }
-            
-                        if (weight <= 0.01f) continue;
-            
-                        weListI = colBoneWe.FindIndex(we => we.boneIndex == boneIndex);
-                        if (weListI < 0)
-                        {
-                            colBoneWe.Add(new() { boneIndex = boneIndex, weight = weight });
-                            continue;
-                        }
-            
-                        colBoneWe[weListI].weight += weight;
-                    }
-                }
-                 
-                colBoneWe = colBoneWe.OrderByDescending(item => item.weight).ToList();
-                allSkinPartCols[i] = FractureHelperFunc.CopyColliderToTransform(allParts[i].col, newBones[colBoneWe[0].boneIndex]);
-                allParts[i].col.enabled = false;
-                
-                colBoneWe.Clear();
-            }
-
-            //combine all real colliders that uses the same bone
-            List<Collider> thisBoneCols;
-            for (int i = 0; i < newBones.Count; i += 1)
-            {
-                thisBoneCols = allSkinPartCols.Where(col => col.transform == newBones[i]).ToList();
-                
-            }
-
-            BoneWeight GetBestWeightForVertex(int fracVi)
-            {
-                //get the closest skinned triangel and its total bones and their total weight
-                BoneWeight newWe;
-
-                int fracTriTemp = FractureHelperFunc.FindTriangleIndexWithVertex(fracTris, fracVi);
-                int closeSkinTriI = FractureHelperFunc.GetClosestTriOnMesh(skinWVer, skinTris,
-                    new Vector3[3] { fracWVer[fracTris[fracTriTemp]], fracWVer[fracTris[fracTriTemp + 1]],
-                        fracWVer[fracTris[fracTriTemp + 2]] }, worldDis);
-
-                int closeSkinTriAdd = FractureHelperFunc.GetClosestPointInArray(new Vector3[3] { skinWVer[skinTris[closeSkinTriI]], skinWVer[skinTris[closeSkinTriI + 1]], skinWVer[skinTris[closeSkinTriI + 2]] }, fracWVer[fracVi], worldDis);
-                newWe = skinBoneWe[skinTris[closeSkinTriI + closeSkinTriAdd]];
-                newWe.boneIndex0 += boneIShift;
-                newWe.boneIndex1 += boneIShift;
-                newWe.boneIndex2 += boneIShift;
-                newWe.boneIndex3 += boneIShift;
-
-                return newWe;
-            }
         }
 
         /// <summary>
@@ -544,7 +548,7 @@ namespace Zombie1111_uDestruction
             float worldDis = worldScale * 0.01f;//0.01??
 
             //get all vertics ogMesh id
-            tempFracVerOgMeshId = new int[vertics.Length]; 
+            tempFracVerOgMeshId = new int[vertics.Length];
             for (int i = 0; i < fParts.Length; i += 1)
             {
                 foreach (int vI in fParts[i].rendVertexIndexes)
@@ -701,48 +705,53 @@ namespace Zombie1111_uDestruction
                 partMesh.uv = new Vector2[0];
                 partMesh.normals = new Vector3[0];
                 partMesh.triangles = new int[0];
+                Collider newCol;
 
                 if (colliderType == ColliderType.mesh)
                 {
                     //mesh
-                    MeshCollider newCol = partTrans.GetOrAddComponent<MeshCollider>();
-                    newCol.convex = true;
-                    newCol.sharedMesh = partMesh;
-                    newCol.sharedMaterial = phyMat;
-                    return newCol;
+                    newCol = partTrans.GetOrAddComponent<MeshCollider>();
+                    //newCol.convex = true;
+                    //newCol.sharedMesh = partMesh;
+                    //newCol.sharedMaterial = phyMat;
+                    //return newCol;
                 }
                 else if (colliderType == ColliderType.boxLarge)
                 {
                     //box large
-                    BoxCollider newCol = partTrans.GetOrAddComponent<BoxCollider>();
-                    newCol.size = partMesh.bounds.size;
-                    newCol.sharedMaterial = phyMat;
-                    return newCol;
+                    newCol = partTrans.GetOrAddComponent<BoxCollider>();
+                    //newCol.size = partMesh.bounds.size;
+                    //newCol.sharedMaterial = phyMat;
+                    //return newCol;
                 }
                 else if (colliderType == ColliderType.boxSmall)
                 {
                     //box small
-                    BoxCollider newCol = partTrans.GetOrAddComponent<BoxCollider>();
-                    newCol.size = Vector3.one * ((Mathf.Abs(partMesh.bounds.extents.x) + Mathf.Abs(partMesh.bounds.extents.y) + Mathf.Abs(partMesh.bounds.extents.z)) / 3.0f);
-                    newCol.sharedMaterial = phyMat;
-                    return newCol;
+                    newCol = partTrans.GetOrAddComponent<BoxCollider>();
+                    //newCol.size = Vector3.one * ((Mathf.Abs(partMesh.bounds.extents.x) + Mathf.Abs(partMesh.bounds.extents.y) + Mathf.Abs(partMesh.bounds.extents.z)) / 3.0f);
+                    //newCol.sharedMaterial = phyMat;
+                    //return newCol;
                 }
                 else if (colliderType == ColliderType.sphereLarge)
                 {
                     //sphere large
-                    SphereCollider newCol = partTrans.GetOrAddComponent<SphereCollider>();
-                    newCol.radius = (Mathf.Abs(partMesh.bounds.extents.x) + Mathf.Abs(partMesh.bounds.extents.y) + Mathf.Abs(partMesh.bounds.extents.z)) / 3.0f;
-                    newCol.sharedMaterial = phyMat;
-                    return newCol;
+                    newCol = partTrans.GetOrAddComponent<SphereCollider>();
+                    //newCol.radius = (Mathf.Abs(partMesh.bounds.extents.x) + Mathf.Abs(partMesh.bounds.extents.y) + Mathf.Abs(partMesh.bounds.extents.z)) / 3.0f;
+                    //newCol.sharedMaterial = phyMat;
+                    //return newCol;
                 }
                 else
                 {
                     //sphere small
-                    SphereCollider newCol = partTrans.GetOrAddComponent<SphereCollider>();
-                    newCol.radius = partMesh.bounds.extents.magnitude / 3.0f;
-                    newCol.sharedMaterial = phyMat;
-                    return newCol;
+                    newCol = partTrans.GetOrAddComponent<SphereCollider>();
+                    //newCol.radius = partMesh.bounds.extents.magnitude / 3.0f;
+                    //newCol.sharedMaterial = phyMat;
+                    //return newCol;
                 }
+
+                FractureHelperFunc.SetColliderFromFromPoints(newCol, partTrans, FractureHelperFunc.ConvertPositionsWithMatrix(partMesh.vertices, partTrans.localToWorldMatrix), true, false);
+                newCol.sharedMaterial = phyMat;
+                return newCol;
             }
         }
 
@@ -765,183 +774,6 @@ namespace Zombie1111_uDestruction
             /// The mesh localToWorld matrix
             /// </summary>
             public Matrix4x4 lTwMatrix;
-        }
-
-        /// <summary>
-        /// Restores all components on the previous saved objToUse
-        /// </summary>
-        /// <param name="objToUse"></param>
-        /// <param name="doSave">If true, objToUse og data will be saved</param>
-        public void Gen_loadAndMaybeSaveOgData(bool doSave = false)
-        {
-            //load/restore og object
-            GameObject objToUse = gameObject;
-
-            if (ogData != null)
-            {
-                //load og components
-                foreach (OrginalCompData ogD in ogData.ogCompData)
-                {
-                    if (ogD.comp == null || ogD.comp.gameObject == null) continue;
-
-                    Type targetType = ogD.comp.GetType();
-                    if (IsValidType(targetType) == false) continue;
-
-                    var enabledProperty = targetType.GetProperty("enabled");
-
-                    if (enabledProperty == null || enabledProperty.PropertyType != typeof(bool)) continue;
-
-                    enabledProperty.SetValue(ogD.comp, ogD.wasEnabled, null);
-                }
-
-                //load og renderer
-                if (ogData.hadRend == true && fracRend != null)
-                {
-                    if (ogData.rendWasSkinned == false)
-                    {
-                        MeshRenderer mRend = transform.GetOrAddComponent<MeshRenderer>();
-                        CopyRendProperties(fracRend, mRend, ogData.ogMats, ogData.ogEnable);
-                        DestroyImmediate(fracRend);
-                    }
-                    else
-                    {
-                        SkinnedMeshRenderer sRend = transform.GetOrAddComponent<SkinnedMeshRenderer>();
-                        sRend.sharedMesh = ogData.ogMesh;
-                        sRend.bones = ogData.ogBones;
-                        sRend.rootBone = ogData.ogRootBone;
-                        CopyRendProperties(fracRend, sRend, ogData.ogMats, ogData.ogEnable);
-                        if (transform != fracRend.transform) DestroyImmediate(fracRend);
-                    }
-                }
-                else if (fracRend != null)
-                {
-                    DestroyImmediate(fracRend);
-                }
-
-                ogData = null;
-            }
-
-            //destroy all frac parents
-            for (int i = 0; i < allFracParents.Count; i += 1)
-            {
-                if (allFracParents[i].parentTrans == null) continue;
-                if (i == 0 && isRealSkinnedM == true)
-                {
-
-                    DestroyImmediate(allFracParents[i].parentRb);
-                    DestroyImmediate(allFracParents[i].fParent);
-
-                    for (int ii = 0; ii < allFracParents[i].partIndexes.Count; ii += 1)
-                    {
-                        if (saved_allPartsCol.Length <= 0)
-                        {
-                            Debug.LogError(transform.name + " parts list was for some weird reason cleared before parts was removed (You should delete them manually)");
-                            break;
-                        }
-
-                        if (saved_allPartsCol[allFracParents[i].partIndexes[ii]] != null) DestroyImmediate(saved_allPartsCol[allFracParents[i].partIndexes[ii]].gameObject);
-                    }
-
-                    continue;
-                }
-
-                DestroyImmediate(allFracParents[i].parentTrans.gameObject);
-            }
-
-            //remove real skin bone cols
-            for (int i = 0; i < allSkinPartCols.Length; i += 1)
-            {
-                DestroyImmediate(allSkinPartCols[i]);
-            }
-
-            allSkinPartCols = new Collider[0];
-            allFracParents.Clear();
-            verticsLinkedThreaded = new IntList[0];
-            allParts = new FracParts[0];
-            partsOgResistanceThreaded = new float[0];
-
-            //clear save asset
-            SaveOrLoadAsset(false, true);
-
-            if (doSave == false) return;
-
-            //save og object
-            //save og renderer
-            ogData = new();
-
-            Renderer rend = transform.GetComponent<Renderer>();
-            if (rend != null)
-            {
-                ogData.hadRend = true;
-                ogData.ogEnable = rend.enabled;
-                ogData.ogMats = rend.sharedMaterials;
-
-                SkinnedMeshRenderer sRend = transform.GetComponent<SkinnedMeshRenderer>();
-                if (sRend != null)
-                {
-                    ogData.ogMesh = sRend.sharedMesh;
-                    ogData.ogBones = sRend.bones;
-                    ogData.ogRootBone = sRend.rootBone;
-                    ogData.rendWasSkinned = true;
-                }
-                else ogData.rendWasSkinned = false;
-            }
-            else ogData.hadRend = false;
-
-            fracRend = transform.GetOrAddComponent<SkinnedMeshRenderer>();
-            if (rend != null) CopyRendProperties(rend, fracRend, new Material[2] { matInside_defualt, matOutside_defualt }, true);
-
-            //save og components
-            bool newBoolValue;
-
-            foreach (Component comp in objToUse.GetComponentsInChildren<Component>())
-            {
-                OrginalCompData newOgD = new();
-                Type targetType = comp.GetType();
-                if (IsValidType(targetType) == false) continue;
-
-                newBoolValue = false;
-
-                var enabledProperty = targetType.GetProperty("enabled");
-
-                if (enabledProperty == null || enabledProperty.PropertyType != typeof(bool)) continue;
-
-                newOgD.wasEnabled = (bool)enabledProperty.GetValue(comp);
-                newOgD.comp = comp;
-                enabledProperty.SetValue(comp, newBoolValue, null);
-
-                ogData.ogCompData.Add(newOgD);
-            }
-
-            bool IsValidType(Type typeToCheck)
-            {
-                return typeof(Renderer).IsAssignableFrom(typeToCheck) == true || typeof(Collider).IsAssignableFrom(typeToCheck) == true;
-            }
-
-            void CopyRendProperties(Renderer source, Renderer target, Material[] targetMats, bool targetEnable)
-            {
-                target.enabled = targetEnable;
-                target.sharedMaterials = targetMats;
-                target.allowOcclusionWhenDynamic = source.allowOcclusionWhenDynamic;
-                target.shadowCastingMode = source.shadowCastingMode;
-                target.receiveShadows = source.receiveShadows;
-                target.lightProbeUsage = source.lightProbeUsage;
-                target.lightProbeProxyVolumeOverride = source.lightProbeProxyVolumeOverride;
-                target.motionVectorGenerationMode = source.motionVectorGenerationMode;
-                target.probeAnchor = source.probeAnchor;
-                target.realtimeLightmapIndex = source.realtimeLightmapIndex;
-                target.realtimeLightmapScaleOffset = source.realtimeLightmapScaleOffset;
-                //target.rayTracingMode = source.rayTracingMode;
-                target.staticShadowCaster = source.staticShadowCaster;
-                target.reflectionProbeUsage = source.reflectionProbeUsage;
-                target.sortingLayerID = source.sortingLayerID;
-                target.sortingLayerName = source.sortingLayerName;
-                target.sortingLayerID = source.sortingLayerID;
-                target.lightmapScaleOffset = source.lightmapScaleOffset;
-                target.lightmapIndex = source.lightmapIndex;
-                target.ResetBounds();
-                target.ResetLocalBounds();
-            }
         }
 
         /// <summary>
@@ -1175,20 +1007,396 @@ namespace Zombie1111_uDestruction
             return splittedMeshes;
         }
 
+        #endregion GenerateFractureSystem
+
+
+
+
+
         //##############################RUNTIME########################################
+
+        #region RealSkinnedMeshes
+
         /// <summary>
-        /// Returns true if the given collider count as a self collider (Depends on selfCollisionCanDamage)
+        /// Contains the collider on the skinned bone for all parts (Only if real skinned)
         /// </summary>
-        /// <returns></returns>
-        public bool Run_isTransSelfTransform(Transform trans)
+        [SerializeField] private Collider[] allSkinPartCols = new Collider[0];
+
+        private BoneWeight[] boneWe_defualt;
+        [System.NonSerialized] public BoneWeight[] boneWe_broken = new BoneWeight[0];
+        private BoneWeight[] boneWe_current;
+        private bool boneWeightNeedUpdate = false;
+        [SerializeField] private bool isRealSkinnedM = false;
+
+        /// <summary>
+        /// Only called if real skinned mesh to copy its animated bones to fractured mesh
+        /// </summary>
+        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW, List<Mesh> partMeshesWorld)
         {
-            if (selfCollisionCanDamage == SelfCollisionMode.always) return false;
+            float worldDis = worldScale * 0.0001f;
 
-            if (trans.parent == transform) return true;
-            if (selfCollisionCanDamage == SelfCollisionMode.never && trans.parent != null && trans.parent.parent == transform) return true;
+            //add bind poses and bone transforms from real skinned rend
+            int boneIShift = fracRend.bones.Length;
+            List<Transform> newBones = fracRend.bones.ToList();
+            List<Matrix4x4> newMatrixs = fracRend.sharedMesh.bindposes.ToList();
 
-            return false;
+            //Assuming skinBones is a List<Transform> containing the new bones
+            for (int i = 0; i < skinBones.Length; i++)
+            {
+                // Add new bone and its bind pose matrix
+                newBones.Add(skinBones[i]);
+                newMatrixs.Add(skinMesh.bindposes[i]);
+            }
+
+            //set boneWeights
+            skinMesh = FractureHelperFunc.ConvertMeshWithMatrix(skinMesh, skinLtW);
+            BoneWeight[] skinBoneWe = skinMesh.boneWeights.ToArray();
+            Vector3[] skinWVer = skinMesh.vertices;
+            int[] skinTris = skinMesh.triangles;
+            int[] fracTris = fracRend.sharedMesh.triangles;
+            boneWe_broken = fracRend.sharedMesh.boneWeights.ToArray();
+            BoneWeight[] newBoneWe = new BoneWeight[boneWe_broken.Length];
+            Vector3[] fracWVer = FractureHelperFunc.ConvertPositionsWithMatrix(fracRend.sharedMesh.vertices, fracRend.localToWorldMatrix);
+            List<int> unusedVers = Enumerable.Range(0, fracWVer.Length).ToList();
+
+            //link vertics bone weights with best weight on skinned mesh
+            int verI;
+
+            while (unusedVers.Count > 0)
+            {
+                verI = unusedVers[0];
+                unusedVers.RemoveAt(0);
+
+                BoneWeight newWe = GetBestWeightForVertex(verI);
+                newBoneWe[verI] = newWe;
+
+                foreach (int vIi in verticsLinkedThreaded[verI].intList)
+                {
+                    unusedVers.Remove(vIi);
+                    newBoneWe[vIi] = newWe;
+                }
+            }
+
+            //assign updated data to mesh and renderer
+            fracRend.bones = newBones.ToArray();
+            fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
+            fracRend.sharedMesh.boneWeights = newBoneWe;
+
+            //add colliders to real skinned bones
+            List<boneWeData> colBoneWe = new();
+            float weight = 0.0f;
+            int boneIndex = 0;
+            int weListI;
+
+            allSkinPartCols = new Collider[allParts.Length];
+
+            for (int i = 0; i < allParts.Length; i += 1)
+            {
+                foreach (int vI in allParts[i].rendVertexIndexes)
+                {
+                    for (int ii = 0; ii < 4; ii++)
+                    {
+                        switch (ii)
+                        {
+                            case 0:
+                                weight = newBoneWe[vI].weight0;
+                                boneIndex = newBoneWe[vI].boneIndex0;
+                                break;
+
+                            case 1:
+                                weight = newBoneWe[vI].weight1;
+                                boneIndex = newBoneWe[vI].boneIndex1;
+                                break;
+
+                            case 2:
+                                weight = newBoneWe[vI].weight2;
+                                boneIndex = newBoneWe[vI].boneIndex2;
+                                break;
+
+                            case 3:
+                                weight = newBoneWe[vI].weight3;
+                                boneIndex = newBoneWe[vI].boneIndex3;
+                                break;
+                        }
+
+                        if (weight <= 0.01f) continue;
+
+                        weListI = colBoneWe.FindIndex(we => we.boneIndex == boneIndex);
+                        if (weListI < 0)
+                        {
+                            colBoneWe.Add(new() { boneIndex = boneIndex, weight = weight });
+                            continue;
+                        }
+
+                        colBoneWe[weListI].weight += weight;
+                    }
+                }
+
+                colBoneWe = colBoneWe.OrderByDescending(item => item.weight).ToList();
+                allSkinPartCols[i] = FractureHelperFunc.CopyColliderToTransform(allParts[i].col, newBones[colBoneWe[0].boneIndex]);
+                allParts[i].col.enabled = false;
+
+                colBoneWe.Clear();
+            }
+
+            //modify colliders to match defualt skinned pose
+            Mesh sMesh = new();
+            fracRend.BakeMesh(sMesh, true);
+            //fracWVer = FractureHelperFunc.ConvertPositionsWithMatrix(sMesh.vertices, fracRend.localToWorldMatrix);
+            sMesh = FractureHelperFunc.ConvertMeshWithMatrix(sMesh, fracRend.localToWorldMatrix);
+            Vector3[] fracWVerOg = fracWVer.ToArray();
+            fracWVer = sMesh.vertices;
+            List<Vector3> partWver = new();
+
+            for (int i = 0; i < allParts.Length; i += 1)
+            {
+                partWver.Clear();
+
+                foreach (int vI in allParts[i].rendVertexIndexes)
+                {
+                    partWver.Add(fracWVer[vI]);
+                }
+
+                //FractureHelperFunc.MergeSimilarVectors(ref partWver, worldDis);
+                FractureHelperFunc.SetColliderFromFromPoints(allSkinPartCols[i], allSkinPartCols[i].transform, partWver.ToArray(), false, false);
+                allParts[i].trans.SetPositionAndRotation(allSkinPartCols[i].transform.position, allSkinPartCols[i].transform.rotation);
+                newMatrixs[i] = allParts[i].trans.worldToLocalMatrix * fracRend.localToWorldMatrix;
+
+                FractureHelperFunc.SetColliderFromFromPoints(allParts[i].col, allParts[i].trans, partWver.ToArray(), false, false);
+            }
+
+            fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
+            fracRend.sharedMesh.boneWeights = boneWe_broken; //debug, this should be removed later
+
+            BoneWeight GetBestWeightForVertex(int fracVi)
+            {
+                //get the closest skinned triangel and its total bones and their total weight
+                BoneWeight newWe;
+
+                int fracTriTemp = FractureHelperFunc.FindTriangleIndexWithVertex(fracTris, fracVi);
+                int closeSkinTriI = FractureHelperFunc.GetClosestTriOnMesh(skinWVer, skinTris,
+                    new Vector3[3] { fracWVer[fracTris[fracTriTemp]], fracWVer[fracTris[fracTriTemp + 1]],
+                        fracWVer[fracTris[fracTriTemp + 2]] }, worldDis);
+
+                int closeSkinTriAdd = FractureHelperFunc.GetClosestPointInArray(new Vector3[3] { skinWVer[skinTris[closeSkinTriI]], skinWVer[skinTris[closeSkinTriI + 1]], skinWVer[skinTris[closeSkinTriI + 2]] }, fracWVer[fracVi], worldDis);
+                newWe = skinBoneWe[skinTris[closeSkinTriI + closeSkinTriAdd]];
+                newWe.boneIndex0 += boneIShift;
+                newWe.boneIndex1 += boneIShift;
+                newWe.boneIndex2 += boneIShift;
+                newWe.boneIndex3 += boneIShift;
+
+                return newWe;
+            }
         }
+
+        #endregion RealSkinnedMeshes
+
+
+
+
+
+
+
+        #region MainUpdateFunctions
+
+        float currentDelayTime = 0.0f;
+        private bool updateThisFrame = false;
+
+        private void Awake()
+        {
+            //load from save aset
+            SaveOrLoadAsset(false);
+
+            if (fracRend == null) return;
+
+            //assign variabels for mesh deformation+colors
+            if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
+            {
+                bakedMesh = new();
+                verticsOrginalThreaded = new();
+                verticsCurrentThreaded = new();
+                fracRend.sharedMesh.GetVertices(verticsOrginalThreaded);
+                verticsForceThreaded = new float[verticsOrginalThreaded.Count];
+                verticsBonesThreaded = fracRend.sharedMesh.boneWeights.Select(bone => bone.boneIndex0).ToArray();
+                verticsUsedThreaded = new bool[verticsOrginalThreaded.Count];
+
+                //set vertex color
+                verticsColorThreaded = new();
+                fracRend.sharedMesh.GetColors(verticsColorThreaded);
+            }
+
+            //assign variabels for repair system
+            if (repairSupport != DestructionRepairSupport.dontSupportRepair)
+            {
+                rep_orginalLocalPartPoss = allParts.Select(part => part.trans.localPosition).ToArray();
+                if (repairSupport != DestructionRepairSupport.partsOnly) rep_verticsOrginal = verticsOrginalThreaded.ToArray();
+            }
+
+            //disable collision with neighbours
+            if (disableCollisionWithNeighbours == true)
+            {
+                for (int i = 0; i < allParts.Length; i += 1)
+                {
+                    foreach (int nI in allParts[i].neighbourParts)
+                    {
+                        Physics.IgnoreCollision(allParts[nI].col, allParts[i].col, true);
+                    }
+                }
+            }
+
+            //half update rate
+            if (halfUpdateRate == true) repairSpeed *= 2.0f;
+            updateThisFrame = saved_fracId % 2 == 0;
+            print(updateThisFrame);
+
+            //assign variabels for real skinned meshes
+            if (isRealSkinnedM == true)
+            {
+                boneWe_defualt = fracRend.sharedMesh.boneWeights;
+                boneWe_current = fracRend.sharedMesh.boneWeights;
+            }
+        }
+
+        private void Update()
+        {
+            if (allParts.Length == 0) return;
+
+            //calculate destruction
+            if (impact_data.Count > 0)
+            {
+                if (currentDelayTime >= minDelay && ThreadCalcDes == null)
+                {
+                    currentDelayTime = 0.0f;
+                    StartCoroutine(CalculateDestruction());
+                }
+
+                currentDelayTime += Time.deltaTime;
+            }
+
+            //half update rate
+            if (halfUpdateRate == true)
+            {
+                updateThisFrame = !updateThisFrame;
+                if (updateThisFrame == false) return;
+            }
+
+            //update bone weights
+            if (boneWeightNeedUpdate == true)
+            {
+                boneWeightNeedUpdate = false;
+                fracRend.sharedMesh.boneWeights = boneWe_current;
+            }
+
+            //update renderer bounds
+            //fracRend.bounds = FractureHelperFunc.ToBounds();
+            //allParts.Select(part => part.col.transform.position).ToArray();
+            var min = Vector3.one * float.MaxValue;
+            var max = Vector3.one * float.MinValue;
+            Vector3 tempPos;
+
+            for (int i = 0; i < allParts.Length; i += 1)
+            {
+                tempPos = allParts[i].trans.position;
+                min = Vector3.Min(min, tempPos);
+                max = Vector3.Max(max, tempPos);
+            }
+
+            fracRend.bounds = new Bounds((max - min) / 2 + min, max - min);
+
+            //do repair
+            if (rep_partsToRepair.Count > 0)
+            {
+                bool didFullRepairAny = false;
+
+                for (int i = rep_partsToRepair.Count - 1; i >= 0; i -= 1)
+                {
+                    if (Run_repairUpdate(rep_partsToRepair[i].partIndex, i) == true) didFullRepairAny = true;
+                }
+
+                if (repairSupport == DestructionRepairSupport.fullHigh || (didFullRepairAny == true && repairSupport == DestructionRepairSupport.fullLow))
+                {
+                    fracRend.sharedMesh.SetVertices(verticsOrginalThreaded);
+                    fracRend.sharedMesh.SetColors(verticsColorThreaded);
+
+                    if (recalculateOnDisplacement != NormalRecalcMode.none)
+                    {
+                        fracRend.sharedMesh.RecalculateNormals();
+                        if (recalculateOnDisplacement == NormalRecalcMode.normalsAndTagents) fracRend.sharedMesh.RecalculateTangents();
+                    }
+                }
+            }
+
+            //update parent info
+            if (parentIndexesToUpdate.Count > 0)
+            {
+                int parentToUpdate = parentIndexesToUpdate.FirstOrDefault();
+                if (parentToUpdate >= 0 && parentToUpdate < allFracParents.Count) Run_updateParentInfo(parentToUpdate);
+                parentIndexesToUpdate.Remove(parentToUpdate);
+            }
+
+            //debug keys
+            if (Input.GetKey(KeyCode.R)) Run_requestRepairPart(Run_tryGetFirstDamagedPart());
+        }
+
+        private void OnDrawGizmos()
+        {
+            SkinnedMeshRenderer sRend = fracRend;
+            if (sRend == null) sRend = transform.GetComponentInChildren<SkinnedMeshRenderer>();
+
+            if (debugTrans == null || sRend == null) return;
+
+            Mesh bMesh = new();
+            sRend.BakeMesh(bMesh, true);
+            //Vector3[] vers = FractureHelperFunc.ConvertPositionsWithMatrix(bMesh.vertices, fracRend.transform.localToWorldMatrix);
+            Vector3[] vers = FractureHelperFunc.ConvertPositionsWithMatrix(bMesh.vertices, sRend.transform.localToWorldMatrix);
+            BoneWeight[] wes = sRend.sharedMesh.boneWeights;
+
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float cD;
+
+            for (int i = 0; i < vers.Length; i += 1)
+            {
+                cD = (debugTrans.transform.position - vers[i]).sqrMagnitude;
+                if (cD < bestD)
+                {
+                    bestI = i;
+                    bestD = cD;
+                }
+
+                //if (wes[i].weight0 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex0].position, Color.blue, 0.1f);
+                //if (wes[i].weight1 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex1].position, Color.blue, 0.1f);
+                //if (wes[i].weight2 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex2].position, Color.blue, 0.1f);
+                //if (wes[i].weight3 > 0.01f) Debug.DrawLine(vers[i], sRend.bones[wes[i].boneIndex3].position, Color.blue, 0.1f);
+            }
+
+            Debug.DrawLine(debugTrans.transform.position, vers[bestI], Color.magenta, 0.1f);
+            //print(wes[bestI].boneIndex0 + "  " + sRend.bones[wes[bestI].boneIndex0].name + " " + wes[bestI].weight0 + " " + wes[bestI].weight1 + " " + wes[bestI].weight2 + " " + wes[bestI].weight3);
+
+            //int[] tris = bMesh.triangles;
+            //Vector3 point = FractureHelperFunc.ClosestPointOnTriangle(vers[tris[triIndex]], vers[tris[triIndex + 1]], vers[tris[triIndex + 2]], debugTrans.position);
+            //Debug.DrawLine(point, debugTrans.position, Color.blue, 0.1f);
+        }
+
+        #endregion MainUpdateFunctions
+
+
+
+
+
+
+
+        #region ParentSystem
+
+        /// <summary>
+        /// Add a parent index here to update the parents info within a few frames
+        /// </summary>
+        private HashSet<int> parentIndexesToUpdate = new();
+
+        /// <summary>
+        /// All fractured parts have one of these as its parent
+        /// </summary>
+        [SerializeField] private List<FracParents> allFracParents = new();
 
         private void Run_updateParentInfo(int parentIndex)
         {
@@ -1247,95 +1455,175 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns the given trans part index, -1 if not a part
+        /// Creates a empty frac parent object and returns its index
         /// </summary>
-        /// <param name="trans"></param>
-        /// <param name="verifyScript">If true, also checks if the fracture script exists in any parent</param>
         /// <returns></returns>
-        public int Run_tryGetPartIndexFromTrans(Transform trans, bool verifyScript = false)
+        private int Run_createNewParent()
         {
-            if (verifyScript == true)
+            //If empty parent exists, use it as new parent (excluding base parent)
+            for (int i = 1; i < allFracParents.Count; i += 1)
             {
-                //verify script
-                if (trans.GetComponentInParent<FractureThis>() != this) return -1;
+                parentIndexesToUpdate.Add(i);
+                if (allFracParents[i].partIndexes.Count <= 0) return i;
             }
 
-            //The part index is stored in the transform name
-            Match match = Regex.Match(trans.name, @"Part\((\d+)\)");
+            //create the parent transform
+            Transform pTrans;
 
-            if (match.Success == true && int.TryParse(match.Groups[1].Value, out int partId) == true) return partId;
+            if (allFracParents.Count == 0 && isRealSkinnedM == true)
+            {
+                pTrans = (Transform)tempOgRealSkin.ogCompData[0].comp;
+                //pTrans.name = "fracParent" + allFracParents.Count + "_" + transform.name;
+            }
+            else
+            {
+                pTrans = new GameObject("fracParent" + allFracParents.Count + "_" + transform.name).transform;
+                pTrans.SetParent(transform);
+                pTrans.SetPositionAndRotation(transform.position, transform.rotation);
+                pTrans.localScale = Vector3.one;
+            }
 
-            return -1;
+            int newParentIndex = allFracParents.Count;
+            allFracParents.Add(new() { parentTrans = pTrans, partIndexes = new() });
+
+            //add rigidbody to parent
+            allFracParents[newParentIndex].parentRb = pTrans.GetOrAddComponent<Rigidbody>();
+            allFracParents[newParentIndex].parentRb.collisionDetectionMode = phyMainOptions.collisionDetection;
+            allFracParents[newParentIndex].parentRb.interpolation = phyMainOptions.interpolate;
+            allFracParents[newParentIndex].parentRb.useGravity = phyMainOptions.useGravity;
+            allFracParents[newParentIndex].parentRb.drag = phyMainOptions.drag;
+            allFracParents[newParentIndex].parentRb.angularDrag = phyMainOptions.angularDrag;
+            allFracParents[newParentIndex].parentRb.constraints = phyMainOptions.constraints;
+
+            //add parent script to parent
+            allFracParents[newParentIndex].fParent = pTrans.GetOrAddComponent<FractureParent>();
+            allFracParents[newParentIndex].fParent.fractureDaddy = this;
+            allFracParents[newParentIndex].fParent.thisParentIndex = newParentIndex;
+
+            parentIndexesToUpdate.Add(newParentIndex);
+            return newParentIndex;
         }
 
-        float currentDelayTime = 0.0f;
-
-        private void Update()
+        /// <summary>
+        /// Sets partsToInclude parent to newParentIndex
+        /// </summary>
+        /// <param name="partsToInclude"></param>
+        /// <param name="newParentIndex">If < 0, a new parent will be created</param>
+        private void Run_setPartsParent(HashSet<int> partsToInclude, int newParentIndex = -1)
         {
-            if (allParts.Length == 0) return;
-
-            //update renderer bounds
-            //fracRend.bounds = FractureHelperFunc.ToBounds();
-            //allParts.Select(part => part.col.transform.position).ToArray();
-            var min = Vector3.one * float.MaxValue;
-            var max = Vector3.one * float.MinValue;
-            Vector3 tempPos;
-
-            for (int i = 0; i < allParts.Length; i += 1)
+            //create new parent if needed
+            if (newParentIndex < 0)
             {
-                tempPos = allParts[i].trans.position;
-                min = Vector3.Min(min, tempPos);
-                max = Vector3.Max(max, tempPos);
+                newParentIndex = Run_createNewParent();
             }
 
-            fracRend.bounds = new Bounds((max - min) / 2 + min, max - min);
-
-            //calculate destruction
-            if (impact_data.Count > 0)
+            //set the parts parent to the new parent
+            foreach (int partI in partsToInclude)
             {
-                if (currentDelayTime >= minDelay && ThreadCalcDes == null)
-                {
-                    currentDelayTime = 0.0f;
-                    StartCoroutine(CalculateDestruction());
-                }
+                Run_setPartParent(partI, newParentIndex);
+            }
+        }
 
-                currentDelayTime += Time.deltaTime;
+        /// <summary>
+        /// Sets the given part parent
+        /// </summary>
+        /// <param name="partIndex"></param>
+        /// <param name="parentIndex"></param>
+        private void Run_setPartParent(int partIndex, int parentIndex)
+        {
+            //if (parentIndex == allParts[partIndex].parentIndex || rep_partsToRepair.Contains(partIndex) == true)
+            if (parentIndex == allParts[partIndex].parentIndex || rep_partsToRepair.Any(part => part.partIndex == partIndex) == true)
+            {
+                if (allParts[partIndex].parentIndex >= 0 && allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].trans) Destroy(allParts[partIndex].col.attachedRigidbody);
+                return;
             }
 
-            //do repair
-            if (rep_partsToRepair.Count > 0)
+            //update previous parent
+            if (allParts[partIndex].parentIndex >= 0)
             {
-                bool didFullRepairAny = false;
-                
-                for (int i = rep_partsToRepair.Count - 1; i >= 0; i -= 1)
+                allFracParents[allParts[partIndex].parentIndex].partIndexes.Remove(partIndex);
+                parentIndexesToUpdate.Add(allParts[partIndex].parentIndex);
+            }
+
+            if (parentIndex < 0)
+            {
+                //remove parent
+                allParts[partIndex].trans.SetParent(transform, true);
+                allParts[partIndex].parentIndex = -1;
+
+                if (isRealSkinnedM == true)
                 {
-                    if (Run_repairUpdate(rep_partsToRepair[i].partIndex, i) == true) didFullRepairAny = true;
+                    SetRealSkinCol(false);
                 }
 
-                if (repairSupport == DestructionRepairSupport.fullHigh || (didFullRepairAny == true && repairSupport == DestructionRepairSupport.fullLow))
-                {
-                    fracRend.sharedMesh.SetVertices(verticsOrginalThreaded);
-                    fracRend.sharedMesh.SetColors(verticsColorThreaded);
+                return;
+            }
 
-                    if (recalculateOnDisplacement != NormalRecalcMode.none)
+            //set new parent
+            if (allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].trans) Destroy(allParts[partIndex].col.attachedRigidbody);
+
+            if (isRealSkinnedM == true)
+            {
+                SetRealSkinCol(parentIndex == 0);
+            }
+
+            allParts[partIndex].trans.SetParent(allFracParents[parentIndex].parentTrans, true);
+            allFracParents[parentIndex].partIndexes.Add(partIndex);
+            allParts[partIndex].parentIndex = parentIndex;
+            parentIndexesToUpdate.Add(allParts[partIndex].parentIndex);
+
+            void SetRealSkinCol(bool toDefualt)
+            {
+                if (toDefualt == true)
+                {
+                    allParts[partIndex].col.enabled = false;
+                    allSkinPartCols[partIndex].enabled = true;
+                    
+                    foreach (int vI in allParts[partIndex].rendVertexIndexes)
                     {
-                        fracRend.sharedMesh.RecalculateNormals();
-                        if (recalculateOnDisplacement == NormalRecalcMode.normalsAndTagents) fracRend.sharedMesh.RecalculateTangents();
+                        boneWe_current[vI] = boneWe_defualt[vI];
                     }
                 }
-            }
+                else
+                {
+                    allParts[partIndex].trans.SetPositionAndRotation(allSkinPartCols[partIndex].transform.position, allSkinPartCols[partIndex].transform.rotation);
+                    allParts[partIndex].col.enabled = true;
+                    allSkinPartCols[partIndex].enabled = false;
 
-            //update parent info
-            if (parentIndexesToUpdate.Count > 0)
-            {
-                int parentToUpdate = parentIndexesToUpdate.FirstOrDefault();
-                if (parentToUpdate >= 0 && parentToUpdate < allFracParents.Count) Run_updateParentInfo(parentToUpdate);
-                parentIndexesToUpdate.Remove(parentToUpdate);
-            }
+                    foreach (int vI in allParts[partIndex].rendVertexIndexes)
+                    {
+                        boneWe_current[vI] = boneWe_broken[vI];
+                    }
+                }
 
-            //debug keys
-            if (Input.GetKey(KeyCode.R)) Run_requestRepairPart(Run_tryGetFirstDamagedPart());
+                boneWeightNeedUpdate = true;
+            }
         }
+
+        #endregion ParentSystem
+
+
+
+
+
+
+
+        #region DestructionSystem
+
+        /// <summary>
+        /// All the fractured parts.
+        /// </summary>
+        [System.NonSerialized] public FracParts[] allParts = new FracParts[0];
+
+        /// <summary>
+        /// If MainPhysicsType == overlappingIsKinematic, bool for all parts that is true if the part was is inside a non fractured mesh when generated
+        /// </summary>
+        [System.NonSerialized] public bool[] kinematicPartStatus = new bool[0];
+
+        /// <summary>
+        /// The renderer used to render the fractured mesh (always skinned)
+        /// </summary>
+        [SerializeField] private SkinnedMeshRenderer fracRend = null;
 
         public class ImpactData
         {
@@ -1376,49 +1664,6 @@ namespace Zombie1111_uDestruction
             impact_data[i].totalForce += impForce;
             if (impact_data[i].forceDir == Vector3.zero) impact_data[i].forceDir = impDirection;
             else impact_data[i].forceDir = Vector3.Lerp(impact_data[i].forceDir, impDirection, impForce / impact_data[i].totalForce).normalized;
-        }
-
-        private void Awake()
-        {
-            //load from save aset
-            SaveOrLoadAsset(false);
-
-            if (fracRend == null) return;
-
-            //assign variabels for mesh deformation+colors
-            if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
-            {
-                bakedMesh = new();
-                verticsOrginalThreaded = new();
-                verticsCurrentThreaded = new();
-                fracRend.sharedMesh.GetVertices(verticsOrginalThreaded);
-                verticsForceThreaded = new float[verticsOrginalThreaded.Count];
-                verticsBonesThreaded = fracRend.sharedMesh.boneWeights.Select(bone => bone.boneIndex0).ToArray();
-                verticsUsedThreaded = new bool[verticsOrginalThreaded.Count];
-
-                //set vertex color
-                verticsColorThreaded = new();
-                fracRend.sharedMesh.GetColors(verticsColorThreaded);
-            }
-
-            //assign variabels for repair system
-            if (repairSupport != DestructionRepairSupport.dontSupportRepair)
-            {
-                rep_orginalLocalPartPoss = allParts.Select(part => part.trans.localPosition).ToArray();
-                if (repairSupport != DestructionRepairSupport.partsOnly) rep_verticsOrginal = verticsOrginalThreaded.ToArray();
-            }
-
-            //disable collision with neighbours
-            if (disableCollisionWithNeighbours == true)
-            {
-                for (int i = 0; i < allParts.Length; i += 1)
-                {
-                    foreach (int nI in allParts[i].neighbourParts)
-                    {
-                        Physics.IgnoreCollision(allParts[nI].col, allParts[i].col, true);
-                    }
-                }
-            }
         }
 
         private Mesh bakedMesh;
@@ -1526,113 +1771,6 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Creates a empty frac parent object and returns its index
-        /// </summary>
-        /// <returns></returns>
-        private int Run_createNewParent()
-        {
-            //If empty parent exists, use it as new parent (excluding base parent)
-            for (int i = 1; i < allFracParents.Count; i += 1)
-            {
-                parentIndexesToUpdate.Add(i);
-                if (allFracParents[i].partIndexes.Count <= 0) return i;
-            }
-
-            //create the parent transform
-            Transform pTrans;
-
-            if (allFracParents.Count == 0 && isRealSkinnedM == true)
-            {
-                pTrans = (Transform)tempOgRealSkin.ogCompData[0].comp;
-                //pTrans.name = "fracParent" + allFracParents.Count + "_" + transform.name;
-            }
-            else
-            {
-                pTrans = new GameObject("fracParent" + allFracParents.Count + "_" + transform.name).transform;
-                pTrans.SetParent(transform);
-                pTrans.SetPositionAndRotation(transform.position, transform.rotation);
-                pTrans.localScale = Vector3.one;
-            }
-
-            int newParentIndex = allFracParents.Count;
-            allFracParents.Add( new() { parentTrans = pTrans, partIndexes = new() } );
-
-            //add rigidbody to parent
-            allFracParents[newParentIndex].parentRb = pTrans.GetOrAddComponent<Rigidbody>();
-            allFracParents[newParentIndex].parentRb.collisionDetectionMode = phyMainOptions.collisionDetection;
-            allFracParents[newParentIndex].parentRb.interpolation = phyMainOptions.interpolate;
-            allFracParents[newParentIndex].parentRb.useGravity = phyMainOptions.useGravity;
-            allFracParents[newParentIndex].parentRb.drag = phyMainOptions.drag;
-            allFracParents[newParentIndex].parentRb.angularDrag = phyMainOptions.angularDrag;
-            allFracParents[newParentIndex].parentRb.constraints = phyMainOptions.constraints;
-
-            //add parent script to parent
-            allFracParents[newParentIndex].fParent = pTrans.GetOrAddComponent<FractureParent>();
-            allFracParents[newParentIndex].fParent.fractureDaddy = this;
-            allFracParents[newParentIndex].fParent.thisParentIndex = newParentIndex;
-
-            parentIndexesToUpdate.Add(newParentIndex);
-            return newParentIndex;
-        }
-
-        /// <summary>
-        /// Sets partsToInclude parent to newParentIndex
-        /// </summary>
-        /// <param name="partsToInclude"></param>
-        /// <param name="newParentIndex">If < 0, a new parent will be created</param>
-        private void Run_setPartsParent(HashSet<int> partsToInclude, int newParentIndex = -1)
-        {
-            //create new parent if needed
-            if (newParentIndex < 0)
-            {
-                newParentIndex = Run_createNewParent();
-            }
-
-            //set the parts parent to the new parent
-            foreach (int partI in partsToInclude)
-            {
-                Run_setPartParent(partI, newParentIndex);
-            }
-        }
-
-        /// <summary>
-        /// Sets the given part parent
-        /// </summary>
-        /// <param name="partIndex"></param>
-        /// <param name="parentIndex"></param>
-        private void Run_setPartParent(int partIndex, int parentIndex)
-        {
-            //if (parentIndex == allParts[partIndex].parentIndex || rep_partsToRepair.Contains(partIndex) == true)
-            if (parentIndex == allParts[partIndex].parentIndex || rep_partsToRepair.Any(part => part.partIndex == partIndex) == true)
-            {
-                if (allParts[partIndex].parentIndex >= 0 && allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].trans) Destroy(allParts[partIndex].col.attachedRigidbody);
-                return;
-            }
-
-            //update previous parent
-            if (allParts[partIndex].parentIndex >= 0)
-            {
-                allFracParents[allParts[partIndex].parentIndex].partIndexes.Remove(partIndex);
-                parentIndexesToUpdate.Add(allParts[partIndex].parentIndex);
-            }
-
-            if (parentIndex < 0)
-            {
-                //remove parent
-                allParts[partIndex].trans.SetParent(transform, true);
-                allParts[partIndex].parentIndex = -1;
-                return;
-            }
-
-            //set new parent
-            if (allParts[partIndex].col.attachedRigidbody != null && allParts[partIndex].col.attachedRigidbody.transform == allParts[partIndex].trans) Destroy(allParts[partIndex].col.attachedRigidbody);
-            allParts[partIndex].trans.SetParent(allFracParents[parentIndex].parentTrans, true);
-            allFracParents[parentIndex].partIndexes.Add(partIndex);
-            allParts[partIndex].parentIndex = parentIndex;
-            parentIndexesToUpdate.Add(allParts[partIndex].parentIndex);
-        }
-
-        /// <summary>
         /// Makes the part a broken piece
         /// </summary>
         /// <param name="partIndex"></param>
@@ -1646,7 +1784,7 @@ namespace Zombie1111_uDestruction
 
             //set collider material
             allParts[partIndex].col.sharedMaterial = phyMat_broken;
-            
+
             //setup physics for the part
             if (phyMainOptions.mainPhysicsType != OptMainPhysicsType.overlappingIsKinematic || kinematicPartStatus[partIndex] == false)
             {
@@ -1775,16 +1913,16 @@ namespace Zombie1111_uDestruction
                     conParts.Add(partsLeftToSearch[0]);
                     setClosed.Add(partsLeftToSearch[0]);
                     partsLeftToSearch.RemoveAt(0);
-                
+
                     if (partsBrokenness[conParts[0]] >= 1.0f) continue;
-                
+
                     for (int i = 0; i < conParts.Count; i += 1)
                     {
                         foreach (int nI in fParts[conParts[i]].neighbourParts)
                         {
                             partsLeftToSearch.Remove(nI);
                             if (partsBrokenness[nI] >= 1.0f || setClosed.Add(nI) == false || parentPartIndexes[parentIndex].Contains(nI) == false) continue;
-                            
+
                             if (phyMainOptions.mainPhysicsType == OptMainPhysicsType.overlappingIsKinematic && kinematicPartStatus[nI] == true) hasMainParent = true;
                             conParts.Add(nI);
                         }
@@ -1935,6 +2073,16 @@ namespace Zombie1111_uDestruction
             }
         }
 
+        #endregion DestructionSystem
+
+
+
+
+
+
+
+        #region RepairSystem
+
         private Vector3[] rep_orginalLocalPartPoss = new Vector3[0];
         private Vector3[] rep_verticsOrginal = new Vector3[0];
         private List<RepPartData> rep_partsToRepair = new();
@@ -1954,36 +2102,15 @@ namespace Zombie1111_uDestruction
 
             Run_setPartParent(partToRepair, 0);
             rep_speedScaled = repairSpeed * allFracParents[0].parentTrans.lossyScale.magnitude;
-            rep_partsToRepair.Add(new() { partIndex = partToRepair, partOgDis = Math.Max(1.0f,  
-                Vector3.Distance(allParts[partToRepair].trans.position, allFracParents[0].parentTrans.TransformPoint(rep_orginalLocalPartPoss[partToRepair])) - repairSpeed) });
+            rep_partsToRepair.Add(new()
+            {
+                partIndex = partToRepair,
+                partOgDis = Math.Max(1.0f,
+                Vector3.Distance(allParts[partToRepair].trans.position, allFracParents[0].parentTrans.TransformPoint(rep_orginalLocalPartPoss[partToRepair])) - repairSpeed)
+            });
 
             allParts[partToRepair].col.enabled = false;
             allParts[partToRepair].col.sharedMaterial = phyMat_defualt;
-        }
-
-        public int Run_tryGetFirstDamagedPart()
-        {
-            if (allFracParents[0].partIndexes.Count <= 0) return 0;
-
-            if (allFracParents[0].partIndexes.Count != allParts.Length)
-            {
-                foreach (int partI in allFracParents[0].partIndexes)
-                {
-                    foreach (int nI in allParts[partI].neighbourParts)
-                    {
-                        if (allParts[nI].parentIndex != 0 && rep_partsToRepair.Any(part => part.partIndex == nI) == false) return nI;
-                    }
-                }
-            }
-            else
-            {
-                foreach (int partI in allFracParents[0].partIndexes)
-                {
-                    if (allParts[partI].partBrokenness > 0.0f && rep_partsToRepair.Any(part => part.partIndex == partI) == false) return partI;
-                }
-            }
-
-            return -1;
         }
 
         /// <summary>
@@ -2019,15 +2146,15 @@ namespace Zombie1111_uDestruction
 
                 foreach (int vI in allParts[partIndex].rendVertexIndexes)
                 {
-                   tempVec = rep_verticsOrginal[vI] - verticsOrginalThreaded[vI];
-                   if (tempVec.sqrMagnitude > 0.0001f) hasRestoredAll = false;
-                   verticsOrginalThreaded[vI] += Vector3.ClampMagnitude(tempVec, tempSpeed);
-                   
-                   tempColor = verticsColorThreaded[vI];
-                   if (tempColor.a > 0.0001f) hasRestoredAll = false;
-                   //tempColor.a = Mathf.MoveTowards(tempColor.a, 0.0f, rep_speedScaled * Time.deltaTime);
-                   tempColor.a = Math.Max(tempColor.a - tempSpeed2, 0.0f);
-                   verticsColorThreaded[vI] = tempColor;
+                    tempVec = rep_verticsOrginal[vI] - verticsOrginalThreaded[vI];
+                    if (tempVec.sqrMagnitude > 0.0001f) hasRestoredAll = false;
+                    verticsOrginalThreaded[vI] += Vector3.ClampMagnitude(tempVec, tempSpeed);
+
+                    tempColor = verticsColorThreaded[vI];
+                    if (tempColor.a > 0.0001f) hasRestoredAll = false;
+                    //tempColor.a = Mathf.MoveTowards(tempColor.a, 0.0f, rep_speedScaled * Time.deltaTime);
+                    tempColor.a = Math.Max(tempColor.a - tempSpeed2, 0.0f);
+                    verticsColorThreaded[vI] = tempColor;
                 }
             }
 
@@ -2041,7 +2168,11 @@ namespace Zombie1111_uDestruction
 
                 allParts[partIndex].partBrokenness = 0.0f;
                 rep_partsToRepair.RemoveAt(repIndex);
-                allParts[partIndex].col.enabled = true;
+                if (isRealSkinnedM == false) allParts[partIndex].col.enabled = true;
+                else
+                {
+                    allSkinPartCols[partIndex].enabled = true;
+                }
 
                 //set position and rotation
                 allParts[partIndex].trans.localRotation = Quaternion.identity;
@@ -2067,18 +2198,82 @@ namespace Zombie1111_uDestruction
             return false;
         }
 
-        private void SaveOrLoadAsset(bool doSave, bool removeAsset = false)
-        {
-            if (saveAsset == null) saveAsset = Resources.Load<FractureSaveAsset>("fractureSaveAsset");
+        #endregion RepairSystem
 
-            if (removeAsset == true)
+
+
+
+
+
+
+        #region HelperFunctions
+
+        /// <summary>
+        /// Returns true if the given collider count as a self collider (Depends on selfCollisionCanDamage)
+        /// </summary>
+        /// <returns></returns>
+        public bool Run_isTransSelfTransform(Transform trans)
+        {
+            if (selfCollisionCanDamage == SelfCollisionMode.always) return false;
+
+            if (trans.parent == transform) return true;
+            if (selfCollisionCanDamage == SelfCollisionMode.never && trans.parent != null && trans.parent.parent == transform) return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns the given trans part index, -1 if not a part
+        /// </summary>
+        /// <param name="trans"></param>
+        /// <param name="verifyScript">If true, also checks if the fracture script exists in any parent</param>
+        /// <returns></returns>
+        public int Run_tryGetPartIndexFromTrans(Transform trans, bool verifyScript = false)
+        {
+            if (verifyScript == true)
             {
-                saveAsset.RemoveSavedData(this, saved_fracId);
-                return;
+                //verify script
+                if (trans.GetComponentInParent<FractureThis>() != this) return -1;
             }
 
-            if (doSave == true) saved_fracId = saveAsset.Save(this, saved_fracId);
-            else saveAsset.Load(this, saved_fracId);
+            //The part index is stored in the transform name
+            Match match = Regex.Match(trans.name, @"Part\((\d+)\)");
+
+            if (match.Success == true && int.TryParse(match.Groups[1].Value, out int partId) == true) return partId;
+
+            return -1;
         }
+
+        /// <summary>
+        /// Returns the index of the "first" part that has taken damage
+        /// </summary>
+        /// <returns></returns>
+        public int Run_tryGetFirstDamagedPart()
+        {
+            if (allFracParents[0].partIndexes.Count <= 0) return 0;
+
+            if (allFracParents[0].partIndexes.Count != allParts.Length)
+            {
+                foreach (int partI in allFracParents[0].partIndexes)
+                {
+                    foreach (int nI in allParts[partI].neighbourParts)
+                    {
+                        if (allParts[nI].parentIndex != 0 && rep_partsToRepair.Any(part => part.partIndex == nI) == false) return nI;
+                    }
+                }
+            }
+            else
+            {
+                foreach (int partI in allFracParents[0].partIndexes)
+                {
+                    if (allParts[partI].partBrokenness > 0.0f && rep_partsToRepair.Any(part => part.partIndex == partI) == false) return partI;
+                }
+            }
+
+            return -1;
+        }
+
+        #endregion HelperFunctions
+
     }
 }
