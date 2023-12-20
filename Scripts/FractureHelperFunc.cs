@@ -638,7 +638,7 @@ namespace Zombie1111_uDestruction
 
             for (int i = 0; i < vertics.Length; i += 1)
             {
-                if ((vertics[i] - pos).sqrMagnitude < verDisTol && i != vIndexToIgnore && verticsIds[i] == id)
+                if ((vertics[i] - pos).magnitude < verDisTol && i != vIndexToIgnore && verticsIds[i] == id)
                 {
                     vAtPos.Add(i);
                 }
