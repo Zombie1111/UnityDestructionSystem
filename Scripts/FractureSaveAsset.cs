@@ -67,7 +67,7 @@ namespace Zombie1111_uDestruction
                 saveFrom.saved_allPartsCol[i] = saveFrom.allParts[i].col;
             }
 
-            Debug.Log("saved " + idIndex + " id " + fracId);
+            //Debug.Log("saved " + idIndex + " id " + fracId);
 
 #if UNITY_EDITOR
             EditorUtility.SetDirty(this);
@@ -89,7 +89,7 @@ namespace Zombie1111_uDestruction
 
             if (idIndex >= 0)
             {
-                Debug.Log("loaded " + idIndex + " id " + fracId);
+                //Debug.Log("loaded " + idIndex + " id " + fracId);
 
                 //Apply saved data to the provided FractureThis instance
                 loadTo.kinematicPartStatus = fracturesSavedData[idIndex].saved_kinematicPartStatus.ToArray();
