@@ -24,8 +24,11 @@ namespace Zombie1111_uDestruction
 
         private void OnCollision(Collision collision)
         {
-            float totalForce = collision.relativeVelocity.magnitude;
-            if (totalForce < fractureDaddy.destructionThreshold || fractureDaddy.Run_isTransSelfTransform(collision.transform) == true) return;
+            float totalForce = collision.relativeVelocity.magnitude
+                * (collision.rigidbody == null ? fractureDaddy.allFracParents[thisParentIndex].parentRb.mass : collision.rigidbody.mass)
+            * fractureDaddy.Run_getDamageMultiplier(collision.transform);
+
+            if (totalForce < fractureDaddy.destructionThreshold) return;
             //print(totalForce + " " + collision.GetContact(0).thisCollider.transform.name);
             //if (dontUpdateColData != 1) return;
 
@@ -37,12 +40,13 @@ namespace Zombie1111_uDestruction
             //}
 
             //fractureDaddy.RequestDestruction(contacts.Take(actualContactCount).Select(contact => contact.point).ToArray(), totalForce, collision.relativeVelocity.normalized);
-            DoImpactAtPosition(collision.GetContact(0).point, collision.relativeVelocity.normalized, totalForce);
+            DoImpactAtPosition(collision.GetContact(0).point, collision.relativeVelocity.normalized, totalForce, collision.collider);
         }
 
-        public void DoImpactAtPosition(Vector3 impPosition, Vector3 impDirection, float impForce)
+        public void DoImpactAtPosition(Vector3 impPosition, Vector3 impDirection, float impForce, Collider collidedWith = null)
         {
-            fractureDaddy.RequestDestruction(impPosition, impDirection, impForce, thisParentIndex);
+            fractureDaddy.RequestDestruction(impPosition, impDirection, impForce, thisParentIndex
+                , collidedWith == null || (collidedWith.attachedRigidbody != null && collidedWith.attachedRigidbody.isKinematic == false));
         }
     }
 }
