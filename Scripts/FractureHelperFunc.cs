@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Zombie1111_uDestruction
 {
@@ -143,14 +146,19 @@ namespace Zombie1111_uDestruction
 
         public static Bounds ConvertBoundsWithMatrix(Bounds bounds, Matrix4x4 matrix)
         {
-            Vector3[] vertices = bounds.GetVertices();
+            Vector3 center = matrix.MultiplyPoint(bounds.center);
+            Vector3 size = matrix.MultiplyVector(bounds.size);
 
-            for (int i = 0; i < vertices.Length; i++)
-            {
-                vertices[i] = matrix.MultiplyPoint3x4(vertices[i]);
-            }
+            return new Bounds(center, size);
 
-            return vertices.ToBounds();
+            //Vector3[] vertices = bounds.GetVertices();
+            //
+            //for (int i = 0; i < vertices.Length; i++)
+            //{
+            //    vertices[i] = matrix.MultiplyPoint3x4(vertices[i]);
+            //}
+            //
+            //return vertices.ToBounds();
         }
 
         public static Bounds GetCompositeMeshBounds(Mesh[] meshes)

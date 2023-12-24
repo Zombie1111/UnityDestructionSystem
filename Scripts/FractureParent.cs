@@ -25,10 +25,12 @@ namespace Zombie1111_uDestruction
         private void OnCollision(Collision collision)
         {
             float totalForce = collision.relativeVelocity.magnitude
-                * (collision.rigidbody == null ? fractureDaddy.allFracParents[thisParentIndex].parentRb.mass : collision.rigidbody.mass)
-            * fractureDaddy.Run_getDamageMultiplier(collision.transform);
+                * (collision.rigidbody == null ? fractureDaddy.allFracParents[thisParentIndex].parentRb.mass : collision.rigidbody.mass);
 
             if (totalForce < fractureDaddy.destructionThreshold) return;
+            totalForce *= fractureDaddy.Run_getDamageMultiplier(collision.rigidbody);
+            if (totalForce < fractureDaddy.destructionThreshold) return;
+
             //print(totalForce + " " + collision.GetContact(0).thisCollider.transform.name);
             //if (dontUpdateColData != 1) return;
 

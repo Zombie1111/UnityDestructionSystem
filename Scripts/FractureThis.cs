@@ -48,6 +48,88 @@ namespace Zombie1111_uDestruction
 
                 serializedObject.ApplyModifiedProperties();
             }
+
+            private void OnSceneGUI()
+            {
+                //draw resistance multiplier resize handels
+                FractureThis script = (FractureThis)target;
+
+                foreach (FractureThis.FracVolume fVolume in script.resistanceMultipliers)
+                {
+                    if (fVolume.boundsColor.a < 0.8f) continue;
+                    //Bounds bounds = fVolume.volume; // Get the Bounds from your script
+                    Bounds bounds = FractureHelperFunc.ConvertBoundsWithMatrix(new() { center = fVolume.volume.center, extents = fVolume.volume.extents }, script.transform.localToWorldMatrix);
+
+                    // Calculate handle positions
+                    Vector3 center = bounds.center;
+                    Vector3 size = bounds.size;
+
+                    Vector3 min = center - size * 0.5f;
+                    Vector3 max = center + size * 0.5f;
+
+                    EditorGUI.BeginChangeCheck();
+
+                    // Record the object for undo
+                    Undo.RecordObject(script, "Resize Bounds");
+
+                    Vector3 newMin = Handles.PositionHandle(min, Quaternion.LookRotation(Vector3.up, Vector3.left));
+                    Vector3 newMax = Handles.PositionHandle(max, Quaternion.LookRotation(Vector3.up, Vector3.left));
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        // Calculate the new size based on handle movement
+                        size = newMax - newMin;
+
+                        // Update the bounds with the new size and center
+                        bounds.size = size;
+                        bounds.center = (newMin + newMax) * 0.5f;
+
+                        // Apply the new bounds to your script
+                        fVolume.volume = FractureHelperFunc.ConvertBoundsWithMatrix(bounds, script.transform.worldToLocalMatrix);
+
+                        // Register the object for complete undo
+                        Undo.RegisterCompleteObjectUndo(script, "Resize Voxel Bounds");
+                    }
+                }
+
+            }
+        }
+
+        public void CopyFracturePropertiesFrom(FractureThis from)
+        {
+            halfUpdateRate = from.halfUpdateRate;
+            worldScale = from.worldScale;
+            fractureCount = from.fractureCount;
+            dynamicFractureCount = from.dynamicFractureCount;
+            seed = from.seed;
+            maxFractureAttempts = from.maxFractureAttempts;
+            generationQuality = from.generationQuality;
+            massDensity = from.massDensity;
+            colliderType = from.colliderType;
+            phyMainOptions = from.phyMainOptions;
+            phyPartsOptions = from.phyPartsOptions;
+            destructionThreshold = from.destructionThreshold;
+            destructionResistance = from.destructionResistance;
+            minDelay = from.minDelay;
+            minAllowedMainPhySize = from.minAllowedMainPhySize;
+            multithreadedDestruction = from.multithreadedDestruction;
+            destructionWidthCurve = from.destructionWidthCurve;
+            distanceFalloffStrenght = from.distanceFalloffStrenght;
+            distanceFalloffPower = from.distanceFalloffPower;
+            selfCollisionMultiplier = from.selfCollisionMultiplier;
+            repairSupport = from.repairSupport;
+            repairSpeed = from.repairSpeed;
+            vertexDisplacementStenght = from.vertexDisplacementStenght;
+            displacementIgnoresWidth = from.displacementIgnoresWidth;
+            recalculateOnDisplacement = from.recalculateOnDisplacement;
+            doVertexColors = from.doVertexColors;
+            setVertexColorOnBreak = from.setVertexColorOnBreak;
+            matInside_defualt = from.matInside_defualt;
+            matOutside_defualt = from.matOutside_defualt;
+            phyMat_defualt = from.phyMat_defualt;
+            phyMat_broken = from.phyMat_broken;
+
+            resistanceMultipliers = from.resistanceMultipliers;
         }
 #endif
 
@@ -65,8 +147,6 @@ namespace Zombie1111_uDestruction
         [Space(10)]
         [Header("Physics")]
         [SerializeField] private float massDensity = 0.1f;
-        [SerializeField] private PhysicMaterial phyMat_defualt = null;
-        [SerializeField] private PhysicMaterial phyMat_broken = null;
         [SerializeField] private ColliderType colliderType = ColliderType.mesh;
         [SerializeField] private bool disableCollisionWithNeighbours = true;
         [SerializeField] private OptPhysicsMain phyMainOptions = new();
@@ -79,12 +159,14 @@ namespace Zombie1111_uDestruction
         [SerializeField] private float minDelay = 0.05f;
         [SerializeField] private int minAllowedMainPhySize = 2;
         [SerializeField] private bool multithreadedDestruction = true;
-        [SerializeField] private AnimationCurve destructionWidthCurve = AnimationCurve.EaseInOut(0.0f, 0.0f, 1.0f, 1.0f);
+        [SerializeField] private AnimationCurve destructionWidthCurve = AnimationCurve.EaseInOut(0.0f, 0.5f, 1.0f, 1.0f);
         [SerializeField] private float distanceFalloffStrenght = 20.0f;
         [SerializeField] private float distanceFalloffPower = 1.0f;
         [SerializeField] private float selfCollisionMultiplier = 0.3f;
         [SerializeField] private DestructionRepairSupport repairSupport = DestructionRepairSupport.fullHigh;
         [SerializeField] private float repairSpeed = 1.0f;
+        [SerializeField] private float neighbourBreakThreshold = 0.9f;
+        [SerializeField] private byte minNeighbourCount = 1;
 
         [Space(10)]
         [Header("Mesh")]
@@ -99,6 +181,22 @@ namespace Zombie1111_uDestruction
         [Header("Material")]
         [SerializeField] private Material matInside_defualt = null;
         [SerializeField] private Material matOutside_defualt = null;
+        [SerializeField] private PhysicMaterial phyMat_defualt = null;
+        [SerializeField] private PhysicMaterial phyMat_broken = null;
+        public List<FracVolume> resistanceMultipliers = new();
+
+        [System.Serializable]
+        public class FracVolume
+        {
+            public Bounds volume = new();
+            public float fadeStrenght = 1.0f;
+            public float multiplier = 1.0f;
+
+#if UNITY_EDITOR
+            [Tooltip("The color of volume bounds shown in the editor, useful to know what multiplier is for what area")] public Color boundsColor = Color.black;
+#endif
+        }
+
 
 #if UNITY_EDITOR
         [Space(10)]
@@ -112,10 +210,29 @@ namespace Zombie1111_uDestruction
             showBones
         }
 
-        //private void OnDrawGizmosSelected()
-        private void OnDrawGizmos()
+        private void OnDrawGizmosSelected()
         {
-            //UpdateRealVerticsWorld(); //debug remove
+            //draw resistance multiplier bounds
+            for (int i = 0; i < resistanceMultipliers.Count; i += 1)
+            {
+                if (resistanceMultipliers[i].boundsColor == new Color(0.0f, 0.0f, 0.0f, 0.0f))
+                {
+                    resistanceMultipliers[i].multiplier = 1.0f;
+                    resistanceMultipliers[i].fadeStrenght = 1.0f;
+                    resistanceMultipliers[i].boundsColor = Color.white;
+                    resistanceMultipliers[i].volume.center = transform.position + (Vector3.one * 0.5f);
+                    resistanceMultipliers[i].volume.extents = Vector3.one;
+                    resistanceMultipliers[i].volume = FractureHelperFunc.ConvertBoundsWithMatrix(resistanceMultipliers[i].volume, transform.worldToLocalMatrix);
+                }
+
+                if (resistanceMultipliers[i].boundsColor.a < 0.01f) continue;
+
+                Bounds bound = FractureHelperFunc.ConvertBoundsWithMatrix(new() { center = resistanceMultipliers[i].volume.center, extents = resistanceMultipliers[i].volume.extents }, transform.localToWorldMatrix);
+                Gizmos.color = resistanceMultipliers[i].boundsColor;
+                Gizmos.DrawWireCube(bound.center, bound.size);
+                Gizmos.color = new Color(Gizmos.color.r, Gizmos.color.g, Gizmos.color.b, Gizmos.color.a / 3.0f);
+                Gizmos.DrawWireCube(bound.center, bound.size + (Vector3.one / resistanceMultipliers[i].fadeStrenght));
+            }
 
             if (debugMode == DebugMode.none || allParts == null || allParts.Length <= 0) return;
 
@@ -164,6 +281,8 @@ namespace Zombie1111_uDestruction
                 //}
             }
         }
+
+        
 #endif
 
         private enum DestructionRepairSupport
@@ -390,7 +509,7 @@ namespace Zombie1111_uDestruction
             allFracParents.Clear();
             verticsLinkedThreaded = new IntList[0];
             allParts = new FracParts[0];
-            partsOgResistanceThreaded = new float[0];
+            AllPartsResistanceThreaded = new float[0];
             boneWe_broken = new BoneWeight[0];
 
             //clear save asset
@@ -580,13 +699,58 @@ namespace Zombie1111_uDestruction
             tempFracVerOgMeshId = null;
             tempOgRealSkin = null;
 
+            //apply resistance multipliers to parts
+            Gen_setupResistanceMultiply();
+
             //save to save asset
             SaveOrLoadAsset(true);
 
             //log result when done, log when done
-            if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.Log("(Warning) " + transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
-            if (transform.TryGetComponent<Rigidbody>(out _) == true) Debug.Log("(Warning) " + transform.name + " has a rigidbody and it may cause issues. Its recommended to remove it and use the fracture physics options instead");
+            if (fracRend.bones.Length > 500) Debug.LogWarning(transform.name + " has " + fracRend.bones.Length + " bones (skinnedMeshRenderers seems to have a limitation of ~500 bones before it breaks)");
+            if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.LogWarning(transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
+            if (transform.TryGetComponent<Rigidbody>(out _) == true) Debug.LogWarning(transform.name + " has a rigidbody and it may cause issues. Its recommended to remove it and use the fracture physics options instead");
             Debug.Log("Fractured " + objectToFracture.transform.name + " into " + fracturedMeshesLocal.Count + " parts, total vertex count = " + fracturedMeshes.Sum(mesh => mesh.vertexCount));
+        }
+
+        /// <summary>
+        /// Modifies allparts 
+        /// </summary>
+        private void Gen_setupResistanceMultiply()
+        {
+            AllPartsResistanceThreaded = new float[allParts.Length];
+
+            Vector3 pPos;
+            List<float> multipliers = new();
+            float totalMultiply;
+            float thisMultiply;
+
+            for (int i = 0; i < allParts.Length; i += 1)
+            {
+                pPos = isRealSkinnedM == true ? allSkinPartCols[i].bounds.center : allParts[i].trans.position;
+                totalMultiply = 0.0f;
+                multipliers.Clear();
+
+                for (int ii = 0; ii < resistanceMultipliers.Count; ii += 1)
+                {
+                    thisMultiply = GetVolumeMultiplier(ii, pPos);
+                    if (Mathf.Approximately(thisMultiply, 1.0f) == true) continue;
+
+                    multipliers.Add(thisMultiply);
+                    totalMultiply += multipliers[^1];
+                }
+
+                if (totalMultiply <= 0.0f) totalMultiply = 1.0f;
+                if (multipliers.Count > 0) totalMultiply /= multipliers.Count;
+
+                AllPartsResistanceThreaded[i] = destructionResistance * totalMultiply;
+            }
+
+            float GetVolumeMultiplier(int volumeIndex, Vector3 pos)
+            {
+                Bounds bound = FractureHelperFunc.ConvertBoundsWithMatrix(new() { center = resistanceMultipliers[volumeIndex].volume.center, extents = resistanceMultipliers[volumeIndex].volume.extents }, transform.localToWorldMatrix);
+                return Mathf.Lerp(resistanceMultipliers[volumeIndex].multiplier, 1.0f
+                    , Mathf.Clamp01(Vector3.Distance(bound.ClosestPoint(pos), pos) * resistanceMultipliers[volumeIndex].fadeStrenght));
+            }
         }
 
         public int triIndex = 0;
@@ -725,13 +889,6 @@ namespace Zombie1111_uDestruction
                 if (generationQuality == GenerationQuality.high) Gen_getKinematicAndNeighboursFromTrans(FractureHelperFunc.LinecastsBetweenPositions(wVerts).ToArray(), i);
             }
 
-            //setup part og resistance
-            partsOgResistanceThreaded = new float[allParts.Length];
-            for (int i = 0; i < partsOgResistanceThreaded.Length; i += 1)
-            {
-                partsOgResistanceThreaded[i] = destructionResistance;
-            }
-
             //update parent info
             Run_updateParentInfo(0);
 
@@ -858,6 +1015,8 @@ namespace Zombie1111_uDestruction
             public Matrix4x4 lTwMatrix;
         }
 
+        private bool mustConfirmHighCount = true;
+
         /// <summary>
         /// Returns all mesh chunks that was generated from the meshesToFracture list
         /// </summary>
@@ -874,8 +1033,16 @@ namespace Zombie1111_uDestruction
             //get per mesh scale, so each mesh can get ~equally sized
             List<Mesh> meshes = meshesToFracture.Select(meshData => meshData.mesh).ToList();
             List<float> meshScales = FractureHelperFunc.GetPerMeshScale(meshes, useMeshBounds);
-            if (dynamicChunkCount == true) totalChunkCount = Mathf.CeilToInt(totalChunkCount * worldScale * FractureHelperFunc.GetBoundingBoxVolume(FractureHelperFunc.GetCompositeMeshBounds(meshes.ToArray())));
+            if (dynamicChunkCount == true) totalChunkCount = Mathf.CeilToInt(totalChunkCount * FractureHelperFunc.GetBoundingBoxVolume(FractureHelperFunc.GetCompositeMeshBounds(meshes.ToArray())));
             meshes.Clear();
+
+            if (mustConfirmHighCount == true && totalChunkCount > 500)
+            {
+                mustConfirmHighCount = false;
+                Debug.LogError("You are trying to fracture a mesh into ~" + totalChunkCount + " parts, thats a lot (Fracture again to fracture anyway)");
+                return null;
+            }
+            else if (totalChunkCount < 500) mustConfirmHighCount = true;
 
             //fractrue the meshes into chunks that are ~equally sized
             for (int i = 0; i < meshesToFracture.Count; i += 1)
@@ -1018,8 +1185,13 @@ namespace Zombie1111_uDestruction
 
                     if (rootBoneTrans == null || rootBoneTrans.parent != transform)
                     {
-                        Debug.LogError("skinnedMeshRenderer rootBone must be a child of " + transform.name);
+                        Debug.LogError(skinnedR.transform.name + " (skinnedRend) rootBone must be a child of " + transform.name);
                         return null;
+                    }
+
+                    if (Vector3.Distance(skinnedR.transform.position, transform.position) > worldScale * 0.01f)
+                    {
+                        Debug.LogWarning(skinnedR.transform.name + " world position does not match " + transform.name + " world position, this may cause the fractured mesh to be misplaced");
                     }
 
                     //save orginal real skinnedmesh data to use it on setup later
@@ -1142,6 +1314,8 @@ namespace Zombie1111_uDestruction
 
             //set boneWeights
             skinMesh = FractureHelperFunc.ConvertMeshWithMatrix(skinMesh, skinLtW);
+            FractureHelperFunc.Debug_drawMesh(skinMesh, false, 40.0f);
+
             BoneWeight[] skinBoneWe = skinMesh.boneWeights.ToArray();
             Vector3[] skinWVer = skinMesh.vertices;
             int[] skinTris = skinMesh.triangles;
@@ -1236,6 +1410,7 @@ namespace Zombie1111_uDestruction
             Mesh sMesh = new();
             fracRend.BakeMesh(sMesh, true);
             sMesh = FractureHelperFunc.ConvertMeshWithMatrix(sMesh, fracRend.localToWorldMatrix);
+
             Vector3[] fracWVerOg = fracWVer.ToArray();
             Vector3[] fracWNorOg = fracWNor.ToArray();
             fracWVer = sMesh.vertices;
@@ -1899,12 +2074,18 @@ namespace Zombie1111_uDestruction
         /// Contains all vertics and all other vertex indexes that share the ~same position as X (Including self)
         /// </summary>
         [System.NonSerialized] public IntList[] verticsLinkedThreaded = new IntList[0];
-        [System.NonSerialized] public float[] partsOgResistanceThreaded = new float[0];
+
+        /// <summary>
+        /// Contains the resistance used for all parts, set when fracture object. (ImpactForce / AllPartsResistanceThreaded[i])
+        /// </summary>
+        [System.NonSerialized] public float[] AllPartsResistanceThreaded = new float[0];
+
         /// <summary>
         /// Contains all vertics and the index of the part they are a part of
         /// </summary>
         [System.NonSerialized] public int[] verticsPartThreaded = new int[0];
         private List<Color> verticsColorThreaded = new();
+
         /// <summary>
         /// The index of the bone each vertex uses
         /// </summary>
@@ -1914,6 +2095,7 @@ namespace Zombie1111_uDestruction
         /// The matrix for each bone (localToWorld)
         /// </summary>
         private Matrix4x4[] boneMatrixsCurrentThreaded;
+
         private Task<DestructionData> ThreadCalcDes = null;
         private Vector3[] calcPartsPossThreaded;
 
@@ -2275,8 +2457,8 @@ namespace Zombie1111_uDestruction
 
                         //if (displacementIgnoresWidth == true) vertexBrokennessToAdd = Math.Max(0.0f, parentForce - GetForceAtPosition_noDir(lToWMatrix.MultiplyPoint(verticsCurrentThreaded[vI]))) / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
                         //else vertexBrokennessToAdd = Math.Max(0.0f, parentForce - GetForceAtPosition(lToWMatrix.MultiplyPoint(verticsCurrentThreaded[vI]))) / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
-                        if (displacementIgnoresWidth == true) vertexBrokennessToAdd = Math.Max(0.0f, parentForce - GetForceAtPosition_noDir(verticsCurrentThreaded[vI])) / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
-                        else vertexBrokennessToAdd = Math.Max(0.0f, parentForce - GetForceAtPosition(verticsCurrentThreaded[vI])) / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
+                        if (displacementIgnoresWidth == true) vertexBrokennessToAdd = Math.Max(0.0f, parentForce - GetForceAtPosition_noDir(verticsCurrentThreaded[vI])) / AllPartsResistanceThreaded[setOpen[openIndex].partIndex];
+                        else vertexBrokennessToAdd = Math.Max(0.0f, parentForce - GetForceAtPosition(verticsCurrentThreaded[vI])) / AllPartsResistanceThreaded[setOpen[openIndex].partIndex];
 
 
                         if (vertexBrokennessToAdd <= 0.0f) continue;
@@ -2306,35 +2488,21 @@ namespace Zombie1111_uDestruction
                 }
                 else spreadFromThis = true;
 
-                //get force to apply to part, ####ERROR NEED FIX, the part should take as much damage as the vertex that took the most damage did
-                //partsBrokenness[setOpen[openIndex].partIndex] += Math.Max(0.0f, parentForce - GetForceAtPosition(calcPartsPossThreaded[setOpen[openIndex].partIndex])) / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
-                partsBrokenness[setOpen[openIndex].partIndex] += Math.Max(0.0f, parentForce - GetForceAtPosition(calcPartsPossThreaded[setOpen[openIndex].partIndex])) / partsOgResistanceThreaded[setOpen[openIndex].partIndex];
+                //get force to apply to part
+                partsBrokenness[setOpen[openIndex].partIndex] += Math.Max(0.0f, parentForce - GetForceAtPosition(calcPartsPossThreaded[setOpen[openIndex].partIndex])) / AllPartsResistanceThreaded[setOpen[openIndex].partIndex];
                 if (topVerForceAdded > partsBrokenness[setOpen[openIndex].partIndex]) partsBrokenness[setOpen[openIndex].partIndex] = topVerForceAdded;
-
-                foreach (int pI in fParts[setOpen[openIndex].partIndex].neighbourParts)
-                {
-                    if (partsBrokenness[pI] <= 0.0f) partsBrokenness[pI] = 0.01f;
-                }
 
                 //get if this part should break
                 if (partsBrokenness[setOpen[openIndex].partIndex] >= 1.0f)
                 {
-                    dData.partsToBreak.Add(setOpen[openIndex].partIndex);
-                    //###need fix, the velocity cannot be calculated like this
-                    //dData.partsToBreakVelocity.Add((partsBrokenness[setOpen[openIndex].partIndex] - 1.0f) * partsOgResistanceThreaded[setOpen[openIndex].partIndex] * iD.forceDir);
-                    dData.partsToBreakVelocity.Add(partsBrokenness[setOpen[openIndex].partIndex] * iD.forceDir);
-                    partsBrokenness[setOpen[openIndex].partIndex] = Mathf.Clamp01(partsBrokenness[setOpen[openIndex].partIndex]);
-
-                    //set vertex color on break
-                    if (setVertexColorOnBreak == true)//verify this
+                    AddPartToBreak(setOpen[openIndex].partIndex, parentIndex);
+                }
+                else
+                {
+                    //make sure all neighbours also has taken some damage (To notify repair system that they may need repair)
+                    foreach (int pI in fParts[setOpen[openIndex].partIndex].neighbourParts)
                     {
-                        foreach (int vI in fParts[setOpen[openIndex].partIndex].rendVertexIndexes)
-                        {
-                            foreach (int vIi in verticsLinkedThreaded[vI].intList)
-                            {
-                                verticsColorThreaded[vIi] = new Color(verticsColorThreaded[vIi].r, verticsColorThreaded[vIi].g, verticsColorThreaded[vIi].b, 1.0f);
-                            }
-                        }
+                        if (partsBrokenness[pI] <= 0.0f) partsBrokenness[pI] = 0.01f;
                     }
                 }
 
@@ -2362,6 +2530,53 @@ namespace Zombie1111_uDestruction
                     return Mathf.Pow((pos - closestImpPos).magnitude * distanceFalloffStrenght, distanceFalloffPower);
                     //return Mathf.Pow(Math.Max((pos - closestImpPosSnapped).magnitude, (pos - closestImpPos).magnitude) * distanceFalloffStrenght, distanceFalloffPower);
                     //return Mathf.Pow((((pos - closestImpPosSnapped).magnitude + (pos - closestImpPos).magnitude) / 2.0f) * distanceFalloffStrenght, distanceFalloffPower);
+                }
+
+                void AddPartToBreak(int partIndex, int parentIndex)
+                {
+                    //add to break list
+                    dData.partsToBreak.Add(partIndex);
+                    dData.partsToBreakVelocity.Add(partsBrokenness[partIndex] * iD.forceDir);
+                    partsBrokenness[partIndex] = 1.0f;
+
+                    //set vertex color on break
+                    if (setVertexColorOnBreak == true)
+                    {
+                        foreach (int vI in fParts[partIndex].rendVertexIndexes)
+                        {
+                            foreach (int vIi in verticsLinkedThreaded[vI].intList)
+                            {
+                                verticsForceThreaded[vIi] = 1.0f;
+                                verticsColorThreaded[vIi] = new Color(verticsColorThreaded[vIi].r, verticsColorThreaded[vIi].g, verticsColorThreaded[vIi].b, 1.0f);
+                            }
+                        }
+                    }
+
+                    //check neighbourParts if also break or set their partsBrokenness
+                    foreach (int pI in fParts[partIndex].neighbourParts)
+                    {
+                        if (fParts[pI].parentIndex != parentIndex || partsBrokenness[pI] >= 1.0f || dData.partsToBreak.Contains(pI) == true) continue;
+                        if (partsBrokenness[pI] >= neighbourBreakThreshold || GetPartRealNeighbourCount(pI, parentIndex) <= minNeighbourCount)
+                        //if (partsBrokenness[pI] >= neighbourBreakThreshold)
+                        {
+                            AddPartToBreak(pI, parentIndex);
+                            continue;
+                        }
+                    
+                        if (partsBrokenness[pI] <= 0.0f) partsBrokenness[pI] = 0.01f;
+                    }
+                }
+
+                byte GetPartRealNeighbourCount(int partIndex, int parentIndex)
+                {
+                    byte nCount = 0;
+                    foreach (int pI in fParts[partIndex].neighbourParts)
+                    {
+                        if (partsBrokenness[pI] >= 1.0f || fParts[pI].parentIndex != parentIndex) continue;
+                        nCount++;
+                    }
+
+                    return nCount;
                 }
             }
         }
@@ -2662,11 +2877,10 @@ namespace Zombie1111_uDestruction
         /// Returns true if the given collider count as a self collider (Depends on selfCollisionCanDamage)
         /// </summary>
         /// <returns></returns>
-        public float Run_getDamageMultiplier(Transform trans)
+        public float Run_getDamageMultiplier(Rigidbody colWith)
         {
-            if (trans.parent == transform) return 0.0f;
-            if (trans.parent != null && trans.parent.parent == transform) return selfCollisionMultiplier;
-
+            if (colWith == null || colWith.isKinematic == true) return selfCollisionMultiplier; //itself caused the impact
+            if (colWith.transform.parent == transform) return selfCollisionMultiplier; //a part from itself caused the impact
             return 1.0f;
         }
 
@@ -2743,6 +2957,7 @@ namespace Zombie1111_uDestruction
 
         private void SetupRealVerticsWorld()
         {
+            if (fracRend == null) return; //return if not fractured
 
             vertices = new Vector3[fracRend.sharedMesh.vertexCount];
             boneMatrices = new Matrix4x4[fracRend.bones.Length];

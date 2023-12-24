@@ -56,7 +56,7 @@ namespace Zombie1111_uDestruction
             fracturesSavedData[idIndex].saved_kinematicPartStatus = saveFrom.kinematicPartStatus.ToArray();
             fracturesSavedData[idIndex].saved_verticsLinkedThreaded = saveFrom.verticsLinkedThreaded.ToArray();
             fracturesSavedData[idIndex].saved_allParts = saveFrom.allParts.ToArray();
-            fracturesSavedData[idIndex].saved_partsOgResistanceThreaded = saveFrom.partsOgResistanceThreaded.ToArray();
+            fracturesSavedData[idIndex].saved_partsOgResistanceThreaded = saveFrom.AllPartsResistanceThreaded.ToArray();
             fracturesSavedData[idIndex].saved_verticsPartThreaded = saveFrom.verticsPartThreaded.ToArray();
             fracturesSavedData[idIndex].saved_boneWe_broken = saveFrom.boneWe_broken.ToArray();
 
@@ -95,7 +95,7 @@ namespace Zombie1111_uDestruction
                 loadTo.kinematicPartStatus = fracturesSavedData[idIndex].saved_kinematicPartStatus.ToArray();
                 loadTo.verticsLinkedThreaded = fracturesSavedData[idIndex].saved_verticsLinkedThreaded.ToArray();
                 loadTo.allParts = fracturesSavedData[idIndex].saved_allParts.ToArray();
-                loadTo.partsOgResistanceThreaded = fracturesSavedData[idIndex].saved_partsOgResistanceThreaded.ToArray();
+                loadTo.AllPartsResistanceThreaded = fracturesSavedData[idIndex].saved_partsOgResistanceThreaded.ToArray();
                 loadTo.verticsPartThreaded = fracturesSavedData[idIndex].saved_verticsPartThreaded.ToArray();
                 loadTo.boneWe_broken = fracturesSavedData[idIndex].saved_boneWe_broken.ToArray();
 
