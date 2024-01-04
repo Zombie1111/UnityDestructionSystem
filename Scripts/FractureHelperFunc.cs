@@ -10,6 +10,12 @@ namespace Zombie1111_uDestruction
 {
     public static class FractureHelperFunc
     {
+        public static void SetVelocityAtPosition(Vector3 targetVelocity, Vector3 positionOfForce, Rigidbody rb)
+        {
+            //rb.AddForceAtPosition(rb.mass * (targetVelocity - rb.velocity) / Time.fixedDeltaTime, positionOfForce, ForceMode.Force);
+            rb.AddForceAtPosition(targetVelocity - rb.velocity, positionOfForce, ForceMode.VelocityChange);
+        }
+
         public static Color SetAlpha(this Color color, float value)
         {
             return new Color(color.r, color.g, color.b, value);
@@ -220,6 +226,23 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Adds the float to the list (low to high) and returns the index the item was inserted at
+        /// </summary>
+        /// <param name="list"></param>
+        /// <param name="item"></param>
+        /// <returns></returns>
+        public static int InsertSorted(List<float> list, float item)
+        {
+            int index = list.BinarySearch(item);
+            if (index < 0)
+                index = ~index; // Bitwise complement to get the insert position
+
+            if (list.Count > 1 && index == 0) index = 1;
+            list.Insert(index, item);
+            return index;
+        }
+
+        /// <summary>
         /// Returns the closest position index
         /// </summary>
         /// <param name="positions">The positions to check against</param>
@@ -246,6 +269,13 @@ namespace Zombie1111_uDestruction
             }
 
             return bestI;
+        }
+
+        public static Vector3 ClosestPointOnLine(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
+        {
+            Vector3 lineToPoint = position - linePosition;
+            float t = Vector3.Dot(lineToPoint, lineDirection) / lineDirection.sqrMagnitude;
+            return linePosition + Mathf.Clamp01(t) * lineDirection;
         }
 
         /// <summary>
@@ -934,9 +964,8 @@ namespace Zombie1111_uDestruction
             // Instantiate a new collider of the same type
             Collider newCollider = null;
 
-            if (ogCol is MeshCollider)
+            if (ogCol is MeshCollider ogMeshCol)
             {
-                MeshCollider ogMeshCol = (MeshCollider)ogCol;
                 MeshCollider newMeshCol = targetTrans.gameObject.AddComponent<MeshCollider>();
 
                 // Copy properties from the original collider to the new collider
@@ -945,9 +974,8 @@ namespace Zombie1111_uDestruction
                 newMeshCol.sharedMesh = new() { vertices = FractureHelperFunc.ConvertPositionsWithMatrix(FractureHelperFunc.ConvertPositionsWithMatrix(ogMeshCol.sharedMesh.vertices, ogCol.transform.localToWorldMatrix), targetTrans.worldToLocalMatrix) };
                 newCollider = newMeshCol;
             }
-            else if (ogCol is BoxCollider)
+            else if (ogCol is BoxCollider originalBoxCollider)
             {
-                BoxCollider originalBoxCollider = (BoxCollider)ogCol;
                 BoxCollider newBoxCollider = targetTrans.gameObject.AddComponent<BoxCollider>();
 
                 // Copy properties from the original collider to the new collider
@@ -955,9 +983,8 @@ namespace Zombie1111_uDestruction
                 newBoxCollider.size = originalBoxCollider.size;
                 newCollider = newBoxCollider;
             }
-            else if (ogCol is SphereCollider)
+            else if (ogCol is SphereCollider originalSphereCollider)
             {
-                SphereCollider originalSphereCollider = (SphereCollider)ogCol;
                 SphereCollider newSphereCollider = targetTrans.gameObject.AddComponent<SphereCollider>();
 
                 // Copy properties from the original collider to the new collider
@@ -965,9 +992,8 @@ namespace Zombie1111_uDestruction
                 newSphereCollider.radius = originalSphereCollider.radius;
                 newCollider = newSphereCollider;
             }
-            else if (ogCol is CapsuleCollider)
+            else if (ogCol is CapsuleCollider originalCapsuleCollider)
             {
-                CapsuleCollider originalCapsuleCollider = (CapsuleCollider)ogCol;
                 CapsuleCollider newCapsuleCollider = targetTrans.gameObject.AddComponent<CapsuleCollider>();
 
                 // Copy properties from the original collider to the new collider
@@ -981,6 +1007,7 @@ namespace Zombie1111_uDestruction
             newCollider.contactOffset = ogCol.contactOffset;
             newCollider.isTrigger = ogCol.isTrigger;
             newCollider.sharedMaterial = ogCol.sharedMaterial;
+            newCollider.hasModifiableContacts = ogCol.hasModifiableContacts;
             return newCollider;
         }
 

@@ -1,5 +1,7 @@
 using UnityEngine;
 using System.Collections;
+using Unity.Collections;
+using Zombie1111_uDestruction;
 
 namespace TrueTrace
 {
@@ -25,10 +27,29 @@ namespace TrueTrace
         private float totalRun = 1.0f;
         private bool StopMovement = true;
         private bool IsPressingT = false;
+        public PhysicMaterial phyMat;
         //private bool IsLocked = true;
+
+        private FractureGlobalHandler globalF;
+
+        private void Start()
+        {
+            globalF = GameObject.FindObjectOfType<FractureGlobalHandler>();
+        }
+
+        private Rigidbody debugRb;
+
         void Update()
         {
-            
+            //if (debugRb != null) print(debugRb.velocity.magnitude);
+
+            // Get mouse wheel input
+            float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
+
+            // Adjust speed based on mouse wheel input
+            Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);
+
+
             if (Input.GetKeyDown(KeyCode.Mouse0) == true)
             {
                 GameObject newO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -37,6 +58,12 @@ namespace TrueTrace
                 Rigidbody rb = newO.AddComponent<Rigidbody>();
                 rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 rb.velocity = transform.forward * 20.0f;
+                rb.interpolation = RigidbodyInterpolation.Interpolate;
+                rb.mass = 3.0f;
+                debugRb = rb;
+                globalF.OnAddRigidbody(rb);
+                //newO.GetComponent<Collider>().hasModifiableContacts = true;
+                newO.GetComponent<Collider>().sharedMaterial = phyMat;
             }
 
             if (doMoveCam == false) return;
@@ -87,7 +114,7 @@ namespace TrueTrace
                 Vector3 p = GetBaseInput();
                 if (Input.GetKey(KeyCode.LeftShift))
                 {
-                    totalRun += Time.deltaTime;
+                    totalRun += Time.unscaledDeltaTime;
                     p = p * totalRun * shiftAdd;
                     p.x = Mathf.Clamp(p.x, -maxShift, maxShift);
                     p.y = Mathf.Clamp(p.y, -maxShift, maxShift);
@@ -99,7 +126,7 @@ namespace TrueTrace
                     p = p * mainSpeed;
                 }
 
-                p = p * Time.deltaTime;
+                p = p * Time.unscaledDeltaTime;
                 Vector3 newPosition = transform.position;
                 if (Input.GetKey(KeyCode.Space))
                 { //If player wants to move on X and Z axis only
