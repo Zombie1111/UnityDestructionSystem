@@ -13,6 +13,7 @@ using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using UnityEngine.Experimental.AI;
 using System.Threading;
+using UnityEngine.UIElements;
 
 namespace Zombie1111_uDestruction
 {
@@ -329,7 +330,7 @@ namespace Zombie1111_uDestruction
             public float massMultiplier = 0.5f;
             public float drag = 0.0f;
             public float angularDrag = 0.05f;
-            public CollisionDetectionMode collisionDetection = CollisionDetectionMode.Discrete;
+            public ColDetectMode collisionDetection = ColDetectMode.discrete;
             public RigidbodyInterpolation interpolate = RigidbodyInterpolation.Interpolate;
             public RigidbodyConstraints constraints;
         }
@@ -343,6 +344,12 @@ namespace Zombie1111_uDestruction
             public float drag = 0.0f;
             public float angularDrag = 0.05f;
             public RigidbodyInterpolation interpolate = RigidbodyInterpolation.Interpolate;
+        }
+
+        private enum ColDetectMode
+        {
+            discrete,
+            speculative
         }
 
         private enum NormalRecalcMode
@@ -1918,7 +1925,7 @@ namespace Zombie1111_uDestruction
 
             //create+set rigidbody
             allFracParents[parentIndex].parentRb = allFracParents[parentIndex].parentTrans.GetOrAddComponent<Rigidbody>();
-            allFracParents[parentIndex].parentRb.collisionDetectionMode = phyMainOptions.collisionDetection;
+            allFracParents[parentIndex].parentRb.collisionDetectionMode = phyMainOptions.collisionDetection == ColDetectMode.discrete ? CollisionDetectionMode.Discrete : CollisionDetectionMode.ContinuousSpeculative;
             allFracParents[parentIndex].parentRb.interpolation = phyMainOptions.interpolate;
             allFracParents[parentIndex].parentRb.useGravity = phyMainOptions.useGravity;
             allFracParents[parentIndex].parentRb.drag = phyMainOptions.drag;
@@ -2124,7 +2131,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// The parts combined avg extent (Multiplied by 1.1). 
         /// </summary>
-        [SerializeField] private float partAvgBoundsExtent = 0.0f;
+        public float partAvgBoundsExtent = 0.0f;
 
         [System.Serializable]
         public struct IntList
@@ -2157,7 +2164,7 @@ namespace Zombie1111_uDestruction
             newRbToMove.Clear();
         }
 
-        private struct DamageToCompute
+        private class DamageToCompute
         {
             public int partIndex;
             public FractureGlobalHandler.GlobalRbData rbCauseImpact;
@@ -2217,6 +2224,11 @@ namespace Zombie1111_uDestruction
             damComputing.AddRange(damToCompute);
             damToCompute.Clear();
 
+            foreach (var dam in damComputing)
+            {
+                Debug.DrawLine(dam.impactPosition, dam.impactPosition + dam.impactVelocity.normalized, Color.red, 5.0f);
+            }
+
             //run compute thread
             damParentPartIndexes = allFracParents.Select(fParent => fParent.partIndexes).ToArray();
 
@@ -2259,13 +2271,48 @@ namespace Zombie1111_uDestruction
 
         private void DestructionSolverThread()
         {
+            ////denoise collision input by surface area (Larger area = less force at each point)
+            //List<int> leftToSearch = Enumerable.Range(0, damComputing.Count).ToList(); //contains indexes for damComputing
+            //List<int> nearDam = new(); //contains indexes for damComputing
+            //float tempSurfaceArea;
+            //
+            //while (leftToSearch.Count > 0)
+            //{
+            //    nearDam.Clear();
+            //    nearDam.Add(leftToSearch[0]);
+            //    leftToSearch.RemoveAt(0);
+            //
+            //    for (int nLi = 0; nLi < nearDam.Count; nLi++)
+            //    {
+            //        foreach (int pI in allParts[damComputing[nearDam[nLi]].partIndex].neighbourParts)
+            //        {
+            //            for (int i = leftToSearch.Count - 1; i >= 0; i--)
+            //            {
+            //                if (damComputing[leftToSearch[i]].partIndex == pI)
+            //                {
+            //                    nearDam.Add(leftToSearch[i]);
+            //                    leftToSearch.RemoveAt(i);
+            //                    break;
+            //                }
+            //            }
+            //        }
+            //    }
+            //
+            //    //devide all connected impact positions by count * avgPartSize. 
+            //    tempSurfaceArea = nearDam.Count * partAvgBoundsExtent;
+            //    foreach (int dI in nearDam)
+            //    {
+            //        damComputing[dI].impactForce /= tempSurfaceArea;
+            //    }
+            //}
+
+            //break parts that was directly hit
             damPartsToBreak.Clear();
             damNewParentParts.Clear();
             List<Rigidbody> partsToBreakUsedRbs = new();
             bool rbAlreadyUsed;
             float velCon;
 
-            //break parts that was directly hit
             for (int i = 0; i < damComputing.Count; i += 1)
             {
                 if (damPartsBrokeness[damComputing[i].partIndex] >= 1.0f) continue; //continue if already broken
