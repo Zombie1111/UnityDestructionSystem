@@ -69,6 +69,8 @@ namespace Zombie1111_uDestruction
             Debug.Log("Removed " + count + " fractures");
         }
 
+        private string ff;
+
         [MenuItem("Tools/Fracture/CopyPropertiesFromLastSelected")]
         private static void CopyPropertiesFromLastSelected()
         {

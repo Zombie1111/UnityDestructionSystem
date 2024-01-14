@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.Collections;
+using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
 
@@ -152,227 +153,150 @@ namespace Zombie1111_uDestruction
             rigidbodiesInstanceId.TryUpdate(rbWithNewMass.GetInstanceID(), new() { rb = rbWithNewMass, rbMass = rbWithNewMass.mass }, null);
         }
 
-        private double timeDebug;
-
-        private class ImpRbData
+        private class ImpPair
         {
-            public int bodyId;
-            public float impForce;
             public Vector3 impVel;
-            public GlobalRbData impRbCause;
-            public List<int> pairIndexes = new();
+            public float impForce;
+            public Rigidbody rbCausedImp;
+            public FractureThis fracThis;
+            public HashSet<int> pairIndexes;
+            public List<ImpPoint> impPoints;
+        }
+
+        private class ImpPoint
+        {
+            public int partIndex;
+            public Vector3 impPos;
         }
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
         {
-            //Stopwatch stopW = new();
-            //stopW.Start();
-            float speedA;
-            float speedB;
-            GlobalFracData colPart;
-            bool didAnyPartBreak;
-            GlobalRbData rbCauseImpact;
+            //get all impact points
+            List<ImpPair> impPairs = new();
 
-            //get data from contacts
-            List<ImpRbData> impData = new();
-            ModifiableContactPair pair;
-            int iToUse;
-            int pairI;
-            HashSet<int> usedCols = new();
-
-            for (pairI = 0; pairI < pairs.Length; pairI++)
+            for (int i = 0; i < pairs.Length; i++)
             {
-                pair = pairs[pairI];
-                if (usedCols.Add(pair.colliderInstanceID) == false && usedCols.Add(pair.otherColliderInstanceID) == false) continue;
+                GetPairImpact(pairs[i], i);
+            }
 
-                speedA = Math.Max(pair.bodyVelocity.magnitude - pair.bodyAngularVelocity.magnitude, 0.0f);
-                speedB = Math.Max(pair.otherBodyVelocity.magnitude - pair.otherBodyAngularVelocity.magnitude, 0.0f);
-            
-                if (speedA > speedB)
+            //denoise impact points and register them
+            bool didAnyBreak;
+
+            for (int i = 0; i < impPairs.Count; i++)
+            {
+                float ogDForce = impPairs[i].impForce;
+                impPairs[i].impForce /= math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f);
+                didAnyBreak = false;
+
+                //print("divide " + math.max(impPairs[i].impPoints.Count, 1.0f) + " force " + ogDForce
+                //+ " force calced " + (impPairs[i].impForce / math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f))
+                //+ " cCount " + impPairs[i].pairIndexes.Count);
+
+                foreach (var iPoint in impPairs[i].impPoints)
                 {
-                    if (speedA < damageThreshold) continue;
+                    FractureHelperFunc.Debug_drawBox(iPoint.impPos, 0.1f, Color.magenta, 1.0f);
+                    if (impPairs[i].fracThis.RegisterImpact(
+                        iPoint.partIndex,
+                        impPairs[i].impForce,
+                        impPairs[i].impVel,
+                        iPoint.impPos,
+                        impPairs[i].rbCausedImp) == true)
+                    {
+                        didAnyBreak = true;
+                    }
+                }
 
-                    AddNewRbData(pair.bodyInstanceID, pair.bodyVelocity);
+                if (didAnyBreak == false) continue;
+
+                //when atleast one part will break, ignore contact
+                foreach (int pairI in impPairs[i].pairIndexes)
+                {
+                    //if (pairs[pairI].contactCount > 1)
+                    //{
+                    //    FractureHelperFunc.Debug_drawBox(pairs[pairI].GetPoint(pairI), 0.1f, Color.magenta, 5.0f);
+                    //    Debug.Log("force " + impPairs[i].impForce + " vel " + impPairs[i].impVel.magnitude + " count " + pairs[pairI].contactCount);
+                    //}
+
+                    for (int ii = 0; ii < pairs[pairI].contactCount; ii++) pairs[pairI].IgnoreContact(ii);
+                }
+            }
+
+            void GetPairImpact(ModifiableContactPair pair, int pairI)
+            {
+                //get the rigidbody that caused the impact
+                GlobalRbData rbCausedImp;
+                float impForce;
+                Vector3 impVel;
+
+                if (pair.bodyVelocity.sqrMagnitude > pair.otherBodyVelocity.sqrMagnitude)
+                {
+                    impVel = pair.bodyVelocity;
+                    impForce = impVel.magnitude - pair.otherBodyVelocity.magnitude;
+
+                    if (impForce < damageThreshold) return;
+                    if (rigidbodiesInstanceId.TryGetValue(pair.bodyInstanceID, out rbCausedImp) == false) return;
                 }
                 else
                 {
-                    if (speedB < damageThreshold) continue;
+                    impVel = pair.otherBodyVelocity;
+                    impForce = impVel.magnitude - pair.bodyVelocity.magnitude;
 
-                    AddNewRbData(pair.otherBodyInstanceID, pair.otherBodyVelocity);
+                    if (impForce < damageThreshold) return;
+                    if (rigidbodiesInstanceId.TryGetValue(pair.otherBodyInstanceID, out rbCausedImp) == false) return;
+                }
+
+                //add the hit point to the list if we hit a part
+                TryAddImpact(pair.colliderInstanceID);
+                TryAddImpact(pair.otherColliderInstanceID);
+
+                void TryAddImpact(int colId)
+                {
+                    //get the part that was hit
+                    if (partsColInstanceId.TryGetValue(colId, out GlobalFracData impPart) == false) return;
+
+                    //get if cause source already exists, if not add it
+                    int iToUse = -1;
+
+                    for (int i = 0; i < impPairs.Count; i++)
+                    {
+                        if (impPairs[i].fracThis == impPart.fracThis && impPairs[i].rbCausedImp == rbCausedImp.rb)
+                        {
+                            iToUse = i;
+                            break;
+                        }
+                    }
+
+                    if (iToUse < 0)
+                    {
+                        //add new cause source
+                        iToUse = impPairs.Count;
+
+                        impPairs.Add(new() {
+                            fracThis = impPart.fracThis,
+                            impForce = impForce * rbCausedImp.rbMass,
+                            rbCausedImp = rbCausedImp.rb,
+                            impVel = impVel,
+                            pairIndexes = new(),
+                            impPoints = new()});
+                    }
+
+                    impPairs[iToUse].pairIndexes.Add(pairI);
+
+                    //get if this part in cause source already has been hit
+                    foreach (var iPoint in impPairs[iToUse].impPoints)
+                    {
+                        if (iPoint.partIndex == impPart.partIndex)
+                        {
+                            return;
+                        }
+                    }
+
+                    //add hit part to impact list
+                    impPairs[iToUse].impPoints.Add(new() {
+                        impPos = pair.GetPoint(0), //Maybe we want to loop and add all contact points?
+                        partIndex = impPart.partIndex });
                 }
             }
-
-            ////denoise contact data input
-            //for (int impI = 0; impI < impData.Count; impI++)
-            //{
-            //    impData[impI].impForce /= impData[impI].pairIndexes.Count;
-            //}
-
-            //register contacts to destruction solvers so the actual destruction is computed as soon as possible
-            float forceMulti;
-
-            for (int impI = 0; impI < impData.Count; impI++)
-            {
-                forceMulti = impData[impI].pairIndexes.Count;
-                print(impData[impI].pairIndexes.Count + " " + impData[impI].impVel + " " + impData[impI].impForce);
-
-                foreach (int iPair in impData[impI].pairIndexes)
-                {
-                    pair = pairs[iPair];
-                    didAnyPartBreak = false;
-
-                    if (partsColInstanceId.TryGetValue(pair.colliderInstanceID, out colPart) == true)
-                    {
-                        didAnyPartBreak = colPart.fracThis.RegisterImpact(
-                            colPart.partIndex,
-                            impData[impI].impForce / Math.Max(forceMulti * colPart.fracThis.partAvgBoundsExtent, 1.0f),
-                            impData[impI].impVel,
-                            pair.GetPoint(0),
-                            impData[impI].impRbCause);
-                    }
-
-                    if (partsColInstanceId.TryGetValue(pair.otherColliderInstanceID, out colPart) == true)
-                    {
-                        if (didAnyPartBreak == false) didAnyPartBreak = colPart.fracThis.RegisterImpact(
-                            colPart.partIndex,
-                            impData[impI].impForce / Math.Max(forceMulti * colPart.fracThis.partAvgBoundsExtent, 1.0f),
-                            impData[impI].impVel,
-                            pair.GetPoint(0),
-                            impData[impI].impRbCause);
-                        else colPart.fracThis.RegisterImpact(
-                            colPart.partIndex,
-                            impData[impI].impForce / Math.Max(forceMulti * colPart.fracThis.partAvgBoundsExtent, 1.0f),
-                            impData[impI].impVel,
-                            pair.GetPoint(0),
-                            impData[impI].impRbCause);
-                    }
-
-                    if (didAnyPartBreak == false) continue;
-
-                    //if any part broke, ignore the collision
-                    for (int i = 0; i < pair.contactCount; i++)
-                    {
-                        //pair.SetMaxImpulse(i, impactVelocity.magnitude / 10.0f);
-                        pair.IgnoreContact(i);
-                    }
-                }
-            }
-
-            void AddNewRbData(int bodyId, Vector3 bodyVel)
-            {
-                //get if body already exists
-                iToUse = -1;
-
-                for (int ii = 0; ii < impData.Count; ii++)
-                {
-                    if (impData[ii].bodyId == bodyId)
-                    {
-                        iToUse = ii;
-                        break;
-                    }
-                }
-
-                //if body do not already exists, create new
-                if (iToUse < 0)
-                {
-                    iToUse = impData.Count;
-
-                    impData.Add(new()
-                    {
-                        impForce = Math.Abs(rigidbodiesInstanceId.TryGetValue(bodyId, out rbCauseImpact) == true ? ((speedA - speedB) * rbCauseImpact.rbMass) : (speedA - speedB)),
-                        impVel = bodyVel,
-                        impRbCause = rbCauseImpact,
-                        bodyId = bodyId,
-                    });
-                }
-
-                //add this pair to the body index
-                impData[iToUse].pairIndexes.Add(pairI);
-            }
-
-            //timeDebug += (double)stopW.ElapsedTicks / Stopwatch.Frequency * 1000.0;
-            //stopW.Stop();
-
-
-
-
-
-
-
-
-            //Debug.Log("Main mod");
-            //
-            ////Stopwatch stopW = new();
-            ////stopW.Start();
-            //float speedA;
-            //float speedB;
-            //GlobalFracData colPart;
-            //float impactForce;
-            //Vector3 impactVelocity;
-            //Vector3 impactVelocityNor;
-            //bool didAnyPartBreak;
-            //Vector3 colPos;
-            //GlobalRbData rbCauseImpact;
-            //
-            //foreach (var pair in pairs)
-            //{
-            //    Debug.Log("Sub mod");
-            //    //get impact force
-            //    speedA = Math.Max(pair.bodyVelocity.magnitude - pair.bodyAngularVelocity.magnitude, 0.0f);
-            //    speedB = Math.Max(pair.otherBodyVelocity.magnitude - pair.otherBodyAngularVelocity.magnitude, 0.0f);
-            //    //speedA = pair.bodyVelocity.magnitude;
-            //    //speedB = pair.otherBodyVelocity.magnitude;
-            //
-            //    if (speedA > speedB)
-            //    {
-            //        if (speedA < damageThreshold) continue;
-            //
-            //        colPos = pair.position;
-            //        if (rigidbodiesInstanceId.TryGetValue(pair.bodyInstanceID, out rbCauseImpact) == true) impactForce = (speedA - speedB) * rbCauseImpact.rbMass;
-            //        else impactForce = speedA - speedB;
-            //        //UnityEngine.Debug.Log("Mass " + pair.massProperties.inverseInertiaScale + " " + pair.massProperties.otherInverseInertiaScale);
-            //        impactVelocity = pair.bodyVelocity;
-            //        //rbCauseImpact = pair.bodyInstanceID;
-            //    }
-            //    else
-            //    {
-            //        if (speedB < damageThreshold) continue;
-            //
-            //        colPos = pair.otherPosition;
-            //        if (rigidbodiesInstanceId.TryGetValue(pair.otherBodyInstanceID, out rbCauseImpact) == true) impactForce = (speedB - speedA) * rbCauseImpact.rbMass;
-            //        else impactForce = speedB - speedA;
-            //        //UnityEngine.Debug.Log("Mass " + pair.massProperties.inverseInertiaScale + " " + pair.massProperties.otherInverseInertiaScale);
-            //        impactVelocity = pair.otherBodyVelocity;
-            //    }
-            //
-            //    //register the impact and get if any part broke
-            //    didAnyPartBreak = false;
-            //
-            //    if (partsColInstanceId.TryGetValue(pair.colliderInstanceID, out colPart) == true)
-            //    {
-            //        didAnyPartBreak = colPart.fracThis.RegisterImpact(colPart.partIndex, impactForce, impactVelocity, pair.GetPoint(0), rbCauseImpact);
-            //    }
-            //
-            //    if (partsColInstanceId.TryGetValue(pair.otherColliderInstanceID, out colPart) == true)
-            //    {
-            //        if (didAnyPartBreak == false) didAnyPartBreak = colPart.fracThis.RegisterImpact(colPart.partIndex, impactForce, impactVelocity, pair.GetPoint(0), rbCauseImpact);
-            //        else colPart.fracThis.RegisterImpact(colPart.partIndex, impactForce, impactVelocity, pair.GetPoint(0), rbCauseImpact);
-            //    }
-            //
-            //    if (didAnyPartBreak == false) continue;
-            //
-            //    //if any part broke, ignore the collision
-            //    impactVelocityNor = -impactVelocity.normalized;
-            //
-            //    for (int i = 0; i < pair.contactCount; i++)
-            //    {
-            //        //pair.SetMaxImpulse(i, impactVelocity.magnitude / 10.0f);
-            //        pair.IgnoreContact(i);
-            //    }
-            //}
-            //
-            ////timeDebug += (double)stopW.ElapsedTicks / Stopwatch.Frequency * 1000.0;
-            ////stopW.Stop();
         }
     }
 }
