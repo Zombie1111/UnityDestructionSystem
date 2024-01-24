@@ -59,9 +59,9 @@ namespace TrueTrace
                 rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 rb.velocity = transform.forward * 20.0f;
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
-                rb.mass = 2.0f;
+                rb.mass = 1.0f;
                 debugRb = rb;
-                globalF.OnAddRigidbody(rb);
+                globalF.OnAddRigidbody(rb, 3.0f);
                 //newO.GetComponent<Collider>().hasModifiableContacts = true;
                 newO.GetComponent<Collider>().sharedMaterial = phyMat;
             }

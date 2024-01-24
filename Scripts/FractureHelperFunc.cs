@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Unity.VisualScripting.Antlr3.Runtime;
+
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -412,6 +414,17 @@ namespace Zombie1111_uDestruction
                     vectors.RemoveAt(ii);
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns 1 if dir2 point in the same direction as dir1, Returns -1 if dir2 point in the opposite direction as dir2
+        /// </summary>
+        /// <param name="dir1">Should be normalized</param>
+        /// <param name="dir2">Should be normalized</param>
+        /// <returns></returns>
+        public static float GetDirectionSimularity(Vector3 dir1, Vector3 dir2)
+        {
+            return Vector3.Dot(dir1, dir2);
         }
 
         /// <summary>
@@ -871,24 +884,32 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="poss"></param>
         /// <returns></returns>
-        public static HashSet<Collider> LinecastsBetweenPositions(List<Vector3> poss)
+        public static HashSet<Collider> LinecastsBetweenPositions(List<Vector3> poss, PhysicsScene phyScene)
         {
-            RaycastHit nHit;
-            HashSet<Collider> hits = new();
-            for (int i = 1; i < poss.Count; i += 1)
+            RaycastHit[] rHits = new RaycastHit[5];
+            int rHitCount;
+            HashSet<Collider> cHits = new();
+            Vector3 rayDir;
+
+            for (int i = 0; i < poss.Count; i++)
             {
-                for (int ii = 1; ii < poss.Count; ii += 1)
+                for (int ii = 0; ii < poss.Count; ii++)
                 {
                     if (ii == i) continue;
 
-                    Physics.Linecast(poss[ii], poss[i], out nHit);
-                    if (nHit.collider != null) hits.Add(nHit.collider);
+                    rayDir = poss[i] - poss[ii];
+                    rHitCount = phyScene.Raycast(poss[ii], rayDir.normalized, rHits, rayDir.magnitude);
+
+                    for (int rI = 0; rI < rHitCount; rI++)
+                    {
+                        if (rHits[rI].collider != null) cHits.Add(rHits[rI].collider);
+                    }
                     //Physics.Linecast(poss[i], poss[ii], out nHit);
                     //if (nHit.collider != null) hits.Add(nHit.collider);
                 }
             }
 
-            return hits;
+            return cHits;
         }
 
         // Function to find the most similar triangle in the mesh
@@ -1052,6 +1073,37 @@ namespace Zombie1111_uDestruction
 
             // Calculate the geometric center as the midpoint of the bounding box
             return (min + max) * 0.5f;
+        }
+
+        /// <summary>
+        /// Subtracts the given vector lenght by amount
+        /// </summary>
+        /// <param name="vector"></param>
+        /// <param name="amount"></param>
+        /// <returns></returns>
+        public static Vector3 SubtractMagnitude(Vector3 vector, float amount)
+        {
+            if (vector.magnitude <= amount) return Vector3.zero;
+            return vector.normalized * (vector.magnitude - amount);
+        }
+
+        /// <summary>
+        /// Returns true if transToLookFor is a parent of transToSearchFrom (Includes indirect parents like transform.parent.parent)
+        /// </summary>
+        /// <param name="transToLookFor"></param>
+        /// <param name="transToSearchFrom"></param>
+        /// <returns></returns>
+        public static bool GetIfTransformIsAnyParent(Transform transToLookFor, Transform transToSearchFrom)
+        {
+            if (transToLookFor == transToSearchFrom) return true;
+
+            while (transToSearchFrom.parent != null)
+            {
+                transToSearchFrom = transToSearchFrom.parent;
+                if (transToSearchFrom == transToLookFor) return true;
+            }
+
+            return false;
         }
 
 #if UNITY_EDITOR

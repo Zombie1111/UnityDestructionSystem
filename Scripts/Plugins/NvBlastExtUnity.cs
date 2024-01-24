@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Assertions;
@@ -104,10 +105,12 @@ public class NvMesh : DisposablePtr
         return _Mesh_getIndexesCount(this.ptr);
     }
 
+    [System.Diagnostics.DebuggerHidden]//Most useless fucking attribute, does not do a shit
     protected override void Release()
     {
         NvLogger.Log("_Mesh_Release");
-        _Mesh_Release(this.ptr);
+
+        _Mesh_Release(this.ptr); //Throws Exceptions even tho it is working
     }
 
     //Unity Helper Functions
@@ -284,10 +287,11 @@ public class NvVoronoiSitesGenerator : DisposablePtr
         return _NvVoronoiSitesGenerator_getSitesCount(this.ptr);
     }
 
+    [System.Diagnostics.DebuggerHidden]//useless
     protected override void Release()
     {
         NvLogger.Log("_VoronoiSitesGenerator_Release");
-        _VoronoiSitesGenerator_Release(this.ptr);
+        _VoronoiSitesGenerator_Release(this.ptr);//Throws exceptions even tho it is working
     }
 
     //Unity Specific
@@ -295,14 +299,14 @@ public class NvVoronoiSitesGenerator : DisposablePtr
     {
         if (smr == null)
         {
-            Debug.Log("No Skinned Mesh Renderer");
+            UnityEngine.Debug.Log("No Skinned Mesh Renderer");
             return;
         }
 
         Animator anim = smr.transform.root.GetComponent<Animator>();
         if (anim == null)
         {
-            Debug.Log("Missing Animator");
+            UnityEngine.Debug.Log("Missing Animator");
             return;
         }
 

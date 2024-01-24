@@ -2,10 +2,13 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using Unity.Collections;
 using Unity.Mathematics;
 using Unity.VisualScripting;
+using UnityEditor;
 using UnityEngine;
 
 namespace Zombie1111_uDestruction
@@ -24,8 +27,29 @@ namespace Zombie1111_uDestruction
         [SerializeField] [Tooltip("Only exposed for debugging purposes")] private List<GlobalFracData> debugFractureInstanceIds = new();
         [SerializeField] [Tooltip("Only exposed for debugging purposes")] private List<GlobalRbData> debugRigidbodyInstanceIds = new();
 
-        private void OnDrawGizmosSelected()
+        private void OnDrawGizmos()
         {
+            //maintain temp saveAssets, potential problem, if scene is not saved but the asset is this may leave unused temp assets
+            for (int i = tempSaveAssets.Count - 1; i >= 0 ; i--)
+            {
+                //if temp has been removed
+                if (tempSaveAssets[i].saveAsset == null)
+                {
+                    tempSaveAssets.RemoveAt(i);
+                    continue;
+                }
+
+                //if temp should be removed
+                if (tempSaveAssets[i].fracThis == null
+                    || tempSaveAssets[i].fracThis.saveAsset == null
+                    || tempSaveAssets[i].fracThis.saveAsset != tempSaveAssets[i].saveAsset)
+                {
+                    AssetDatabase.DeleteAsset(AssetDatabase.GetAssetPath(tempSaveAssets[i].saveAsset));
+                    tempSaveAssets.RemoveAt(i);
+                }
+            }
+
+            //update debug variabels
             if (partsColInstanceId.Count != debugFractureInstanceIds.Count)
             {
                 debugFractureInstanceIds = partsColInstanceId.Values.ToList();
@@ -58,7 +82,7 @@ namespace Zombie1111_uDestruction
             Rigidbody[] bodies = GameObject.FindObjectsByType<Rigidbody>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (Rigidbody rb in bodies)
             {
-                OnAddRigidbody(rb);
+                OnAddRigidbody(rb, rb.mass);
                 //rigidbodiesInstanceId.TryAdd(rb.GetInstanceID(), rb);
             }
 
@@ -138,9 +162,9 @@ namespace Zombie1111_uDestruction
         /// This function should be called everytime you add a rigidbody to any object (Call after the rigidbody is added)
         /// </summary>
         /// <param name="addedRb"></param>
-        public void OnAddRigidbody(Rigidbody addedRb)
+        public void OnAddRigidbody(Rigidbody addedRb, float mass)
         {
-            rigidbodiesInstanceId.TryAdd(addedRb.GetInstanceID(), new() { rb = addedRb, rbMass = addedRb.mass });
+            rigidbodiesInstanceId.TryAdd(addedRb.GetInstanceID(), new() { rb = addedRb, rbMass = mass });
         }
 
         /// <summary>
@@ -148,10 +172,51 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="rbWithNewMass"></param>
         /// <param name="newMass"></param>
-        public void OnChangeRigidbodyMass(Rigidbody rbWithNewMass)
+        public void OnSetRigidbodyMass(Rigidbody rbWithNewMass, float newMass)
         {
-            rigidbodiesInstanceId.TryUpdate(rbWithNewMass.GetInstanceID(), new() { rb = rbWithNewMass, rbMass = rbWithNewMass.mass }, null);
+            rigidbodiesInstanceId.TryUpdate(rbWithNewMass.GetInstanceID(), new() { rb = rbWithNewMass, rbMass = newMass }, null);
         }
+
+#if UNITY_EDITOR
+        [SerializeField] private List<TempSaveAsset> tempSaveAssets = new();
+
+        [System.Serializable]
+        private class TempSaveAsset
+        {
+            public FractureSaveAsset saveAsset;
+            public FractureThis fracThis;
+        }
+
+        /// <summary>
+        /// Creates a temporary saveAsset and assigns it to createFor (The asset will be destroyed automatically if createFor is no longer using it) Editor only
+        /// </summary>
+        /// <param name="createFor"></param>
+        /// <returns>False if unable to create a new temp saveAsset</returns>
+        public bool TryCreateTempSaveAsset(FractureThis createFor)
+        {
+            //verify that the given fracture is valid
+            if (createFor == null || createFor.saveAsset != null) return false;
+
+            //Get the path to the folder where all temporary frac save assets should be stored
+            string folderPath = Path.GetDirectoryName(AssetDatabase.GetAssetPath(MonoScript.FromMonoBehaviour(this))) + @"\TempFracSaveAssets";
+            folderPath = folderPath.Replace(@"\"[0], '/');
+            if (AssetDatabase.IsValidFolder(folderPath) == false)
+            {
+                Debug.LogError("The fracture temp folder is missing, expected " + folderPath + " to be a valid path");
+                return false;
+            }
+
+            //Create the asset and save it
+            folderPath += "/tempFracSaveAsset.asset";
+            folderPath = AssetDatabase.GenerateUniqueAssetPath(folderPath);
+            FractureSaveAsset fracSaveAsset = ScriptableObject.CreateInstance<FractureSaveAsset>();
+            AssetDatabase.CreateAsset(fracSaveAsset, folderPath);
+            tempSaveAssets.Add(new() { saveAsset = fracSaveAsset, fracThis = createFor });
+            createFor.saveAsset = fracSaveAsset;
+
+            return true;
+        }
+#endif
 
         private class ImpPair
         {
@@ -161,6 +226,7 @@ namespace Zombie1111_uDestruction
             public FractureThis fracThis;
             public HashSet<int> pairIndexes;
             public List<ImpPoint> impPoints;
+            public bool ignoreCauseRb;
         }
 
         private class ImpPoint
@@ -176,6 +242,12 @@ namespace Zombie1111_uDestruction
 
             for (int i = 0; i < pairs.Length; i++)
             {
+                //Debug.Log(pairs[i].contactCount);
+                //for (int ii = 0; ii < pairs[i].contactCount; ii++)
+                //{
+                //    FractureHelperFunc.Debug_drawBox(pairs[i].GetPoint(ii), 0.03f, Color.magenta, 1.0f);
+                //}
+
                 GetPairImpact(pairs[i], i);
             }
 
@@ -184,23 +256,25 @@ namespace Zombie1111_uDestruction
 
             for (int i = 0; i < impPairs.Count; i++)
             {
-                float ogDForce = impPairs[i].impForce;
-                impPairs[i].impForce /= math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f);
-                didAnyBreak = false;
+                foreach (var iii in impPairs[i].pairIndexes)
+                {
+                    Debug.DrawLine(pairs[iii].GetPoint(0), pairs[iii].GetPoint(0) + pairs[iii].GetNormal(0).normalized, Color.magenta, 0.5f, false);
+                }
 
-                //print("divide " + math.max(impPairs[i].impPoints.Count, 1.0f) + " force " + ogDForce
-                //+ " force calced " + (impPairs[i].impForce / math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f))
-                //+ " cCount " + impPairs[i].pairIndexes.Count);
+                //Debug.Log("count " +impPairs[i].impPoints.Count + " divide " + impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent + "ogforce " + impPairs[i].impForce);
+                //impPairs[i].impForce /= math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f);
+                didAnyBreak = false;
+                Debug.DrawLine(impPairs[i].impPoints[0].impPos, impPairs[i].impPoints[0].impPos + impPairs[i].impVel.normalized, Color.yellow, 0.5f, false);
 
                 foreach (var iPoint in impPairs[i].impPoints)
                 {
-                    FractureHelperFunc.Debug_drawBox(iPoint.impPos, 0.1f, Color.magenta, 1.0f);
+
                     if (impPairs[i].fracThis.RegisterImpact(
                         iPoint.partIndex,
                         impPairs[i].impForce,
                         impPairs[i].impVel,
                         iPoint.impPos,
-                        impPairs[i].rbCausedImp) == true)
+                        impPairs[i].ignoreCauseRb == false ? impPairs[i].rbCausedImp : null) == true)
                     {
                         didAnyBreak = true;
                     }
@@ -209,14 +283,10 @@ namespace Zombie1111_uDestruction
                 if (didAnyBreak == false) continue;
 
                 //when atleast one part will break, ignore contact
+                ModifiableContactPair pair;
+
                 foreach (int pairI in impPairs[i].pairIndexes)
                 {
-                    //if (pairs[pairI].contactCount > 1)
-                    //{
-                    //    FractureHelperFunc.Debug_drawBox(pairs[pairI].GetPoint(pairI), 0.1f, Color.magenta, 5.0f);
-                    //    Debug.Log("force " + impPairs[i].impForce + " vel " + impPairs[i].impVel.magnitude + " count " + pairs[pairI].contactCount);
-                    //}
-
                     for (int ii = 0; ii < pairs[pairI].contactCount; ii++) pairs[pairI].IgnoreContact(ii);
                 }
             }
@@ -227,11 +297,13 @@ namespace Zombie1111_uDestruction
                 GlobalRbData rbCausedImp;
                 float impForce;
                 Vector3 impVel;
-
-                if (pair.bodyVelocity.sqrMagnitude > pair.otherBodyVelocity.sqrMagnitude)
+                float speedA = math.max(pair.bodyVelocity.magnitude - pair.bodyAngularVelocity.magnitude, 0.0f);
+                float speedB = math.max(pair.otherBodyVelocity.magnitude - pair.otherBodyAngularVelocity.magnitude, 0.0f);
+                
+                if (speedA > speedB)
                 {
                     impVel = pair.bodyVelocity;
-                    impForce = impVel.magnitude - pair.otherBodyVelocity.magnitude;
+                    impForce = speedA - speedB;
 
                     if (impForce < damageThreshold) return;
                     if (rigidbodiesInstanceId.TryGetValue(pair.bodyInstanceID, out rbCausedImp) == false) return;
@@ -239,7 +311,7 @@ namespace Zombie1111_uDestruction
                 else
                 {
                     impVel = pair.otherBodyVelocity;
-                    impForce = impVel.magnitude - pair.bodyVelocity.magnitude;
+                    impForce = speedB - speedA;
 
                     if (impForce < damageThreshold) return;
                     if (rigidbodiesInstanceId.TryGetValue(pair.otherBodyInstanceID, out rbCausedImp) == false) return;
@@ -256,13 +328,24 @@ namespace Zombie1111_uDestruction
 
                     //get if cause source already exists, if not add it
                     int iToUse = -1;
+                    bool ignoreRb = false;
 
                     for (int i = 0; i < impPairs.Count; i++)
                     {
-                        if (impPairs[i].fracThis == impPart.fracThis && impPairs[i].rbCausedImp == rbCausedImp.rb)
+                        if (impPairs[i].rbCausedImp == rbCausedImp.rb)
                         {
-                            iToUse = i;
-                            break;
+                            if (impPairs[i].fracThis == impPart.fracThis)
+                            {
+                                iToUse = i;
+                                break;
+                            }
+                            else if (impPairs[i].ignoreCauseRb == false)
+                            {
+                                //when should ignore a cause rb
+                                if (impPairs[i].fracThis.AllPartsResistanceThreaded[impPairs[i].impPoints[0].partIndex]
+                                    > impPart.fracThis.AllPartsResistanceThreaded[impPart.partIndex]) impPairs[i].ignoreCauseRb = true;
+                                else ignoreRb = true;
+                            }
                         }
                     }
 
@@ -277,7 +360,8 @@ namespace Zombie1111_uDestruction
                             rbCausedImp = rbCausedImp.rb,
                             impVel = impVel,
                             pairIndexes = new(),
-                            impPoints = new()});
+                            impPoints = new(),
+                            ignoreCauseRb = ignoreRb});
                     }
 
                     impPairs[iToUse].pairIndexes.Add(pairI);
