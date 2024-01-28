@@ -898,7 +898,7 @@ namespace Zombie1111_uDestruction
                     if (ii == i) continue;
 
                     rayDir = poss[i] - poss[ii];
-                    rHitCount = phyScene.Raycast(poss[ii], rayDir.normalized, rHits, rayDir.magnitude);
+                    rHitCount = phyScene.Raycast(poss[ii], rayDir.normalized, rHits, rayDir.magnitude, Physics.AllLayers, QueryTriggerInteraction.Ignore);
 
                     for (int rI = 0; rI < rHitCount; rI++)
                     {
@@ -1104,6 +1104,26 @@ namespace Zombie1111_uDestruction
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Assigns each axis of vecA with vecB if the same vecB axis is lower
+        /// </summary>
+        public static void GetEachAxisMin(ref Vector3 vecA, Vector3 vecB)
+        {
+            if (vecA.x > vecB.x) vecA.x = vecB.x;
+            if (vecA.y > vecB.y) vecA.y = vecB.y;
+            if (vecA.z > vecB.z) vecA.z = vecB.z;
+        }
+
+        /// <summary>
+        /// Assigns each axis of vecA with vecB if the same vecB axis is higher
+        /// </summary>
+        public static void GetEachAxisMax(ref Vector3 vecA, Vector3 vecB)
+        {
+            if (vecA.x < vecB.x) vecA.x = vecB.x;
+            if (vecA.y < vecB.y) vecA.y = vecB.y;
+            if (vecA.z < vecB.z) vecA.z = vecB.z;
         }
 
 #if UNITY_EDITOR

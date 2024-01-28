@@ -39,19 +39,11 @@ namespace TrueTrace
 
         private Rigidbody debugRb;
 
-        void Update()
+        private void FixedUpdate()
         {
-            //if (debugRb != null) print(debugRb.velocity.magnitude);
-
-            // Get mouse wheel input
-            float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
-
-            // Adjust speed based on mouse wheel input
-            Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);
-
-
-            if (Input.GetKeyDown(KeyCode.Mouse0) == true)
+            if (doShoot == true)
             {
+                doShoot = false;
                 GameObject newO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 newO.transform.localScale *= 0.2f;
                 newO.transform.position = transform.position;
@@ -64,6 +56,25 @@ namespace TrueTrace
                 globalF.OnAddRigidbody(rb, 3.0f);
                 //newO.GetComponent<Collider>().hasModifiableContacts = true;
                 newO.GetComponent<Collider>().sharedMaterial = phyMat;
+            }
+        }
+
+        private bool doShoot = false;
+
+        private void Update()
+        {
+            //if (debugRb != null) print(debugRb.velocity.magnitude);
+
+            // Get mouse wheel input
+            float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
+
+            // Adjust speed based on mouse wheel input
+            Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);
+
+
+            if (Input.GetKeyDown(KeyCode.Mouse0) == true)
+            {
+                doShoot = true;
             }
 
             if (doMoveCam == false) return;

@@ -5,6 +5,8 @@ using UnityEngine;
 using UnityEditor;
 using Unity.EditorCoroutines.Editor;
 using Unity.VisualScripting.FullSerializer;
+using UnityEditor.SearchService;
+using System.Runtime.InteropServices;
 
 namespace Zombie1111_uDestruction
 {
@@ -13,63 +15,47 @@ namespace Zombie1111_uDestruction
         [MenuItem("Tools/Fracture/Fracture All")]
         private static void FractureAll()
         {
-            EditorCoroutineUtility.StartCoroutineOwnerless(FractureAll(69, GameObject.FindObjectsOfType<FractureThis>(false)));
+            EditorCoroutineUtility.StartCoroutineOwnerless(FractureArray(GameObject.FindObjectsOfType<FractureThis>(false)));
         }
 
         [MenuItem("Tools/Fracture/Fracture Selected")]
         private static void FractureSelected()
         {
-            if (Selection.activeTransform == null)
-            {
-                Debug.LogError("No object selected");
-                return;
-            }
-
-            Transform[] transs = Selection.transforms;
-            FractureThis[] toFrac = new FractureThis[transs.Length];
-            for (int i = 0; i < toFrac.Length; i += 1)
-            {
-                toFrac[i] = transs[i].GetComponent<FractureThis>();
-            }
-
-            EditorCoroutineUtility.StartCoroutineOwnerless(FractureAll(69, toFrac));
+            EditorCoroutineUtility.StartCoroutineOwnerless(FractureArray(GetSelectedFractures().ToArray()));
         }
 
         [MenuItem("Tools/Fracture/Remove All Fractures")]
         private static void RemoveAllFractures()
         {
-            int count = 0;
-            foreach (FractureThis frac in GameObject.FindObjectsOfType<FractureThis>())
-            {
-                frac.Gen_loadAndMaybeSaveOgData(false);
-                count++;
-            }
-
-            Debug.Log("Removed " + count + " fractures");
+            RemoveFracturesArray(GameObject.FindObjectsOfType<FractureThis>(false));
         }
 
         [MenuItem("Tools/Fracture/Remove Selected Fractures")]
         private static void RemoveSelectedFractures()
         {
+            RemoveFracturesArray(GetSelectedFractures().ToArray());
+        }
+
+        /// <summary>
+        /// Returns a list containing all fractures the user have currently selected in the editor
+        /// </summary>
+        private static List<FractureThis> GetSelectedFractures()
+        {
             if (Selection.activeTransform == null)
             {
                 Debug.LogError("No object selected");
-                return;
+                return new();
             }
 
-            int count = 0;
             Transform[] transs = Selection.transforms;
+            List<FractureThis> selectedFracs = new();
             for (int i = 0; i < transs.Length; i += 1)
             {
-                if (transs[i].TryGetComponent<FractureThis>(out var toFrac) == false) continue;
-                toFrac.Gen_loadAndMaybeSaveOgData(false);
-                count++;
+                if (transs[i].TryGetComponent(out FractureThis fracT) == true) selectedFracs.Add(fracT);
             }
 
-            Debug.Log("Removed " + count + " fractures");
+            return selectedFracs;
         }
-
-        private string ff;
 
         [MenuItem("Tools/Fracture/CopyPropertiesFromLastSelected")]
         private static void CopyPropertiesFromLastSelected()
@@ -80,8 +66,7 @@ namespace Zombie1111_uDestruction
                 return;
             }
 
-            FractureThis fThis = Selection.activeTransform.GetComponent<FractureThis>();
-            if (fThis == null)
+            if (Selection.activeTransform.TryGetComponent<FractureThis>(out var fThis) == false)
             {
                 Debug.LogError("The last selected object is not a fracture");
                 return;
@@ -103,20 +88,20 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Fractures all meshes with the given fracture quality
+        /// Fractures all objects in the given arrayz
         /// </summary>
         /// <param name="fractureQuality">0 = low, 1 = medium, 2 = high (above 2 = defualt)</param>
         /// <returns></returns>
-        public static IEnumerator FractureAll(byte fractureQuality, FractureThis[] toFracture)
+        public static IEnumerator FractureArray(FractureThis[] toFracture, byte fractureQuality = 69, bool logProgress = true)
         {
             int fracturedCount = 0;
+            HashSet<FractureSaveAsset> usedAssets = new();
 
             foreach (FractureThis frac in toFracture)
             {
-                if (frac == null) continue;
-                if (frac.enabled == false)
+                if (frac == null || frac.enabled == false || usedAssets.Add(frac.saveAsset) == false)
                 {
-                    fracturedCount += 1;
+                    fracturedCount++;
                     continue;
                 }
 
@@ -127,12 +112,36 @@ namespace Zombie1111_uDestruction
 
                 frac.generationQuality = ogQuality;
 
-                fracturedCount += 1;
-                if (fracturedCount >= toFracture.Length) Debug.Log("Fracture Progress: " + fracturedCount + "/" + toFracture.Length + " (Done)");
-                else Debug.Log("Fracture Progress: " + fracturedCount + "/" + toFracture.Length);
+                fracturedCount++;
+
+                if (logProgress == true)
+                {
+                    if (fracturedCount >= toFracture.Length) Debug.Log("Fracture Progress: " + fracturedCount + "/" + toFracture.Length + " (Done)");
+                    else Debug.Log("Fracture Progress: " + fracturedCount + "/" + toFracture.Length);
+                }
 
                 yield return new WaitForSecondsRealtime(0.01f);
             }
+        }
+
+        /// <summary>
+        /// Removes all fractures in the given array
+        /// </summary>
+        public static void RemoveFracturesArray(FractureThis[] toRemove, bool logProgress = true)
+        {
+            HashSet<FractureSaveAsset> usedAssets = new();
+
+            foreach (FractureThis frac in toRemove)
+            {
+                if (frac == null || frac.enabled == false || usedAssets.Add(frac.saveAsset) == false)
+                {
+                    continue;
+                }
+
+                frac.Gen_removeFracture();
+            }
+
+            if (logProgress == true) Debug.Log("Removed " + toRemove.Length + " fractures");
         }
     }
 }

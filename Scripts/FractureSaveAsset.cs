@@ -5,6 +5,8 @@ using JetBrains.Annotations;
 using Unity.VisualScripting.FullSerializer;
 using System.Linq;
 using UnityEngine.SceneManagement;
+using Microsoft.Win32.SafeHandles;
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -91,7 +93,7 @@ namespace Zombie1111_uDestruction
             fracSavedData.saved_boneWe_broken = saveFrom.boneWe_broken.ToArray();
 
             //save mesh stuff if prefab
-            if (saveFrom.gameObject.scene.path.Length == 0 || PrefabUtility.IsPartOfAnyPrefab(saveFrom.gameObject) == true)
+            if (saveFrom.GetFracturePrefabType() > 0)
             {
                 fracSavedData.sMesh_boneWeights = saveFrom.fracRend.sharedMesh.boneWeights;
                 fracSavedData.sMesh_bindposes = saveFrom.fracRend.sharedMesh.bindposes;
@@ -171,7 +173,7 @@ namespace Zombie1111_uDestruction
             }
 
             //load meshes if was prefab
-            if (fracSavedData.sMesh_vertics == null) return true;
+            if (fracSavedData.sMesh_vertics == null || fracSavedData.sMesh_vertics.Length == 0) return true;
 
             loadTo.fracRend.sharedMesh = new()
             {
@@ -186,7 +188,7 @@ namespace Zombie1111_uDestruction
             loadTo.fracRend.sharedMesh.RecalculateNormals();
             loadTo.fracRend.sharedMesh.RecalculateTangents();
 
-            if (fracSavedData.sMesh_colsVers == null) return true;
+            if (fracSavedData.sMesh_colsVers == null || fracSavedData.sMesh_colsVers.Length == 0) return true;
             for (int i = 0; i < loadTo.allParts.Length; i += 1)
             {
                 ((MeshCollider)loadTo.allParts[i].col).sharedMesh = new()

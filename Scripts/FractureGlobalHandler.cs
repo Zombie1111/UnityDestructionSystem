@@ -283,8 +283,6 @@ namespace Zombie1111_uDestruction
                 if (didAnyBreak == false) continue;
 
                 //when atleast one part will break, ignore contact
-                ModifiableContactPair pair;
-
                 foreach (int pairI in impPairs[i].pairIndexes)
                 {
                     for (int ii = 0; ii < pairs[pairI].contactCount; ii++) pairs[pairI].IgnoreContact(ii);
