@@ -229,7 +229,7 @@ namespace Zombie1111_uDestruction
             public bool ignoreCauseRb;
         }
 
-        private class ImpPoint
+        public class ImpPoint
         {
             public int partIndex;
             public Vector3 impPos;
@@ -263,24 +263,28 @@ namespace Zombie1111_uDestruction
 
                 //Debug.Log("count " +impPairs[i].impPoints.Count + " divide " + impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent + "ogforce " + impPairs[i].impForce);
                 //impPairs[i].impForce /= math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f);
-                didAnyBreak = false;
+                //didAnyBreak = false;
                 Debug.DrawLine(impPairs[i].impPoints[0].impPos, impPairs[i].impPoints[0].impPos + impPairs[i].impVel.normalized, Color.yellow, 0.5f, false);
 
-                foreach (var iPoint in impPairs[i].impPoints)
-                {
+                //foreach (var iPoint in impPairs[i].impPoints)
+                //{
+                //
+                //    if (impPairs[i].fracThis.RegisterCollision(
+                //        iPoint.partIndex,
+                //        impPairs[i].impForce,
+                //        impPairs[i].impVel,
+                //        iPoint.impPos,
+                //        impPairs[i].ignoreCauseRb == false ? impPairs[i].rbCausedImp : null) == true)
+                //    {
+                //        didAnyBreak = true;
+                //    }
+                //}
 
-                    if (impPairs[i].fracThis.RegisterImpact(
-                        iPoint.partIndex,
-                        impPairs[i].impForce,
-                        impPairs[i].impVel,
-                        iPoint.impPos,
-                        impPairs[i].ignoreCauseRb == false ? impPairs[i].rbCausedImp : null) == true)
-                    {
-                        didAnyBreak = true;
-                    }
-                }
-
-                if (didAnyBreak == false) continue;
+                if (impPairs[i].fracThis.RegisterCollision(
+                    impPairs[i].impPoints,
+                    impPairs[i].impForce,
+                    impPairs[i].impVel,
+                    impPairs[i].ignoreCauseRb == false ? impPairs[i].rbCausedImp : null) == false) continue;
 
                 //when atleast one part will break, ignore contact
                 foreach (int pairI in impPairs[i].pairIndexes)
@@ -340,8 +344,8 @@ namespace Zombie1111_uDestruction
                             else if (impPairs[i].ignoreCauseRb == false)
                             {
                                 //when should ignore a cause rb
-                                if (impPairs[i].fracThis.AllPartsResistanceThreaded[impPairs[i].impPoints[0].partIndex]
-                                    > impPart.fracThis.AllPartsResistanceThreaded[impPart.partIndex]) impPairs[i].ignoreCauseRb = true;
+                                if (impPairs[i].fracThis.allPartsResistance[impPairs[i].impPoints[0].partIndex]
+                                    > impPart.fracThis.allPartsResistance[impPart.partIndex]) impPairs[i].ignoreCauseRb = true;
                                 else ignoreRb = true;
                             }
                         }

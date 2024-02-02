@@ -130,8 +130,8 @@ namespace Zombie1111_uDestruction
             minAllowedMainPhySize = from.minAllowedMainPhySize;
             multithreadedDestruction = from.multithreadedDestruction;
             //destructionWidthCurve = from.destructionWidthCurve;
-            distanceFalloffStrenght = from.distanceFalloffStrenght;
-            distanceFalloffPower = from.distanceFalloffPower;
+            falloffStrenght = from.falloffStrenght;
+            falloffPower = from.falloffPower;
             //selfCollisionMultiplier = from.selfCollisionMultiplier;
             repairSupport = from.repairSupport;
             repairSpeed = from.repairSpeed;
@@ -176,8 +176,9 @@ namespace Zombie1111_uDestruction
         [SerializeField] private float minDelay = 0.05f;
         [SerializeField] private int minAllowedMainPhySize = 2;
         [SerializeField] private bool multithreadedDestruction = true;
-        [SerializeField] private float distanceFalloffStrenght = 20.0f;
-        [SerializeField] private float distanceFalloffPower = 1.0f;
+        [SerializeField] private float falloffStrenght = 20.0f;
+        [SerializeField] private float falloffPower = 1.0f;
+        [SerializeField] private float partResistanceFactor = 1.0f;
         //[SerializeField] private float widthFalloffStrenght = 20.0f;
         //[SerializeField] private float widthFalloffPower = 1.0f;
         [SerializeField] private DestructionRepairSupport repairSupport = DestructionRepairSupport.fullHigh;
@@ -605,7 +606,7 @@ namespace Zombie1111_uDestruction
             allFracParents.Clear();
             verticsLinkedThreaded = new IntList[0];
             allParts = new FracParts[0];
-            AllPartsResistanceThreaded = new float[0];
+            allPartsResistance = new float[0];
             boneWe_broken = new BoneWeight[0];
 
             if (doSave == false) return;
@@ -787,7 +788,7 @@ namespace Zombie1111_uDestruction
                     {
                         if (okRem == true) okRem = fracT.Gen_removeFracture(true);
                         else fracT.Gen_removeFracture(true);
-                    }                    
+                    }
                 }
 
                 return okRem;
@@ -890,7 +891,7 @@ namespace Zombie1111_uDestruction
             {
                 Gen_setupSkinnedMesh(tempOgRealSkin.ogMesh, tempOgRealSkin.ogBones, tempOgRealSkin.ogRootBone.localToWorldMatrix, fracturedMeshes);
             }
-            
+
             tempPartOgMeshId = null;
             tempFracVerOgMeshId = null;
             tempOgRealSkin = null;
@@ -916,7 +917,7 @@ namespace Zombie1111_uDestruction
         private void Gen_setupResistanceMultiply()
         {
             //get all parts resistance multiply value from all multiply volumes
-            AllPartsResistanceThreaded = new float[allParts.Length];
+            allPartsResistance = new float[allParts.Length];
 
             Vector3 pPos;
             List<float> multipliers = new();
@@ -950,7 +951,7 @@ namespace Zombie1111_uDestruction
                 if (totalMultiply <= 0.0f) totalMultiply = 1.0f;
                 if (multipliers.Count > 0) totalMultiply /= multipliers.Count;
 
-                AllPartsResistanceThreaded[i] = destructionResistance * totalMultiply;
+                allPartsResistance[i] = destructionResistance * totalMultiply;
             }
 
             partAvgBoundsExtent = (totalExtents / extentCount) * 1.1f;
@@ -1839,14 +1840,17 @@ namespace Zombie1111_uDestruction
 
             //assign variabels for destruction
             ogObjectLayer = gameObject.layer;
-            damPartsBrokeness = new float[allParts.Length];
+            des_partsBrokeness = new float[allParts.Length];
             AllRendBones = fracRend.bones;
+            des_partsOffset = new Vector3[allParts.Length];
 
             //assign variabels for mesh deformation+colors
             if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
             {
                 mDef_verUse = new();
                 mDef_verNow = new Vector3[fracRend.sharedMesh.vertexCount];
+                des_verForceApply = new float[fracRend.sharedMesh.vertexCount];
+                des_verForceApplied = new float[fracRend.sharedMesh.vertexCount];
                 fracRend.sharedMesh.GetVertices(mDef_verUse);
                 mDef_verDefAmount = new float[mDef_verUse.Count];
                 if (isRealSkinnedM == false) verticsBonesThreaded = fracRend.sharedMesh.boneWeights.Select(bone => bone.boneIndex0).ToArray();
@@ -1940,9 +1944,9 @@ namespace Zombie1111_uDestruction
             //sync part brokenness
             if (damBrokenessNeedsSync == true)
             {
-                for (int i = 0; i < damPartsBrokeness.Length; i++)
+                for (int i = 0; i < des_partsBrokeness.Length; i++)
                 {
-                    damPartsBrokeness[i] = allParts[i].partBrokenness;
+                    des_partsBrokeness[i] = allParts[i].partBrokenness;
                 }
 
                 damBrokenessNeedsSync = false;
@@ -1971,7 +1975,6 @@ namespace Zombie1111_uDestruction
             //compute destruction and deformation
             if (calcDesThread_isActive == false)
             {
-
                 if (damPartsUsed.Count > 0 && calcDefThread == null)
                 {
                     StartCoroutine(ComputeDeformation());
@@ -2018,14 +2021,14 @@ namespace Zombie1111_uDestruction
             var min = Vector3.one * -694200;
             var max = Vector3.one * 694200;
             Vector3 tempPos;
-            
+
             for (int i = 0; i < allParts.Length; i++)
             {
                 tempPos = allParts[i].trans.position;
                 min = Vector3.Min(min, tempPos);
                 max = Vector3.Max(max, tempPos);
             }
-            
+
             fracRend.bounds = new() { min = min + (-2.0f * partAvgBoundsExtent * Vector3.one), max = max + (2.0f * partAvgBoundsExtent * Vector3.one) };
         }
 
@@ -2053,7 +2056,7 @@ namespace Zombie1111_uDestruction
             j_hasMoved = new NativeQueue<bool>(Allocator.Persistent);
             j_active = false;
         }
-        
+
         private void BoneHandleJob_run()
         {
             //Run the job
@@ -2075,12 +2078,12 @@ namespace Zombie1111_uDestruction
             //get job result
             j_handle.Complete();
             j_active = false;
-            
+
             if (j_hasMoved.Count > 0)
             {
                 j_hasMoved.Clear();
                 allFracBonesLToW.CopyFrom(j_fracBonesLToW);
-            
+
                 Vector3 min = Vector3.one * 694200;
                 Vector3 max = Vector3.one * -694200;
                 foreach (Vector3 vec in j_fracBonesPos)
@@ -2092,7 +2095,7 @@ namespace Zombie1111_uDestruction
                     if (min.z > vec.z) min.z = vec.z;
                     else if (max.z < vec.z) max.z = vec.z;
                 }
-            
+
                 fracRend.bounds = new()
                 {
                     min = min + (-2.0f * partAvgBoundsExtent * Vector3.one),
@@ -2410,7 +2413,7 @@ namespace Zombie1111_uDestruction
             }
         }
 
-#endregion ParentSystem
+        #endregion ParentSystem
 
 
 
@@ -2465,7 +2468,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Contains the resistance used for all parts, set when fracture object. (ImpactForce / AllPartsResistanceThreaded[i])
         /// </summary>
-        [System.NonSerialized] public float[] AllPartsResistanceThreaded = new float[0];
+        [System.NonSerialized] public float[] allPartsResistance = new float[0];
 
         /// <summary>
         /// Contains all vertics and the index of the part they are a part of
@@ -2510,34 +2513,63 @@ namespace Zombie1111_uDestruction
 
         private class DamageToCompute
         {
-            public int partIndex;
-            public Rigidbody rbCauseImpact;
-            public Vector3 impactVelocity;
-            public Vector3 impactPosition;
-            public float impactForce;
+            public List<FractureGlobalHandler.ImpPoint> impPoints;
+            public Rigidbody rbCauseImp;
+            public Vector3 impVelocity;
+            public float impForce;
+            public bool willBreakParts;
         }
 
-        private ConcurrentBag<DamageToCompute> damToCompute = new();
+        private ConcurrentDictionary<Rigidbody, DamageToCompute> damToCompute = new();
         //private List<DamageToCompute> damToCompute = new();
         private List<DamageToCompute> damComputing = new();
 
         /// <summary>
-        /// Register a impact to compute destruction as soon as possible. Returns true if the impact is strong enough to break the direct part
+        /// Register a impact to compute destruction as soon as possible. Returns true if the impact is strong enough to break at least one part
         /// </summary>
-        /// <param name="partIndex">The index of the part that was directly hit, Use the tryGetPartIndex functions to get the part index</param>
-        /// <param name="impactForce">How strong the impact is, higher value = more destruction. If impactForce/destructionResistance >= 1.0f the direct part breaks</param>
+        /// <param name="impactPoints">Should contain the world positions where the collision occurred and the indexes of the parts that it collided with</param>
+        /// <param name="impactForce">How strong the impact is, higher value = more destruction</param>
         /// <param name="impactVelocity">The velocity of the object that caused the impact</param>
-        /// <param name="impactPosition">The position where object A touches object B</param>
+        /// <param name="rbCauseImpact">The rigidbody that caused the impact</param>
         /// <returns></returns>
-        public bool RegisterImpact(int partIndex, float impactForce, Vector3 impactVelocity, Vector3 impactPosition, Rigidbody rbCauseImpact)
+        public bool RegisterCollision(List<FractureGlobalHandler.ImpPoint> impactPoints, float impactForce, Vector3 impactVelocity, Rigidbody rbCauseImpact)
         {
-            //reading partBrokenness here is not thread safe
-            if (allParts[partIndex].partBrokenness >= 1.0f) return true;
-            
-            damToCompute.Add(new() { impactForce = impactForce, impactPosition = impactPosition, impactVelocity = impactVelocity, partIndex = partIndex, rbCauseImpact = rbCauseImpact });
+            //get if any part will break
+            bool willBreak = false;
+            foreach (var impPoint in impactPoints)
+            {
+                //reading partBrokenness here is not thread safe
+                if (allParts[impPoint.partIndex].partBrokenness >= 1.0f) continue;
+                if (allParts[impPoint.partIndex].partBrokenness + (impactForce / allPartsResistance[impPoint.partIndex]) >= 1.0f)
+                {
+                    willBreak = true;
+                    break;
+                }
+            }
 
-            //reading partBrokenness here is not thread safe
-            return allParts[partIndex].partBrokenness + (impactForce / AllPartsResistanceThreaded[partIndex]) >= 1.0f;
+            //Register the collision
+            if (damToCompute.TryGetValue(rbCauseImpact, out DamageToCompute newDam) == true)
+            {
+                newDam.impPoints.AddRange(impactPoints);
+                if (newDam.impForce < impactForce)
+                {
+                    newDam.impForce = impactForce;
+                    newDam.impVelocity = impactVelocity;
+                }
+
+                if (newDam.willBreakParts == false) newDam.willBreakParts = willBreak;
+                damToCompute.TryUpdate(rbCauseImpact, newDam, null);
+            }
+            else
+            {
+                newDam.impForce = impactForce;
+                newDam.impPoints = impactPoints;
+                newDam.impVelocity = impactVelocity;
+                newDam.rbCauseImp = rbCauseImpact;
+                damToCompute.TryAdd(rbCauseImpact, newDam);
+            }
+
+            return willBreak;
         }
 
         private bool calcDesThread_isActive = false;
@@ -2581,8 +2613,6 @@ namespace Zombie1111_uDestruction
         private List<DesToBreakData> damPartsToBreak = new();
         private List<DesPartsUsed> damPartsUsed = new();
         private int damPartsUsedZeroI = 0;
-        private float[] damPartsBrokeness = new float[0];
-        private List<int>[] damParentPartIndexes;
         private int ogObjectLayer = 0;
 
         /// <summary>
@@ -2618,13 +2648,13 @@ namespace Zombie1111_uDestruction
             {
                 if (damPartsUsed[i].doBreak == true) continue;
 
-                allParts[damPartsUsed[i].partIndex].partBrokenness = damPartsBrokeness[damPartsUsed[i].partIndex];
+                allParts[damPartsUsed[i].partIndex].partBrokenness = des_partsBrokeness[damPartsUsed[i].partIndex];
             }
 
             //break parts
             for (int i = 0; i < damPartsToBreak.Count; i += 1)
             {
-                allParts[damPartsToBreak[i].partIndex].partBrokenness = damPartsBrokeness[damPartsToBreak[i].partIndex];
+                allParts[damPartsToBreak[i].partIndex].partBrokenness = des_partsBrokeness[damPartsToBreak[i].partIndex];
                 if (damPartsToBreak[i].rbCausedImpact != null)
                 {
                     damPartsToBreak[i].rbCausedImpact.velocity = FractureHelperFunc.SubtractMagnitude(damPartsToBreak[i].rbCausedImpact.velocity, damPartsToBreak[i].velocity.magnitude * damPartsToBreak[i].velMulti);
@@ -2649,62 +2679,178 @@ namespace Zombie1111_uDestruction
             damPartsUsedZeroI = damPartsUsed.Count;
 
             //run compute thread
-            damParentPartIndexes = allFracParents.Select(fParent => fParent.partIndexes).ToArray();
+            des_parentPartIndexes = allFracParents.Select(fParent => fParent.partIndexes).ToArray();
 
             if (multithreadedDestruction == true) calcDesThread = Task.Run(() => DestructionSolverThread());
             else DestructionSolverThread();
             calcDesThread_isActive = true;
         }
 
+        private class DesToBreak
+        {
+            public int partIndex;
+            public int impIndex;
+            public float forceApplied;
+            public float forceConsumed;
+        }
+
+        private class DesNewParent
+        {
+            public HashSet<int> partsToInclude;
+            public Vector3 velToGive;
+        }
+
+        private List<DesToBreak> des_partsToBreak;
+        private List<DesNewParent> des_newParents;
+        private float[] des_partsBrokeness = new float[0];
+        private Vector3[] des_partsOffset;
+        private List<int>[] des_parentPartIndexes;
+        private float[] des_verForceApply;
+        private float[] des_verForceApplied;
+
         private void DestructionSolverThread()
         {
-            //sort damComputing from highest force to lowest
-            damComputing.Sort((x, y) => -x.impactForce.CompareTo(y.impactForce));
+            //clear old result
+            des_partsToBreak.Clear();
+            des_newParents.Clear();
+            HashSet<int> partsToIgnore = new();
+            RealtimeVer_syncBones();
 
-            //merge damComputing that is for the same index
-            for (int i = 0; i < damComputing.Count - 1; i++)
+            //loop through all impSources and compute each seperatly
+            for (int i = 0; i < damComputing.Count; i++)
             {
-                for (int ii = damComputing.Count - 1; ii > i; ii--)
-                {
-                    if (damComputing[i].partIndex == damComputing[ii].partIndex && damComputing[i].rbCauseImpact == damComputing[ii].rbCauseImpact)
-                    {
-                        //print("merge " + i + " " + ii);
-                        //damComputing[i].impactForce += damComputing[ii].impactForce;
-                        damComputing.RemoveAt(ii);
-                    }
-                }
-            
-                ////verify thread safety
-                //if (damComputing[i].rbCauseImpact.rb == allFracParents[allParts[damComputing[i].partIndex].parentIndex].parentRb)
-                //{
-                //    damComputing[i].impactVelocity *= -1.0f;
-                //}
-            
-                //Debug.DrawLine(damComputing[i].impactPosition + damComputing[i].impactVelocity, damComputing[i].impactPosition, Color.white, 5.0f);
+                CalcImpSource(i);
             }
 
-            //break direct hit part
-            damPartsToBreak.Clear();
-            int pI;
-            float damNeededToBreak;
+            float cDis;
+            float closeDis;
+            void CalcImpSource(int impIndex)
+            {
+                //Get the parts to start searching from
+                List<int> oList = new();
+                List<FractureGlobalHandler.ImpPoint> impPoints = damComputing[impIndex].impPoints;
+                float impForce = damComputing[impIndex].impForce;
+                int partI;
+                Vector3 impDir = damComputing[impIndex].impVelocity.normalized;
 
-           for (int i = 0; i < damComputing.Count; i++)
-           {
-                pI = damComputing[i].partIndex;
-                damNeededToBreak = 1.0f - damPartsBrokeness[pI];
-                damPartsBrokeness[pI] += damComputing[i].impactForce / AllPartsResistanceThreaded[pI];
-                if (damPartsBrokeness[pI] < 1.0f) continue;
+                foreach (FractureGlobalHandler.ImpPoint iPoint in impPoints)
+                {
+                    partI = iPoint.partIndex;
 
-                //Debug.Log("Multi " + ((damNeededToBreak * AllPartsResistanceThreaded[pI]) / damComputing[i].impactForce)
-                //    + " force " + damComputing[i].impactForce + " fToBreak " + (damNeededToBreak * AllPartsResistanceThreaded[pI]));
+                    if (damComputing[impIndex].willBreakParts == true)
+                    {
+                        if (des_partsBrokeness[partI] < 1.0f && partsToIgnore.Add(partI) == true)
+                        {
+                            allPartsResistance[partI] += impForce / allPartsResistance[partI];
+                            if (allPartsResistance[partI] < 1.0f) allPartsResistance[partI] = 1.0f;
 
-                damPartsBrokeness[pI] = 1.0f;
-                damPartsToBreak.Add(new() {
-                    partIndex = pI,
-                    rbCausedImpact = damComputing[i].rbCauseImpact,
-                    velocity = damComputing[i].impactVelocity,
-                    velMulti = damNeededToBreak * AllPartsResistanceThreaded[pI] / damComputing[i].impactForce * destructionConsumption});
-           }
+                            AddNewToBreak(partI, impForce, impIndex);
+                        }
+                    }
+                    else if (des_partsBrokeness[partI] < 1.0f && partsToIgnore.Add(partI) == true)
+                    {
+                        oList.Add(partI);
+                    }
+
+                    foreach (int borI in allParts[partI].neighbourParts)//verify thread safety
+                    {
+                        if (des_partsBrokeness[borI] >= 1.0f || partsToIgnore.Add(borI) == false) continue;
+                        oList.Add(borI);
+                    }
+                }
+
+                //Spread the destruction through the mesh
+                float highestForceApplied;
+                Color tempCol;
+
+                for (int oI = 0; oI < oList.Count; oI++)
+                {
+                    //get the world position of the vertices used by this part
+                    partI = oList[oI];
+                    highestForceApplied = -1.0f;
+                    RealtimeVer_prepareChange(partI);
+
+                    //loop through all part vertices and get the force applied to them
+                    foreach (int vI in allParts[partI].rendVertexIndexes)//verify thread safety
+                    {
+                        des_verForceApply[vI] = (impForce - (MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]), falloffPower) * falloffStrenght)) / allPartsResistance[partI];
+                        
+                        if (des_verForceApply[vI] < 0.0f) continue;
+                        if (highestForceApplied < des_verForceApply[vI]) highestForceApplied = des_verForceApply[vI];
+                    }
+
+                    if (highestForceApplied < 0.0f) continue;
+
+                    //try add neighbours to oList to continue spreading
+                    foreach (int borI in allParts[partI].neighbourParts)//verify thread safety
+                    {
+                        if (allParts[borI].parentIndex != allParts[partI].parentIndex || partsToIgnore.Add(borI) == false || des_partsBrokeness[borI] >= 1.0f) continue;//verify thread safety
+                        oList.Add(borI);
+                    }
+
+                    //apply the highest vertex force to the part itself
+                    highestForceApplied *= partResistanceFactor;
+                    des_partsBrokeness[partI] += highestForceApplied;
+                    if (des_partsBrokeness[partI] >= 1.0f)
+                    {
+                        AddNewToBreak(partI, highestForceApplied, impIndex);
+                        continue;
+                    }
+
+                    //loop through all part vertices and deform them
+                    //float partVerForce = 0.0f;
+
+                    foreach (int vI in allParts[partI].rendVertexIndexes)//verify thread safety
+                    {
+                        des_verForceApply[vI] = Math.Min(des_verForceApply[vI], 1.0f - des_verForceApplied[vI]);
+                        if (des_verForceApply[vI] <= 0.00001f)
+                        {
+                            //partVerForce += des_verForceApplied[vI];
+                            continue;
+                        }
+                        
+                        des_verForceApplied[vI] += des_verForceApply[vI];
+                        //partVerForce += des_verForceApplied[vI];
+
+                        mDef_verNow[vI] += des_verForceApply[vI] * vertexDisplacementStenght * impDir;
+                        tempCol = mDef_verColUse[vI];
+                        tempCol.a = des_verForceApplied[vI];
+                        mDef_verColUse[vI] = tempCol;
+                    }
+
+                    //Offset the part and save part vertics offsets
+                    //partVerForce /= allParts[partI].rendVertexIndexes.Count;
+                    RealtimeVer_prepareApply(partI);
+                }
+
+                float GetClosestImpPoint(Vector3 closestToThis)
+                {
+                    closeDis = float.MaxValue;
+
+                    foreach (FractureGlobalHandler.ImpPoint iPoint in impPoints)
+                    {
+                        cDis = (iPoint.impPos - closestToThis).magnitude;
+                        if (cDis >= closeDis) continue;
+
+                        closeDis = cDis;
+                        //closePos = iPoint.impPos;
+                    }
+
+                    return closeDis;
+                }
+            }
+
+            void AddNewToBreak(int partIndex, float forceApplied, int impIndex)
+            {
+                float forceCons = (1.0f - (des_partsBrokeness[partIndex] - forceApplied)) * (allPartsResistance[partIndex] / damComputing[impIndex].impForce);
+
+                des_partsToBreak.Add(new() {
+                    forceConsumed = forceCons,
+                    forceApplied = 1.0f - forceApplied,
+                    partIndex = partIndex,
+                    impIndex = impIndex
+                });
+            }
         }
 
         /// <summary>
@@ -3199,68 +3345,74 @@ namespace Zombie1111_uDestruction
         private Matrix4x4 mBake_vms = new();
 
         /// <summary>
-        /// Assigns verticsCurrentThreaded array with fracRend current vertics positions in worldspace
+        /// Should be called once before using prepareChange to sync the boneMatrices used by prepareChange with the actual bones
         /// </summary>
-        private void PrepareVerCurrentForUpdate()
+        private void RealtimeVer_syncBones()
         {
             for (int i = 0; i < mBake_boneMatrices.Length; i++) mBake_boneMatrices[i] = allFracBonesLToW[i] * mBake_meshBindposes[i];
+        }
 
-            for (int i = 0; i < mDef_verUse.Count; i++)
+        /// <summary>
+        /// After calling this, you can assign mDef_verNow[allParts[partIndex].rendVertexIndexes] with new world positions
+        /// </summary>
+        private void RealtimeVer_prepareChange(int partIndex)
+        {
+            foreach (int vI in allParts[partIndex].rendVertexIndexes)
             {
-                mBake_weight = boneWe_current[i];
+                mBake_weight = boneWe_current[vI];
                 mBake_bm0 = mBake_boneMatrices[mBake_weight.boneIndex0];
                 mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1];
                 mBake_bm2 = mBake_boneMatrices[mBake_weight.boneIndex2];
                 mBake_bm3 = mBake_boneMatrices[mBake_weight.boneIndex3];
-
+                
                 mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
                 mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;
                 mBake_vms.m02 = mBake_bm0.m02 * mBake_weight.weight0 + mBake_bm1.m02 * mBake_weight.weight1 + mBake_bm2.m02 * mBake_weight.weight2 + mBake_bm3.m02 * mBake_weight.weight3;
                 mBake_vms.m03 = mBake_bm0.m03 * mBake_weight.weight0 + mBake_bm1.m03 * mBake_weight.weight1 + mBake_bm2.m03 * mBake_weight.weight2 + mBake_bm3.m03 * mBake_weight.weight3;
-
+                
                 mBake_vms.m10 = mBake_bm0.m10 * mBake_weight.weight0 + mBake_bm1.m10 * mBake_weight.weight1 + mBake_bm2.m10 * mBake_weight.weight2 + mBake_bm3.m10 * mBake_weight.weight3;
                 mBake_vms.m11 = mBake_bm0.m11 * mBake_weight.weight0 + mBake_bm1.m11 * mBake_weight.weight1 + mBake_bm2.m11 * mBake_weight.weight2 + mBake_bm3.m11 * mBake_weight.weight3;
                 mBake_vms.m12 = mBake_bm0.m12 * mBake_weight.weight0 + mBake_bm1.m12 * mBake_weight.weight1 + mBake_bm2.m12 * mBake_weight.weight2 + mBake_bm3.m12 * mBake_weight.weight3;
                 mBake_vms.m13 = mBake_bm0.m13 * mBake_weight.weight0 + mBake_bm1.m13 * mBake_weight.weight1 + mBake_bm2.m13 * mBake_weight.weight2 + mBake_bm3.m13 * mBake_weight.weight3;
-
+                
                 mBake_vms.m20 = mBake_bm0.m20 * mBake_weight.weight0 + mBake_bm1.m20 * mBake_weight.weight1 + mBake_bm2.m20 * mBake_weight.weight2 + mBake_bm3.m20 * mBake_weight.weight3;
                 mBake_vms.m21 = mBake_bm0.m21 * mBake_weight.weight0 + mBake_bm1.m21 * mBake_weight.weight1 + mBake_bm2.m21 * mBake_weight.weight2 + mBake_bm3.m21 * mBake_weight.weight3;
                 mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
                 mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
-
-                mDef_verNow[i] = mBake_vms.MultiplyPoint3x4(mDef_verUse[i]);
+                
+                mDef_verNow[vI] = mBake_vms.MultiplyPoint3x4(mDef_verUse[vI]);
             }
-        } 
+        }
 
         /// <summary>
-        /// After calling PrepareVerCurrentForUpdate and assining new values to verticsCurrentThreaded call this to update the rend mesh
+        /// You should call this after calling RealtimeVer_prepareChange with the same partIndex
         /// </summary>
-        private void UpdateMeshFromVerCurrent()
+        private void RealtimeVer_prepareApply(int partIndex)
         {
-            for (int i = 0; i < mDef_verUse.Count; i++)
+            foreach (int vI in allParts[partIndex].rendVertexIndexes)
             {
-                mBake_weight = boneWe_current[i];
+                mBake_weight = boneWe_current[vI];
                 mBake_bm0 = mBake_boneMatrices[mBake_weight.boneIndex0].inverse;
                 mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1].inverse;
                 mBake_bm2 = mBake_boneMatrices[mBake_weight.boneIndex2].inverse;
                 mBake_bm3 = mBake_boneMatrices[mBake_weight.boneIndex3].inverse;
-
+                
                 mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
                 mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;
                 mBake_vms.m02 = mBake_bm0.m02 * mBake_weight.weight0 + mBake_bm1.m02 * mBake_weight.weight1 + mBake_bm2.m02 * mBake_weight.weight2 + mBake_bm3.m02 * mBake_weight.weight3;
                 mBake_vms.m03 = mBake_bm0.m03 * mBake_weight.weight0 + mBake_bm1.m03 * mBake_weight.weight1 + mBake_bm2.m03 * mBake_weight.weight2 + mBake_bm3.m03 * mBake_weight.weight3;
-
+                
                 mBake_vms.m10 = mBake_bm0.m10 * mBake_weight.weight0 + mBake_bm1.m10 * mBake_weight.weight1 + mBake_bm2.m10 * mBake_weight.weight2 + mBake_bm3.m10 * mBake_weight.weight3;
                 mBake_vms.m11 = mBake_bm0.m11 * mBake_weight.weight0 + mBake_bm1.m11 * mBake_weight.weight1 + mBake_bm2.m11 * mBake_weight.weight2 + mBake_bm3.m11 * mBake_weight.weight3;
                 mBake_vms.m12 = mBake_bm0.m12 * mBake_weight.weight0 + mBake_bm1.m12 * mBake_weight.weight1 + mBake_bm2.m12 * mBake_weight.weight2 + mBake_bm3.m12 * mBake_weight.weight3;
                 mBake_vms.m13 = mBake_bm0.m13 * mBake_weight.weight0 + mBake_bm1.m13 * mBake_weight.weight1 + mBake_bm2.m13 * mBake_weight.weight2 + mBake_bm3.m13 * mBake_weight.weight3;
-
+                
                 mBake_vms.m20 = mBake_bm0.m20 * mBake_weight.weight0 + mBake_bm1.m20 * mBake_weight.weight1 + mBake_bm2.m20 * mBake_weight.weight2 + mBake_bm3.m20 * mBake_weight.weight3;
                 mBake_vms.m21 = mBake_bm0.m21 * mBake_weight.weight0 + mBake_bm1.m21 * mBake_weight.weight1 + mBake_bm2.m21 * mBake_weight.weight2 + mBake_bm3.m21 * mBake_weight.weight3;
                 mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
                 mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
-
-                mDef_verUse[i] = mBake_vms.MultiplyPoint3x4(mDef_verNow[i]);
+                
+                mDef_verUse[vI] = mBake_vms.MultiplyPoint3x4(mDef_verNow[vI]);
             }
         }
 
@@ -3272,34 +3424,25 @@ namespace Zombie1111_uDestruction
             //get the parts to use in deformation calc
             defToUse = damPartsUsed.ToArray();
             damPartsUsed.Clear();
-
-            //run the compute deformation thread
-            calcDefThread = Task.Run(() => ComputeDeformationThread());
-            while (calcDefThread.IsCompleted == false && calcDefThread.IsFaulted == false) yield return null;
-
-            if (calcDefThread.IsFaulted == true)
-            {
-                //when error accure
-                Debug.LogException(calcDefThread.Exception);
-                Debug.LogWarning("A race may have accured while computing deformation for " + transform.name);
-                calcDefThread = null;
-                yield break;
-            }
+            yield return new WaitForEndOfFrame();
+            ////run the compute deformation thread
+            //calcDefThread = Task.Run(() => ComputeDeformationThread());
+            //while (calcDefThread.IsCompleted == false && calcDefThread.IsFaulted == false) yield return null;
+            //
+            //if (calcDefThread.IsFaulted == true)
+            //{
+            //    //when error accure
+            //    Debug.LogException(calcDefThread.Exception);
+            //    Debug.LogWarning("A race may have accured while computing deformation for " + transform.name);
+            //    calcDefThread = null;
+            //    yield break;
+            //}
 
             calcDefThread = null;
 
             //apply deformation
             fracRend.sharedMesh.SetVertices(mDef_verUse, 0, mDef_verUse.Count, UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
             fracRend.sharedMesh.SetColors(mDef_verColUse, 0, mDef_verColUse.Count, UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
-        }
-
-        private void ComputeDeformationThread()
-        {
-            PrepareVerCurrentForUpdate();
-
-            //assign new world vertics positions to verticsCurrentThreaded array
-
-            UpdateMeshFromVerCurrent();
         }
 
         #endregion MeshDeformation
