@@ -17,6 +17,7 @@ namespace Zombie1111_uDestruction
     {
         [Header("Global Fracture Config")]
         [SerializeField] private float damageThreshold = 2.0f;
+        public float impactZoneRadius = 0.1f;
 
         private ConcurrentDictionary<int, GlobalFracData> partsColInstanceId = new();
         private ConcurrentDictionary<int, GlobalRbData> rigidbodiesInstanceId = new();
@@ -226,7 +227,6 @@ namespace Zombie1111_uDestruction
             public FractureThis fracThis;
             public HashSet<int> pairIndexes;
             public List<ImpPoint> impPoints;
-            public bool ignoreCauseRb;
         }
 
         public class ImpPoint
@@ -256,15 +256,9 @@ namespace Zombie1111_uDestruction
 
             for (int i = 0; i < impPairs.Count; i++)
             {
-                foreach (var iii in impPairs[i].pairIndexes)
-                {
-                    Debug.DrawLine(pairs[iii].GetPoint(0), pairs[iii].GetPoint(0) + pairs[iii].GetNormal(0).normalized, Color.magenta, 0.5f, false);
-                }
-
                 //Debug.Log("count " +impPairs[i].impPoints.Count + " divide " + impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent + "ogforce " + impPairs[i].impForce);
                 //impPairs[i].impForce /= math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f);
                 //didAnyBreak = false;
-                Debug.DrawLine(impPairs[i].impPoints[0].impPos, impPairs[i].impPoints[0].impPos + impPairs[i].impVel.normalized, Color.yellow, 0.5f, false);
 
                 //foreach (var iPoint in impPairs[i].impPoints)
                 //{
@@ -284,7 +278,7 @@ namespace Zombie1111_uDestruction
                     impPairs[i].impPoints,
                     impPairs[i].impForce,
                     impPairs[i].impVel,
-                    impPairs[i].ignoreCauseRb == false ? impPairs[i].rbCausedImp : null) == false) continue;
+                    impPairs[i].rbCausedImp) == false) continue;
 
                 //when atleast one part will break, ignore contact
                 foreach (int pairI in impPairs[i].pairIndexes)
@@ -330,7 +324,6 @@ namespace Zombie1111_uDestruction
 
                     //get if cause source already exists, if not add it
                     int iToUse = -1;
-                    bool ignoreRb = false;
 
                     for (int i = 0; i < impPairs.Count; i++)
                     {
@@ -340,13 +333,6 @@ namespace Zombie1111_uDestruction
                             {
                                 iToUse = i;
                                 break;
-                            }
-                            else if (impPairs[i].ignoreCauseRb == false)
-                            {
-                                //when should ignore a cause rb
-                                if (impPairs[i].fracThis.allPartsResistance[impPairs[i].impPoints[0].partIndex]
-                                    > impPart.fracThis.allPartsResistance[impPart.partIndex]) impPairs[i].ignoreCauseRb = true;
-                                else ignoreRb = true;
                             }
                         }
                     }
@@ -362,8 +348,7 @@ namespace Zombie1111_uDestruction
                             rbCausedImp = rbCausedImp.rb,
                             impVel = impVel,
                             pairIndexes = new(),
-                            impPoints = new(),
-                            ignoreCauseRb = ignoreRb});
+                            impPoints = new()});
                     }
 
                     impPairs[iToUse].pairIndexes.Add(pairI);

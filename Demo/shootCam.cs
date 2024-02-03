@@ -38,24 +38,28 @@ namespace TrueTrace
         }
 
         private Rigidbody debugRb;
+        private bool gotCod = false;
+        private Vector3 plPos;
+        private Vector3 plDir;
 
         private void FixedUpdate()
         {
-            if (doShoot == true)
+            if (doShoot == true && gotCod == true)
             {
                 doShoot = false;
                 GameObject newO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 newO.transform.localScale *= 0.2f;
-                newO.transform.position = transform.position;
+                newO.transform.position = plPos;
                 Rigidbody rb = newO.AddComponent<Rigidbody>();
                 rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                rb.velocity = transform.forward * 20.0f;
+                rb.velocity = plDir * 20.0f;
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
                 rb.mass = 1.0f;
                 debugRb = rb;
                 globalF.OnAddRigidbody(rb, 3.0f);
                 //newO.GetComponent<Collider>().hasModifiableContacts = true;
                 newO.GetComponent<Collider>().sharedMaterial = phyMat;
+                gotCod = false;
             }
         }
 
@@ -63,10 +67,16 @@ namespace TrueTrace
 
         private void Update()
         {
-            //if (debugRb != null) print(debugRb.velocity.magnitude);
+            if (doShoot == true && gotCod == false)
+            {
+                plPos = transform.position;
+                plDir = transform.forward;
+                gotCod = true;
+            }
+                //if (debugRb != null) print(debugRb.velocity.magnitude);
 
-            // Get mouse wheel input
-            float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
+                // Get mouse wheel input
+                float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
 
             // Adjust speed based on mouse wheel input
             Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);

@@ -20,7 +20,6 @@ using Unity.Mathematics;
 using System.Runtime.CompilerServices;
 using UnityEditor.SceneManagement;
 using JetBrains.Annotations;
-using Unity.VisualScripting;
 using UnityEditor.XR;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Jobs;
@@ -1660,8 +1659,6 @@ namespace Zombie1111_uDestruction
             List<Vector3> usedNors = new();
             bool alreadyTested;
 
-            Debug_toggleTimer();
-
             for (int i = 0; i < allParts.Length; i += 1)
             {
                 partWver.Clear();
@@ -1729,7 +1726,6 @@ namespace Zombie1111_uDestruction
 
             fracRend.sharedMesh.boneWeights = newBoneWe;
             fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
-            Debug_toggleTimer();
 
             BoneWeight GetBestWeightForVertex(int fracVi)
             {
@@ -1839,10 +1835,14 @@ namespace Zombie1111_uDestruction
             globalHandler.AddReferencesFromFracture(this);
 
             //assign variabels for destruction
+            impactRadius = globalHandler.impactZoneRadius;
+            impactRadiusSquared = impactRadius * impactRadius;
             ogObjectLayer = gameObject.layer;
             des_partsBrokeness = new float[allParts.Length];
             AllRendBones = fracRend.bones;
             des_partsOffset = new Vector3[allParts.Length];
+            des_partsToBreak = new();
+            des_newParents = new();
 
             //assign variabels for mesh deformation+colors
             if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
@@ -1859,6 +1859,7 @@ namespace Zombie1111_uDestruction
                 //set vertex color
                 mDef_verColUse = new();
                 fracRend.sharedMesh.GetColors(mDef_verColUse);
+                if (mDef_verColUse.Count <= 0) mDef_verColUse = new Color[mDef_verNow.Length].ToList();
             }
 
             //assign variabels for repair system
@@ -1975,10 +1976,10 @@ namespace Zombie1111_uDestruction
             //compute destruction and deformation
             if (calcDesThread_isActive == false)
             {
-                if (damPartsUsed.Count > 0 && calcDefThread == null)
-                {
-                    StartCoroutine(ComputeDeformation());
-                }
+                //if (damPartsUsed.Count > 0 && calcDefThread == null)
+                //{
+                //    StartCoroutine(ComputeDeformation());
+                //}
 
                 if (damToCompute.Count > 0)
                 {
@@ -2534,6 +2535,12 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         public bool RegisterCollision(List<FractureGlobalHandler.ImpPoint> impactPoints, float impactForce, Vector3 impactVelocity, Rigidbody rbCauseImpact)
         {
+            if (rbCauseImpact == null)
+            {
+                Debug.LogError("How the fuck is the rigidbody null");
+                return false;
+            }
+
             //get if any part will break
             bool willBreak = false;
             foreach (var impPoint in impactPoints)
@@ -2548,7 +2555,8 @@ namespace Zombie1111_uDestruction
             }
 
             //Register the collision
-            if (damToCompute.TryGetValue(rbCauseImpact, out DamageToCompute newDam) == true)
+            DamageToCompute newDam;
+            if (damToCompute.TryGetValue(rbCauseImpact, out newDam) == true)
             {
                 newDam.impPoints.AddRange(impactPoints);
                 if (newDam.impForce < impactForce)
@@ -2562,10 +2570,14 @@ namespace Zombie1111_uDestruction
             }
             else
             {
-                newDam.impForce = impactForce;
-                newDam.impPoints = impactPoints;
-                newDam.impVelocity = impactVelocity;
-                newDam.rbCauseImp = rbCauseImpact;
+                newDam = new()
+                {
+                    impForce = impactForce,
+                    impPoints = impactPoints,
+                    impVelocity = impactVelocity,
+                    rbCauseImp = rbCauseImpact
+                };
+
                 damToCompute.TryAdd(rbCauseImpact, newDam);
             }
 
@@ -2632,7 +2644,7 @@ namespace Zombie1111_uDestruction
                 {
                     //when error accure
                     Debug.LogException(calcDesThread.Exception);
-                    Debug.LogWarning("A race may have accured while computing destruction for " + transform.name);
+                    Debug.LogWarning("Above error was thrown by destructionSolver for " + transform.name);
                     calcDesThread = null;
                     return;
                 }
@@ -2643,30 +2655,49 @@ namespace Zombie1111_uDestruction
             calcDesThread_isActive = false;
 
             //apply destruction result 
-            //parts overall
-            for (int i = damPartsUsedZeroI; i < damPartsUsed.Count; i++)
-            {
-                if (damPartsUsed[i].doBreak == true) continue;
-
-                allParts[damPartsUsed[i].partIndex].partBrokenness = des_partsBrokeness[damPartsUsed[i].partIndex];
-            }
-
             //break parts
-            for (int i = 0; i < damPartsToBreak.Count; i += 1)
+            for (int i = 0; i < des_partsToBreak.Count; i++)
             {
-                allParts[damPartsToBreak[i].partIndex].partBrokenness = des_partsBrokeness[damPartsToBreak[i].partIndex];
-                if (damPartsToBreak[i].rbCausedImpact != null)
+                if (des_partsToBreak[i].directHit == true && damComputing[des_partsToBreak[i].impIndex].rbCauseImp != null)
                 {
-                    damPartsToBreak[i].rbCausedImpact.velocity = FractureHelperFunc.SubtractMagnitude(damPartsToBreak[i].rbCausedImpact.velocity, damPartsToBreak[i].velocity.magnitude * damPartsToBreak[i].velMulti);
+                    damComputing[des_partsToBreak[i].impIndex].rbCauseImp.velocity = FractureHelperFunc.SubtractMagnitude(
+                        damComputing[des_partsToBreak[i].impIndex].rbCauseImp.velocity,
+                        des_partsToBreak[i].forceConsumed * damComputing[des_partsToBreak[i].impIndex].impVelocity.magnitude);
                 }
 
-                Run_breakPart(damPartsToBreak[i].partIndex, damPartsToBreak[i].velocity, damPartsToBreak[i].velMulti);
+                Run_breakPart(
+                    des_partsToBreak[i].partIndex,
+                    damComputing[des_partsToBreak[i].impIndex].impVelocity,
+                    des_partsToBreak[i].forceConsumed,
+                    des_partsToBreak[i].forceApplied);
+            }
+
+           //apply deformation
+           fracRend.sharedMesh.SetVertices(mDef_verUse, 0, mDef_verUse.Count,
+               UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
+               | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
+               | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
+               | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
+           
+           fracRend.sharedMesh.SetColors(mDef_verColUse, 0, mDef_verColUse.Count,
+               UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
+               | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
+               | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
+               | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
+
+            if (recalculateOnDisplacement == NormalRecalcMode.normalsOnly) fracRend.sharedMesh.RecalculateNormals();
+            else if (recalculateOnDisplacement == NormalRecalcMode.normalsAndTagents)
+            {
+                fracRend.sharedMesh.RecalculateNormals();
+                fracRend.sharedMesh.RecalculateTangents();
             }
 
             //create new parents
-            for (int i = 0; i < damNewParentParts.Count; i += 1)
+            for (int i = 0; i < des_newParents.Count; i++)
             {
-                Run_setPartsParent(damNewParentParts[i].partsIncluded, damNewParentParts[i].parentVelocity, -1);
+                Run_setPartsParent(
+                    des_newParents[i].partsToInclude,
+                    des_newParents[i].velToGive / Math.Max(1.0f, des_newParents[i].partsToInclude.Count * massDensity * phyMainOptions.massMultiplier));
             }
         }
 
@@ -2674,13 +2705,21 @@ namespace Zombie1111_uDestruction
         {
             //get what to compute
             damComputing.Clear();
-            damComputing.AddRange(damToCompute);
-            damToCompute.Clear();
+            lock (damToCompute)
+            {
+                foreach (var kvp in damToCompute)
+                {
+                    damComputing.Add(kvp.Value);
+                }
+
+                damToCompute.Clear();
+            }
+
             damPartsUsedZeroI = damPartsUsed.Count;
 
             //run compute thread
             des_parentPartIndexes = allFracParents.Select(fParent => fParent.partIndexes).ToArray();
-
+            
             if (multithreadedDestruction == true) calcDesThread = Task.Run(() => DestructionSolverThread());
             else DestructionSolverThread();
             calcDesThread_isActive = true;
@@ -2688,6 +2727,7 @@ namespace Zombie1111_uDestruction
 
         private class DesToBreak
         {
+            public bool directHit;
             public int partIndex;
             public int impIndex;
             public float forceApplied;
@@ -2707,9 +2747,14 @@ namespace Zombie1111_uDestruction
         private List<int>[] des_parentPartIndexes;
         private float[] des_verForceApply;
         private float[] des_verForceApplied;
+        private float impactRadius;
+        private float impactRadiusSquared;
 
         private void DestructionSolverThread()
         {
+            Debug_toggleTimer();
+
+            //do destruction, solve destruction
             //clear old result
             des_partsToBreak.Clear();
             des_newParents.Clear();
@@ -2732,6 +2777,7 @@ namespace Zombie1111_uDestruction
                 float impForce = damComputing[impIndex].impForce;
                 int partI;
                 Vector3 impDir = damComputing[impIndex].impVelocity.normalized;
+                float highestForceApplied;
 
                 foreach (FractureGlobalHandler.ImpPoint iPoint in impPoints)
                 {
@@ -2741,17 +2787,18 @@ namespace Zombie1111_uDestruction
                     {
                         if (des_partsBrokeness[partI] < 1.0f && partsToIgnore.Add(partI) == true)
                         {
-                            allPartsResistance[partI] += impForce / allPartsResistance[partI];
-                            if (allPartsResistance[partI] < 1.0f) allPartsResistance[partI] = 1.0f;
+                            highestForceApplied = impForce / allPartsResistance[partI];
+                            des_partsBrokeness[partI] += highestForceApplied;
+                            if (des_partsBrokeness[partI] < 1.0f) des_partsBrokeness[partI] = 1.0f;
 
-                            AddNewToBreak(partI, impForce, impIndex);
+                            AddNewToBreak(partI, highestForceApplied, impIndex, true);
                         }
                     }
                     else if (des_partsBrokeness[partI] < 1.0f && partsToIgnore.Add(partI) == true)
                     {
                         oList.Add(partI);
                     }
-
+                    
                     foreach (int borI in allParts[partI].neighbourParts)//verify thread safety
                     {
                         if (des_partsBrokeness[borI] >= 1.0f || partsToIgnore.Add(borI) == false) continue;
@@ -2760,7 +2807,6 @@ namespace Zombie1111_uDestruction
                 }
 
                 //Spread the destruction through the mesh
-                float highestForceApplied;
                 Color tempCol;
 
                 for (int oI = 0; oI < oList.Count; oI++)
@@ -2773,13 +2819,13 @@ namespace Zombie1111_uDestruction
                     //loop through all part vertices and get the force applied to them
                     foreach (int vI in allParts[partI].rendVertexIndexes)//verify thread safety
                     {
-                        des_verForceApply[vI] = (impForce - (MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]), falloffPower) * falloffStrenght)) / allPartsResistance[partI];
+                        des_verForceApply[vI] = math.max(0.0f, (impForce - (MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]), falloffPower) * falloffStrenght)) / allPartsResistance[partI]);
                         
-                        if (des_verForceApply[vI] < 0.0f) continue;
+                        if (des_verForceApply[vI] <= 0.0f) continue;
                         if (highestForceApplied < des_verForceApply[vI]) highestForceApplied = des_verForceApply[vI];
                     }
 
-                    if (highestForceApplied < 0.0f) continue;
+                    if (highestForceApplied <= 0.0f) continue;
 
                     //try add neighbours to oList to continue spreading
                     foreach (int borI in allParts[partI].neighbourParts)//verify thread safety
@@ -2789,11 +2835,11 @@ namespace Zombie1111_uDestruction
                     }
 
                     //apply the highest vertex force to the part itself
-                    highestForceApplied *= partResistanceFactor;
+                    highestForceApplied /= partResistanceFactor;
                     des_partsBrokeness[partI] += highestForceApplied;
                     if (des_partsBrokeness[partI] >= 1.0f)
                     {
-                        AddNewToBreak(partI, highestForceApplied, impIndex);
+                        AddNewToBreak(partI, highestForceApplied, impIndex, false);
                         continue;
                     }
 
@@ -2823,6 +2869,22 @@ namespace Zombie1111_uDestruction
                     RealtimeVer_prepareApply(partI);
                 }
 
+                Debug_toggleTimer();
+
+#if UNITY_EDITOR
+                if (debugMode == DebugMode.showDestruction)
+                {
+                    foreach (FractureGlobalHandler.ImpPoint iPoint in impPoints)
+                    {
+
+                        FractureHelperFunc.Debug_drawDisc(iPoint.impPos, impDir, impactRadius, 6);
+
+                    }
+
+                    Debug.DrawLine(impPoints[0].impPos, impPoints[0].impPos + impDir, Color.white, 0.5f, false);
+                }
+#endif
+
                 float GetClosestImpPoint(Vector3 closestToThis)
                 {
                     closeDis = float.MaxValue;
@@ -2830,6 +2892,7 @@ namespace Zombie1111_uDestruction
                     foreach (FractureGlobalHandler.ImpPoint iPoint in impPoints)
                     {
                         cDis = (iPoint.impPos - closestToThis).magnitude;
+                        //cDis = (FractureHelperFunc.ClosestPointOnDisc(closestToThis, iPoint.impPos, impDir, impactRadius, impactRadiusSquared) - closestToThis).magnitude;
                         if (cDis >= closeDis) continue;
 
                         closeDis = cDis;
@@ -2840,15 +2903,15 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            void AddNewToBreak(int partIndex, float forceApplied, int impIndex)
+            void AddNewToBreak(int partIndex, float forceApplied, int impIndex, bool wasDirectHit)
             {
                 float forceCons = (1.0f - (des_partsBrokeness[partIndex] - forceApplied)) * (allPartsResistance[partIndex] / damComputing[impIndex].impForce);
-
                 des_partsToBreak.Add(new() {
                     forceConsumed = forceCons,
-                    forceApplied = 1.0f - forceApplied,
+                    forceApplied = 1.0f - forceCons,
                     partIndex = partIndex,
-                    impIndex = impIndex
+                    impIndex = impIndex,
+                    directHit = wasDirectHit
                 });
             }
         }
@@ -2858,14 +2921,16 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="partIndex"></param>
         /// <param name="breakVelocity"></param>
-        private void Run_breakPart(int partIndex, Vector3 breakVelocity, float velocityMultiplier)
+        private void Run_breakPart(int partIndex, Vector3 breakVelocity, float forceConsumed, float forceLeft)
         {
             if (allParts[partIndex].parentIndex < 0) return;
 
             //update parent
+            Vector3 partWorldPosition = GetPartWorldPosition(partIndex);
             allFracParents[allParts[partIndex].parentIndex].parentRb.AddForceAtPosition(
-                velocityMultiplier / math.max(allFracParents[allParts[partIndex].parentIndex].parentRb.mass, 1.0f) * breakVelocity,
-                GetPartWorldPosition(partIndex), ForceMode.VelocityChange);
+                forceConsumed / Math.Max(1.0f, allFracParents[allParts[partIndex].parentIndex].parentRb.mass) * breakVelocity,
+                partWorldPosition,
+                ForceMode.VelocityChange);
 
             Run_setPartParent(partIndex, -1, true);
 
@@ -2874,8 +2939,7 @@ namespace Zombie1111_uDestruction
             {
                 if (phyPartsOptions.partPhysicsType == OptPartPhysicsType.rigidbody_medium || phyPartsOptions.partPhysicsType == OptPartPhysicsType.rigidbody_high)
                 {
-                    //if rigidbody
-                    //there is a delay before the rigidbody is activated. Only potential salution left to try is to manually move rigidbody forward until it gets activated
+                    //if rigidbody, would it be faster if the rb always exists and just toggle kinematic?
                     Rigidbody newRb = allParts[partIndex].col.GetOrAddComponent<Rigidbody>();
                     newRb.mass = massDensity;
                     newRb.drag = phyPartsOptions.drag;
@@ -2885,12 +2949,12 @@ namespace Zombie1111_uDestruction
                     newRb.isKinematic = false;
 
                     //Would be nice to add somesort of verification to prevent the part to be moved inside a "solid" wall
-                    if (Physics.Raycast(GetPartWorldPosition(partIndex), breakVelocity, out RaycastHit nHit, partAvgBoundsExtent + (breakVelocity.magnitude * Time.fixedDeltaTime)) == false || globalHandler.TryGetFracPartFromColInstanceId(nHit.colliderInstanceID) != null)
+                    if (Physics.Raycast(partWorldPosition, breakVelocity, out RaycastHit nHit, partAvgBoundsExtent + (breakVelocity.magnitude * Time.fixedDeltaTime)) == false || globalHandler.TryGetFracPartFromColInstanceId(nHit.colliderInstanceID) != null)
                     newRb.transform.position += breakVelocity * Time.fixedDeltaTime; //verification above seems to work but is it fast enough
 
                     //newRb.MovePosition(newRb.transform.position + (breakVelocity * Time.fixedDeltaTime));
                     //print(velocityMultiplier);
-                    newRb.velocity = (1.0f - velocityMultiplier) * 0.5f * breakVelocity;
+                    newRb.velocity = forceLeft * breakVelocity;
                     globalHandler.OnAddRigidbody(newRb, newRb.mass);
                     //allParts[partIndex].col.enabled = false;
                     //newRb.AddForce(breakVelocity, ForceMode.VelocityChange);

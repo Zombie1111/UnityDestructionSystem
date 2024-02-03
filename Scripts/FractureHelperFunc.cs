@@ -273,6 +273,17 @@ namespace Zombie1111_uDestruction
             return bestI;
         }
 
+        public static Vector3 ClosestPointOnDisc(Vector3 point, Vector3 discCenter, Vector3 discNormal, float discRadius, float discRadiusSquared)
+        {
+            //Project the point onto the disc normal plane, discNormal wont be used after this so we can reuse it
+            discNormal = point - Vector3.Dot(point - discCenter, discNormal) * discNormal;
+
+            //Move the projected point into the disc radius
+            if ((discNormal - discCenter).sqrMagnitude > discRadiusSquared) discNormal = discCenter + (discNormal - discCenter).normalized * discRadius;
+            
+            return discNormal;
+        }
+
         public static Vector3 ClosestPointOnLine(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
         {
             Vector3 lineToPoint = position - linePosition;
@@ -1165,6 +1176,26 @@ namespace Zombie1111_uDestruction
 
                     Debug.DrawLine(vertex, endPos, Color.yellow, durration);
                 }
+            }
+        }
+
+        public static void Debug_drawDisc(Vector3 discCenter, Vector3 discNormal, float discRadius, int segments)
+        {
+            // Calculate two vectors perpendicular to the normal
+            Vector3 from = Vector3.Cross(discNormal, Vector3.up).normalized;
+            Vector3 to = Vector3.Cross(discNormal, from).normalized;
+
+            // Calculate the world position of the disc center
+            Vector3 worldCenter = discCenter;
+
+            // Draw the disc circumference using line segments
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = i * 2 * Mathf.PI / segments;
+                Vector3 start = worldCenter + discRadius * Mathf.Cos(angle) * from + discRadius * Mathf.Sin(angle) * to;
+                angle = (i + 1) * 2 * Mathf.PI / segments;
+                Vector3 end = worldCenter + discRadius * Mathf.Cos(angle) * from + discRadius * Mathf.Sin(angle) * to;
+                Debug.DrawLine(start, end, Color.red, 0.5f);
             }
         }
 
