@@ -176,6 +176,7 @@ namespace Zombie1111_uDestruction
         [SerializeField] private int minAllowedMainPhySize = 2;
         [SerializeField] private bool multithreadedDestruction = true;
         [SerializeField] private float falloffStrenght = 20.0f;
+        [SerializeField] private float falloffHardness = 0.2f;
         [SerializeField] private float falloffPower = 1.0f;
         [SerializeField] private float partResistanceFactor = 1.0f;
         //[SerializeField] private float widthFalloffStrenght = 20.0f;
@@ -2808,6 +2809,7 @@ namespace Zombie1111_uDestruction
 
                 //Spread the destruction through the mesh
                 Color tempCol;
+                float falloffValue;
 
                 for (int oI = 0; oI < oList.Count; oI++)
                 {
@@ -2819,15 +2821,19 @@ namespace Zombie1111_uDestruction
                     //loop through all part vertices and get the force applied to them
                     foreach (int vI in allParts[partI].rendVertexIndexes)//verify thread safety
                     {
-                        des_verForceApply[vI] = math.max(0.0f, (impForce - (MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]), falloffPower) * falloffStrenght)) / allPartsResistance[partI]);
-                        
-                        if (des_verForceApply[vI] <= 0.0f) continue;
+                        //des_verForceApply[vI] = math.max(0.0f, (impForce - (MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]), falloffPower) * falloffStrenght)) / allPartsResistance[partI]);
+                        //des_verForceApply[vI] = math.max(0.0f, (impForce / 
+                        //    math.max((MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]) * falloffStrenght, falloffPower)) / allPartsResistance[partI], 1.0f)));
+                        falloffValue = MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]) * falloffStrenght, falloffPower);
+                        des_verForceApply[vI] = ((impForce / math.max(falloffValue, 1.0f)) - (falloffValue * falloffHardness)) / allPartsResistance[partI];
+
+                        if (des_verForceApply[vI] <= 0.01f) continue;
                         if (highestForceApplied < des_verForceApply[vI]) highestForceApplied = des_verForceApply[vI];
                     }
 
                     if (highestForceApplied <= 0.0f) continue;
 
-                    //try add neighbours to oList to continue spreading
+                    //try add neighbours to oList to continue spreadings
                     foreach (int borI in allParts[partI].neighbourParts)//verify thread safety
                     {
                         if (allParts[borI].parentIndex != allParts[partI].parentIndex || partsToIgnore.Add(borI) == false || des_partsBrokeness[borI] >= 1.0f) continue;//verify thread safety
