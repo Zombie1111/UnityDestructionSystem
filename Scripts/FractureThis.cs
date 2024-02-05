@@ -26,6 +26,7 @@ using UnityEngine.Jobs;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.VisualScripting;
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -899,6 +900,9 @@ namespace Zombie1111_uDestruction
             //apply resistance multipliers to parts
             Gen_setupResistanceMultiply();
 
+            //Optimize data for use in destruction solver at runtime
+            Gen_optimizeDataForRuntime();
+
             //save to save asset
             SaveOrLoadAsset(true);
 
@@ -909,6 +913,41 @@ namespace Zombie1111_uDestruction
             Debug.Log("Fractured " + objectToFracture.transform.name + " into " + fracturedMeshesLocal.Count + " parts, total vertex count = " + fracturedMeshes.Sum(mesh => mesh.vertexCount));
 
             return true;
+        }
+
+        private void Gen_optimizeDataForRuntime()
+        {
+            //verticsLinkedThreaded should only contain the ~same vertices for the same part
+            for (int i = 0; i < verticsLinkedThreaded.Length; i++)
+            {
+                int requiredPart = verticsPartThreaded[i];
+                verticsLinkedThreaded[i].intList.Remove(i);
+                for (int ii = verticsLinkedThreaded[i].intList.Count - 1; ii >= 0; ii--)
+                {
+                    if (verticsPartThreaded[verticsLinkedThreaded[i].intList[ii]] == requiredPart) continue;
+
+                    verticsLinkedThreaded[i].intList.RemoveAt(ii);
+                }
+            }
+
+            //rendVertexIndexes should only contain one of the ~same vertices
+            for (int i = 0; i < allParts.Length; i++)
+            {
+                for (int ii = allParts[i].rendVertexIndexes.Count - 1; ii >= 0; ii--)
+                {
+                    if (ii >= allParts[i].rendVertexIndexes.Count)
+                    {
+                        continue;
+                    }
+
+                    int vI = allParts[i].rendVertexIndexes[ii];
+                    foreach (int nVi in verticsLinkedThreaded[vI].intList)
+                    {
+                        if (nVi == vI) continue;
+                        allParts[i].rendVertexIndexes.Remove(nVi);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -2673,18 +2712,18 @@ namespace Zombie1111_uDestruction
                     des_partsToBreak[i].forceApplied);
             }
 
-           //apply deformation
-           fracRend.sharedMesh.SetVertices(mDef_verUse, 0, mDef_verUse.Count,
-               UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
-               | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
-               | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
-               | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
-           
-           fracRend.sharedMesh.SetColors(mDef_verColUse, 0, mDef_verColUse.Count,
-               UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
-               | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
-               | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
-               | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
+            //apply deformation
+            fracRend.sharedMesh.SetVertices(mDef_verUse, 0, mDef_verUse.Count,
+                UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
+                | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
+                | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
+                | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
+
+            fracRend.sharedMesh.SetColors(mDef_verColUse, 0, mDef_verColUse.Count,
+                UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
+                | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
+                | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
+                | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
 
             if (recalculateOnDisplacement == NormalRecalcMode.normalsOnly) fracRend.sharedMesh.RecalculateNormals();
             else if (recalculateOnDisplacement == NormalRecalcMode.normalsAndTagents)
@@ -2720,7 +2759,7 @@ namespace Zombie1111_uDestruction
 
             //run compute thread
             des_parentPartIndexes = allFracParents.Select(fParent => fParent.partIndexes).ToArray();
-            
+
             if (multithreadedDestruction == true) calcDesThread = Task.Run(() => DestructionSolverThread());
             else DestructionSolverThread();
             calcDesThread_isActive = true;
@@ -2799,7 +2838,7 @@ namespace Zombie1111_uDestruction
                     {
                         oList.Add(partI);
                     }
-                    
+
                     foreach (int borI in allParts[partI].neighbourParts)//verify thread safety
                     {
                         if (des_partsBrokeness[borI] >= 1.0f || partsToIgnore.Add(borI) == false) continue;
@@ -2860,7 +2899,7 @@ namespace Zombie1111_uDestruction
                             //partVerForce += des_verForceApplied[vI];
                             continue;
                         }
-                        
+
                         des_verForceApplied[vI] += des_verForceApply[vI];
                         //partVerForce += des_verForceApplied[vI];
 
@@ -2868,6 +2907,11 @@ namespace Zombie1111_uDestruction
                         tempCol = mDef_verColUse[vI];
                         tempCol.a = des_verForceApplied[vI];
                         mDef_verColUse[vI] = tempCol;
+
+                        foreach (int nVi in verticsLinkedThreaded[vI].intList)
+                        {
+                            mDef_verColUse[nVi] = tempCol;
+                        }
                     }
 
                     //Offset the part and save part vertics offsets
@@ -2912,7 +2956,8 @@ namespace Zombie1111_uDestruction
             void AddNewToBreak(int partIndex, float forceApplied, int impIndex, bool wasDirectHit)
             {
                 float forceCons = (1.0f - (des_partsBrokeness[partIndex] - forceApplied)) * (allPartsResistance[partIndex] / damComputing[impIndex].impForce);
-                des_partsToBreak.Add(new() {
+                des_partsToBreak.Add(new()
+                {
                     forceConsumed = forceCons,
                     forceApplied = 1.0f - forceCons,
                     partIndex = partIndex,
@@ -2956,7 +3001,7 @@ namespace Zombie1111_uDestruction
 
                     //Would be nice to add somesort of verification to prevent the part to be moved inside a "solid" wall
                     if (Physics.Raycast(partWorldPosition, breakVelocity, out RaycastHit nHit, partAvgBoundsExtent + (breakVelocity.magnitude * Time.fixedDeltaTime)) == false || globalHandler.TryGetFracPartFromColInstanceId(nHit.colliderInstanceID) != null)
-                    newRb.transform.position += breakVelocity * Time.fixedDeltaTime; //verification above seems to work but is it fast enough
+                        newRb.transform.position += breakVelocity * Time.fixedDeltaTime; //verification above seems to work but is it fast enough
 
                     //newRb.MovePosition(newRb.transform.position + (breakVelocity * Time.fixedDeltaTime));
                     //print(velocityMultiplier);
@@ -3434,22 +3479,22 @@ namespace Zombie1111_uDestruction
                 mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1];
                 mBake_bm2 = mBake_boneMatrices[mBake_weight.boneIndex2];
                 mBake_bm3 = mBake_boneMatrices[mBake_weight.boneIndex3];
-                
+
                 mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
                 mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;
                 mBake_vms.m02 = mBake_bm0.m02 * mBake_weight.weight0 + mBake_bm1.m02 * mBake_weight.weight1 + mBake_bm2.m02 * mBake_weight.weight2 + mBake_bm3.m02 * mBake_weight.weight3;
                 mBake_vms.m03 = mBake_bm0.m03 * mBake_weight.weight0 + mBake_bm1.m03 * mBake_weight.weight1 + mBake_bm2.m03 * mBake_weight.weight2 + mBake_bm3.m03 * mBake_weight.weight3;
-                
+
                 mBake_vms.m10 = mBake_bm0.m10 * mBake_weight.weight0 + mBake_bm1.m10 * mBake_weight.weight1 + mBake_bm2.m10 * mBake_weight.weight2 + mBake_bm3.m10 * mBake_weight.weight3;
                 mBake_vms.m11 = mBake_bm0.m11 * mBake_weight.weight0 + mBake_bm1.m11 * mBake_weight.weight1 + mBake_bm2.m11 * mBake_weight.weight2 + mBake_bm3.m11 * mBake_weight.weight3;
                 mBake_vms.m12 = mBake_bm0.m12 * mBake_weight.weight0 + mBake_bm1.m12 * mBake_weight.weight1 + mBake_bm2.m12 * mBake_weight.weight2 + mBake_bm3.m12 * mBake_weight.weight3;
                 mBake_vms.m13 = mBake_bm0.m13 * mBake_weight.weight0 + mBake_bm1.m13 * mBake_weight.weight1 + mBake_bm2.m13 * mBake_weight.weight2 + mBake_bm3.m13 * mBake_weight.weight3;
-                
+
                 mBake_vms.m20 = mBake_bm0.m20 * mBake_weight.weight0 + mBake_bm1.m20 * mBake_weight.weight1 + mBake_bm2.m20 * mBake_weight.weight2 + mBake_bm3.m20 * mBake_weight.weight3;
                 mBake_vms.m21 = mBake_bm0.m21 * mBake_weight.weight0 + mBake_bm1.m21 * mBake_weight.weight1 + mBake_bm2.m21 * mBake_weight.weight2 + mBake_bm3.m21 * mBake_weight.weight3;
                 mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
                 mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
-                
+
                 mDef_verNow[vI] = mBake_vms.MultiplyPoint3x4(mDef_verUse[vI]);
             }
         }
@@ -3466,23 +3511,28 @@ namespace Zombie1111_uDestruction
                 mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1].inverse;
                 mBake_bm2 = mBake_boneMatrices[mBake_weight.boneIndex2].inverse;
                 mBake_bm3 = mBake_boneMatrices[mBake_weight.boneIndex3].inverse;
-                
+
                 mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
                 mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;
                 mBake_vms.m02 = mBake_bm0.m02 * mBake_weight.weight0 + mBake_bm1.m02 * mBake_weight.weight1 + mBake_bm2.m02 * mBake_weight.weight2 + mBake_bm3.m02 * mBake_weight.weight3;
                 mBake_vms.m03 = mBake_bm0.m03 * mBake_weight.weight0 + mBake_bm1.m03 * mBake_weight.weight1 + mBake_bm2.m03 * mBake_weight.weight2 + mBake_bm3.m03 * mBake_weight.weight3;
-                
+
                 mBake_vms.m10 = mBake_bm0.m10 * mBake_weight.weight0 + mBake_bm1.m10 * mBake_weight.weight1 + mBake_bm2.m10 * mBake_weight.weight2 + mBake_bm3.m10 * mBake_weight.weight3;
                 mBake_vms.m11 = mBake_bm0.m11 * mBake_weight.weight0 + mBake_bm1.m11 * mBake_weight.weight1 + mBake_bm2.m11 * mBake_weight.weight2 + mBake_bm3.m11 * mBake_weight.weight3;
                 mBake_vms.m12 = mBake_bm0.m12 * mBake_weight.weight0 + mBake_bm1.m12 * mBake_weight.weight1 + mBake_bm2.m12 * mBake_weight.weight2 + mBake_bm3.m12 * mBake_weight.weight3;
                 mBake_vms.m13 = mBake_bm0.m13 * mBake_weight.weight0 + mBake_bm1.m13 * mBake_weight.weight1 + mBake_bm2.m13 * mBake_weight.weight2 + mBake_bm3.m13 * mBake_weight.weight3;
-                
+
                 mBake_vms.m20 = mBake_bm0.m20 * mBake_weight.weight0 + mBake_bm1.m20 * mBake_weight.weight1 + mBake_bm2.m20 * mBake_weight.weight2 + mBake_bm3.m20 * mBake_weight.weight3;
                 mBake_vms.m21 = mBake_bm0.m21 * mBake_weight.weight0 + mBake_bm1.m21 * mBake_weight.weight1 + mBake_bm2.m21 * mBake_weight.weight2 + mBake_bm3.m21 * mBake_weight.weight3;
                 mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
                 mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
-                
+
                 mDef_verUse[vI] = mBake_vms.MultiplyPoint3x4(mDef_verNow[vI]);
+
+                foreach (int nVi in verticsLinkedThreaded[vI].intList)
+                {
+                    mDef_verUse[nVi] = mDef_verUse[vI];
+                }
             }
         }
 
