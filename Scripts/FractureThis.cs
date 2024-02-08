@@ -179,6 +179,7 @@ namespace Zombie1111_uDestruction
         [SerializeField] private float falloffStrenght = 20.0f;
         [SerializeField] private float falloffHardness = 0.2f;
         [SerializeField] private float falloffPower = 1.0f;
+        [SerializeField] private float minFalloffDistance = 0.1f;
         [SerializeField] private float partResistanceFactor = 1.0f;
         //[SerializeField] private float widthFalloffStrenght = 20.0f;
         //[SerializeField] private float widthFalloffPower = 1.0f;
@@ -917,37 +918,71 @@ namespace Zombie1111_uDestruction
 
         private void Gen_optimizeDataForRuntime()
         {
-            //verticsLinkedThreaded should only contain the ~same vertices for the same part
-            for (int i = 0; i < verticsLinkedThreaded.Length; i++)
+            //change verticsLinkedThreaded structure
+            List<IntList> optLinked = verticsLinkedThreaded.ToList();
+            HashSet<int> usedVers = new();
+            for (int i = optLinked.Count - 1; i >= 0; i--)
             {
-                int requiredPart = verticsPartThreaded[i];
-                verticsLinkedThreaded[i].intList.Remove(i);
-                for (int ii = verticsLinkedThreaded[i].intList.Count - 1; ii >= 0; ii--)
+                for (int ii = optLinked[i].intList.Count - 1; ii >= 0; ii--)
                 {
-                    if (verticsPartThreaded[verticsLinkedThreaded[i].intList[ii]] == requiredPart) continue;
-
-                    verticsLinkedThreaded[i].intList.RemoveAt(ii);
+                    if (usedVers.Add(optLinked[i].intList[ii]) == false) optLinked[i].intList.RemoveAt(ii);
                 }
+
+                if (optLinked[i].intList.Count == 0) optLinked.RemoveAt(i);
             }
 
-            //rendVertexIndexes should only contain one of the ~same vertices
+            verticsLinkedThreaded = optLinked.ToArray();
+            Debug.Log(verticsLinkedThreaded.Length);
+
+            //change rendVertexIndexes to contain verticsLinkedThreaded indexes
             for (int i = 0; i < allParts.Length; i++)
             {
-                for (int ii = allParts[i].rendVertexIndexes.Count - 1; ii >= 0; ii--)
-                {
-                    if (ii >= allParts[i].rendVertexIndexes.Count)
-                    {
-                        continue;
-                    }
+                allParts[i].rendVertexIndexes.Clear();
+            }
 
-                    int vI = allParts[i].rendVertexIndexes[ii];
-                    foreach (int nVi in verticsLinkedThreaded[vI].intList)
-                    {
-                        if (nVi == vI) continue;
-                        allParts[i].rendVertexIndexes.Remove(nVi);
-                    }
+            int partI;
+
+            for (int i = 0; i < verticsLinkedThreaded.Length; i++)
+            {
+                foreach (int vI in verticsLinkedThreaded[i].intList)
+                {
+                    partI = verticsPartThreaded[vI];
+                    if (allParts[partI].rendVertexIndexes.Contains(i) == false) allParts[partI].rendVertexIndexes.Add(i);
+
                 }
             }
+
+            ////verticsLinkedThreaded should only contain the ~same vertices for the same part
+            //for (int i = 0; i < verticsLinkedThreaded.Length; i++)
+            //{
+            //    int requiredPart = verticsPartThreaded[i];
+            //    verticsLinkedThreaded[i].intList.Remove(i);
+            //    for (int ii = verticsLinkedThreaded[i].intList.Count - 1; ii >= 0; ii--)
+            //    {
+            //        if (verticsPartThreaded[verticsLinkedThreaded[i].intList[ii]] == requiredPart) continue;
+            //
+            //        verticsLinkedThreaded[i].intList.RemoveAt(ii);
+            //    }
+            //}
+            //
+            ////rendVertexIndexes should only contain one of the ~same vertices
+            //for (int i = 0; i < allParts.Length; i++)
+            //{
+            //    for (int ii = allParts[i].rendVertexIndexes.Count - 1; ii >= 0; ii--)
+            //    {
+            //        if (ii >= allParts[i].rendVertexIndexes.Count)
+            //        {
+            //            continue;
+            //        }
+            //
+            //        int vI = allParts[i].rendVertexIndexes[ii];
+            //        foreach (int nVi in verticsLinkedThreaded[vI].intList)
+            //        {
+            //            if (nVi == vI) continue;
+            //            allParts[i].rendVertexIndexes.Remove(nVi);
+            //        }
+            //    }
+            //}
         }
 
         /// <summary>
@@ -1889,8 +1924,9 @@ namespace Zombie1111_uDestruction
             {
                 mDef_verUse = new();
                 mDef_verNow = new Vector3[fracRend.sharedMesh.vertexCount];
-                des_verForceApply = new float[fracRend.sharedMesh.vertexCount];
-                des_verForceApplied = new float[fracRend.sharedMesh.vertexCount];
+                des_linkForceApply = new float[verticsLinkedThreaded.Length];
+                des_linkForceApplied = new float[verticsLinkedThreaded.Length];
+                des_linkVer = new int[verticsLinkedThreaded.Length];
                 fracRend.sharedMesh.GetVertices(mDef_verUse);
                 mDef_verDefAmount = new float[mDef_verUse.Count];
                 if (isRealSkinnedM == false) verticsBonesThreaded = fracRend.sharedMesh.boneWeights.Select(bone => bone.boneIndex0).ToArray();
@@ -1976,11 +2012,11 @@ namespace Zombie1111_uDestruction
             if (allParts.Length == 0) return;
 
             //FixedUpdate is called before collsionModifyEvent
-            //Start update fracRend bones data job
-            BoneHandleJob_run();
-
             //apply destruction result
             if (calcDesThread_isActive == true) DestructionSolverComplete();
+
+            //Start update fracRend bones data job
+            BoneHandleJob_run();
 
             //sync part brokenness
             if (damBrokenessNeedsSync == true)
@@ -2502,7 +2538,7 @@ namespace Zombie1111_uDestruction
         private float[] mDef_verDefAmount;
 
         /// <summary>
-        /// Contains all vertics and all other vertex indexes that share the ~same position as X (Including self)
+        /// Each intList contains all vertices that share the ~same position. Each vertex only exists once.
         /// </summary>
         [System.NonSerialized] public IntList[] verticsLinkedThreaded = new IntList[0];
 
@@ -2785,10 +2821,12 @@ namespace Zombie1111_uDestruction
         private float[] des_partsBrokeness = new float[0];
         private Vector3[] des_partsOffset;
         private List<int>[] des_parentPartIndexes;
-        private float[] des_verForceApply;
-        private float[] des_verForceApplied;
+        private float[] des_linkForceApply;
+        private float[] des_linkForceApplied;
+        private int[] des_linkVer;
         private float impactRadius;
         private float impactRadiusSquared;
+        private HashSet<int> des_usedLinked = new();
 
         private void DestructionSolverThread()
         {
@@ -2798,8 +2836,14 @@ namespace Zombie1111_uDestruction
             //clear old result
             des_partsToBreak.Clear();
             des_newParents.Clear();
+            des_usedLinked.Clear();
             HashSet<int> partsToIgnore = new();
             RealtimeVer_syncBones();
+
+            for (int i = 0; i < des_linkForceApply.Length; i++)
+            {
+                des_linkForceApply[i] = 0.0f;
+            }
 
             //loop through all impSources and compute each seperatly
             for (int i = 0; i < damComputing.Count; i++)
@@ -2853,21 +2897,30 @@ namespace Zombie1111_uDestruction
                 for (int oI = 0; oI < oList.Count; oI++)
                 {
                     //get the world position of the vertices used by this part
+                    int vI;
                     partI = oList[oI];
                     highestForceApplied = -1.0f;
                     RealtimeVer_prepareChange(partI);
 
                     //loop through all part vertices and get the force applied to them
-                    foreach (int vI in allParts[partI].rendVertexIndexes)//verify thread safety
+                    foreach (int lI in allParts[partI].rendVertexIndexes)//verify thread safety
                     {
-                        //des_verForceApply[vI] = math.max(0.0f, (impForce - (MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]), falloffPower) * falloffStrenght)) / allPartsResistance[partI]);
-                        //des_verForceApply[vI] = math.max(0.0f, (impForce / 
-                        //    math.max((MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]) * falloffStrenght, falloffPower)) / allPartsResistance[partI], 1.0f)));
-                        falloffValue = MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]) * falloffStrenght, falloffPower);
-                        des_verForceApply[vI] = ((impForce / math.max(falloffValue, 1.0f)) - (falloffValue * falloffHardness)) / allPartsResistance[partI];
+                        if (des_linkForceApply[lI] > 0.0f)
+                        {
+                            if (des_linkForceApply[lI] <= 0.0001f) continue;
+                            if (highestForceApplied < des_linkForceApply[lI]) highestForceApplied = des_linkForceApply[lI];
+                            continue; //continue if already calculated
+                        }
 
-                        if (des_verForceApply[vI] <= 0.01f) continue;
-                        if (highestForceApplied < des_verForceApply[vI]) highestForceApplied = des_verForceApply[vI];
+                        //vI = verticsLinkedThreaded[lI].intList[0];
+                        vI = des_linkVer[lI];
+                        if (vI < 0) continue;
+
+                        falloffValue = MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]) * falloffStrenght, falloffPower);
+                        des_linkForceApply[lI] = ((impForce / math.max(falloffValue, 1.0f)) - (falloffValue * falloffHardness)) / allPartsResistance[partI];
+
+                        if (des_linkForceApply[lI] <= 0.0001f) continue;
+                        if (highestForceApplied < des_linkForceApply[lI]) highestForceApplied = des_linkForceApply[lI];
                     }
 
                     if (highestForceApplied <= 0.0f) continue;
@@ -2887,37 +2940,41 @@ namespace Zombie1111_uDestruction
                         AddNewToBreak(partI, highestForceApplied, impIndex, false);
                         continue;
                     }
+                }
 
-                    //loop through all part vertices and deform them
-                    //float partVerForce = 0.0f;
+                //loop through all used linked indexes and apply deformation to them
+                int vZero;
 
-                    foreach (int vI in allParts[partI].rendVertexIndexes)//verify thread safety
+                foreach (int lI in des_usedLinked)
+                {
+                    des_linkForceApply[lI] = Math.Min(des_linkForceApply[lI], 1.0f - des_linkForceApplied[lI]);
+                    if (des_linkForceApply[lI] <= 0.00001f)
                     {
-                        des_verForceApply[vI] = Math.Min(des_verForceApply[vI], 1.0f - des_verForceApplied[vI]);
-                        if (des_verForceApply[vI] <= 0.00001f)
-                        {
-                            //partVerForce += des_verForceApplied[vI];
-                            continue;
-                        }
-
-                        des_verForceApplied[vI] += des_verForceApply[vI];
                         //partVerForce += des_verForceApplied[vI];
-
-                        mDef_verNow[vI] += des_verForceApply[vI] * vertexDisplacementStenght * impDir;
-                        tempCol = mDef_verColUse[vI];
-                        tempCol.a = des_verForceApplied[vI];
-                        mDef_verColUse[vI] = tempCol;
-
-                        foreach (int nVi in verticsLinkedThreaded[vI].intList)
-                        {
-                            mDef_verColUse[nVi] = tempCol;
-                        }
+                        continue;
                     }
 
-                    //Offset the part and save part vertics offsets
-                    //partVerForce /= allParts[partI].rendVertexIndexes.Count;
-                    RealtimeVer_prepareApply(partI);
+                    des_linkForceApplied[lI] += des_linkForceApply[lI];
+                    //partVerForce += des_verForceApplied[vI];
+                    vZero = des_linkVer[lI];
+                    if (vZero < 0) continue;
+
+                    mDef_verNow[vZero] += des_linkForceApply[lI] * vertexDisplacementStenght * impDir;
+                    tempCol = mDef_verColUse[vZero];
+                    tempCol.a = des_linkForceApplied[lI];
+                    mDef_verColUse[vZero] = tempCol;
+
+                    foreach (int vI in verticsLinkedThreaded[lI].intList)
+                    {
+                        mDef_verColUse[vI] = tempCol;
+                    }
+
+                    RealtimeVer_prepareApply(lI, vZero);
                 }
+
+                //Offset the part and save part vertics offsets
+                //partVerForce /= allParts[partI].rendVertexIndexes.Count;
+
 
                 Debug_toggleTimer();
 
@@ -2949,7 +3006,7 @@ namespace Zombie1111_uDestruction
                         //closePos = iPoint.impPos;
                     }
 
-                    return closeDis;
+                    return minFalloffDistance > closeDis ? minFalloffDistance : closeDis;
                 }
             }
 
@@ -3470,10 +3527,33 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// After calling this, you can assign mDef_verNow[allParts[partIndex].rendVertexIndexes] with new world positions
         /// </summary>
-        private void RealtimeVer_prepareChange(int partIndex)
+        private int RealtimeVer_prepareChange(int partIndex)
         {
-            foreach (int vI in allParts[partIndex].rendVertexIndexes)
+            int vI = -1;
+            foreach (int lI in allParts[partIndex].rendVertexIndexes)
             {
+                if (des_usedLinked.Add(lI) == false)
+                {
+                    continue;
+                }
+
+                vI = -1;
+
+                foreach (int vIi in verticsLinkedThreaded[lI].intList)
+                {
+                    if (des_partsBrokeness[verticsPartThreaded[vIi]] >= 1.0f) continue;
+                    des_linkVer[lI] = vIi;
+                    vI = vIi;
+                    break;
+                }
+
+                if (vI < 0)
+                {
+                    des_linkVer[lI] = -1;
+                    des_usedLinked.Remove(lI);
+                    break;
+                }
+
                 mBake_weight = boneWe_current[vI];
                 mBake_bm0 = mBake_boneMatrices[mBake_weight.boneIndex0];
                 mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1];
@@ -3497,42 +3577,42 @@ namespace Zombie1111_uDestruction
 
                 mDef_verNow[vI] = mBake_vms.MultiplyPoint3x4(mDef_verUse[vI]);
             }
+
+            return vI;
         }
 
         /// <summary>
         /// You should call this after calling RealtimeVer_prepareChange with the same partIndex
         /// </summary>
-        private void RealtimeVer_prepareApply(int partIndex)
+        private void RealtimeVer_prepareApply(int linkedIndex, int verIndex)
         {
-            foreach (int vI in allParts[partIndex].rendVertexIndexes)
+            mBake_weight = boneWe_current[verIndex];
+            mBake_bm0 = mBake_boneMatrices[mBake_weight.boneIndex0].inverse;
+            mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1].inverse;
+            mBake_bm2 = mBake_boneMatrices[mBake_weight.boneIndex2].inverse;
+            mBake_bm3 = mBake_boneMatrices[mBake_weight.boneIndex3].inverse;
+
+            mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
+            mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;
+            mBake_vms.m02 = mBake_bm0.m02 * mBake_weight.weight0 + mBake_bm1.m02 * mBake_weight.weight1 + mBake_bm2.m02 * mBake_weight.weight2 + mBake_bm3.m02 * mBake_weight.weight3;
+            mBake_vms.m03 = mBake_bm0.m03 * mBake_weight.weight0 + mBake_bm1.m03 * mBake_weight.weight1 + mBake_bm2.m03 * mBake_weight.weight2 + mBake_bm3.m03 * mBake_weight.weight3;
+
+            mBake_vms.m10 = mBake_bm0.m10 * mBake_weight.weight0 + mBake_bm1.m10 * mBake_weight.weight1 + mBake_bm2.m10 * mBake_weight.weight2 + mBake_bm3.m10 * mBake_weight.weight3;
+            mBake_vms.m11 = mBake_bm0.m11 * mBake_weight.weight0 + mBake_bm1.m11 * mBake_weight.weight1 + mBake_bm2.m11 * mBake_weight.weight2 + mBake_bm3.m11 * mBake_weight.weight3;
+            mBake_vms.m12 = mBake_bm0.m12 * mBake_weight.weight0 + mBake_bm1.m12 * mBake_weight.weight1 + mBake_bm2.m12 * mBake_weight.weight2 + mBake_bm3.m12 * mBake_weight.weight3;
+            mBake_vms.m13 = mBake_bm0.m13 * mBake_weight.weight0 + mBake_bm1.m13 * mBake_weight.weight1 + mBake_bm2.m13 * mBake_weight.weight2 + mBake_bm3.m13 * mBake_weight.weight3;
+
+            mBake_vms.m20 = mBake_bm0.m20 * mBake_weight.weight0 + mBake_bm1.m20 * mBake_weight.weight1 + mBake_bm2.m20 * mBake_weight.weight2 + mBake_bm3.m20 * mBake_weight.weight3;
+            mBake_vms.m21 = mBake_bm0.m21 * mBake_weight.weight0 + mBake_bm1.m21 * mBake_weight.weight1 + mBake_bm2.m21 * mBake_weight.weight2 + mBake_bm3.m21 * mBake_weight.weight3;
+            mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
+            mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
+
+            Vector3 newVerUse = mBake_vms.MultiplyPoint3x4(mDef_verNow[verIndex]);
+
+            foreach (int vI in verticsLinkedThreaded[linkedIndex].intList)
             {
-                mBake_weight = boneWe_current[vI];
-                mBake_bm0 = mBake_boneMatrices[mBake_weight.boneIndex0].inverse;
-                mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1].inverse;
-                mBake_bm2 = mBake_boneMatrices[mBake_weight.boneIndex2].inverse;
-                mBake_bm3 = mBake_boneMatrices[mBake_weight.boneIndex3].inverse;
-
-                mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
-                mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;
-                mBake_vms.m02 = mBake_bm0.m02 * mBake_weight.weight0 + mBake_bm1.m02 * mBake_weight.weight1 + mBake_bm2.m02 * mBake_weight.weight2 + mBake_bm3.m02 * mBake_weight.weight3;
-                mBake_vms.m03 = mBake_bm0.m03 * mBake_weight.weight0 + mBake_bm1.m03 * mBake_weight.weight1 + mBake_bm2.m03 * mBake_weight.weight2 + mBake_bm3.m03 * mBake_weight.weight3;
-
-                mBake_vms.m10 = mBake_bm0.m10 * mBake_weight.weight0 + mBake_bm1.m10 * mBake_weight.weight1 + mBake_bm2.m10 * mBake_weight.weight2 + mBake_bm3.m10 * mBake_weight.weight3;
-                mBake_vms.m11 = mBake_bm0.m11 * mBake_weight.weight0 + mBake_bm1.m11 * mBake_weight.weight1 + mBake_bm2.m11 * mBake_weight.weight2 + mBake_bm3.m11 * mBake_weight.weight3;
-                mBake_vms.m12 = mBake_bm0.m12 * mBake_weight.weight0 + mBake_bm1.m12 * mBake_weight.weight1 + mBake_bm2.m12 * mBake_weight.weight2 + mBake_bm3.m12 * mBake_weight.weight3;
-                mBake_vms.m13 = mBake_bm0.m13 * mBake_weight.weight0 + mBake_bm1.m13 * mBake_weight.weight1 + mBake_bm2.m13 * mBake_weight.weight2 + mBake_bm3.m13 * mBake_weight.weight3;
-
-                mBake_vms.m20 = mBake_bm0.m20 * mBake_weight.weight0 + mBake_bm1.m20 * mBake_weight.weight1 + mBake_bm2.m20 * mBake_weight.weight2 + mBake_bm3.m20 * mBake_weight.weight3;
-                mBake_vms.m21 = mBake_bm0.m21 * mBake_weight.weight0 + mBake_bm1.m21 * mBake_weight.weight1 + mBake_bm2.m21 * mBake_weight.weight2 + mBake_bm3.m21 * mBake_weight.weight3;
-                mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
-                mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
-
-                mDef_verUse[vI] = mBake_vms.MultiplyPoint3x4(mDef_verNow[vI]);
-
-                foreach (int nVi in verticsLinkedThreaded[vI].intList)
-                {
-                    mDef_verUse[nVi] = mDef_verUse[vI];
-                }
+                if (des_partsBrokeness[verticsPartThreaded[vI]] >= 1.0f) continue;
+                mDef_verUse[vI] = newVerUse;
             }
         }
 

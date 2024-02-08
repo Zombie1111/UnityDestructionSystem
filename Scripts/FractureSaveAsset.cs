@@ -152,7 +152,7 @@ namespace Zombie1111_uDestruction
                 || fracSavedData.saved_allParts.Length != loadTo.saved_allPartsCol.Length
                 || loadTo.fracRend == null
                 || loadTo.fracRend.transform != loadTo.transform
-                || (loadTo.fracRend.sharedMesh != null && loadTo.fracRend.sharedMesh.vertexCount != fracSavedData.saved_verticsLinkedThreaded.Length))
+                || (loadTo.fracRend.sharedMesh != null && loadTo.fracRend.sharedMesh.vertexCount != fracSavedData.saved_verticsPartThreaded.Length))
             {
                 return false;
             }

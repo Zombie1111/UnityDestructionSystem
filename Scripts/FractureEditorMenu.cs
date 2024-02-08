@@ -143,6 +143,30 @@ namespace Zombie1111_uDestruction
 
             if (logProgress == true) Debug.Log("Removed " + toRemove.Length + " fractures");
         }
+
+        [MenuItem("CONTEXT/SkinnedMeshRenderer/Save Mesh...")]
+        public static void SaveMeshInPlace(MenuCommand menuCommand)
+        {
+            SkinnedMeshRenderer mf = menuCommand.context as SkinnedMeshRenderer;
+            Mesh m = mf.sharedMesh;
+            SaveMesh(m, m.name, true, false);
+        }
+
+        public static void SaveMesh(Mesh mesh, string name, bool makeNewInstance, bool optimizeMesh)
+        {
+            string path = EditorUtility.SaveFilePanel("Save Separate Mesh Asset", "Assets/", name, "asset");
+            if (string.IsNullOrEmpty(path)) return;
+
+            path = FileUtil.GetProjectRelativePath(path);
+
+            Mesh meshToSave = (makeNewInstance) ? Object.Instantiate(mesh) as Mesh : mesh;
+
+            if (optimizeMesh)
+                MeshUtility.Optimize(meshToSave);
+
+            AssetDatabase.CreateAsset(meshToSave, path);
+            AssetDatabase.SaveAssets();
+        }
     }
 }
 #endif
