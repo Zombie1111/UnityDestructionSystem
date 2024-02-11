@@ -11,22 +11,11 @@ using Component = UnityEngine.Component;
 using System.Data;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
-using UnityEngine.Experimental.AI;
-using System.Threading;
-using UnityEngine.UIElements;
-using UnityEditor.Rendering;
-using UnityEditor.Search;
 using Unity.Mathematics;
-using System.Runtime.CompilerServices;
 using UnityEditor.SceneManagement;
-using JetBrains.Annotations;
-using UnityEditor.XR;
-using UnityEngine.Experimental.Rendering;
 using UnityEngine.Jobs;
 using Unity.Collections;
 using Unity.Jobs;
-using Unity.Collections.LowLevel.Unsafe;
-using Unity.VisualScripting;
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -151,14 +140,17 @@ namespace Zombie1111_uDestruction
         //fracture settings
         [Header("Fracture")]
         public FractureSaveAsset saveAsset = null;
-        [Tooltip("Time until the fracture can be destroyed after awake, can also be set to <0.0f to disable destruction")] public float immortalTime = 1.0f;
+        [Tooltip("Time until the fracture can be destroyed after awake, can also be set to <0.0f to disable destruction")]
+        public float immortalTime = 1.0f;
         [SerializeField] private bool halfUpdateRate = true;
         [SerializeField] private float worldScale = 1.0f;
         [SerializeField] private int fractureCount = 15;
         [SerializeField] private bool dynamicFractureCount = true;
+        [Tooltip("If < 1.0f, controls how random the angle of the cuts are. If >= 1.0f, voronoi is used")]
+        [SerializeField] [Range(0.0f, 1.0f)] private float randomness = 1.0f;
         [SerializeField] private int seed = -1;
         [SerializeField] private byte maxFractureAttempts = 20;
-        public GenerationQuality generationQuality = GenerationQuality.medium;
+        public GenerationQuality generationQuality = GenerationQuality.normal;
 
         [Space(10)]
         [Header("Physics")]
@@ -172,7 +164,6 @@ namespace Zombie1111_uDestruction
         [Header("Destruction")]
         public float destructionThreshold = 1.0f;
         [SerializeField] private float destructionResistance = 4.0f;
-        [SerializeField] private float destructionConsumption = 4.0f;
         [SerializeField] private float minDelay = 0.05f;
         [SerializeField] private int minAllowedMainPhySize = 2;
         [SerializeField] private bool multithreadedDestruction = true;
@@ -359,29 +350,30 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// High = 2, medium = 1, low = 0
+        /// High = 2, normal = 1
         /// </summary>
         public enum GenerationQuality
         {
             high = 2,
-            medium = 1,
-            low = 0
+            normal = 1,
         }
 
         private enum ColliderType
         {
             mesh,
-            boxLarge,
-            boxSmall,
+            box,
+            capsule,
             sphereLarge,
             sphereSmall
         }
 
         private enum SelfCollideWithRule
         {
-            ignoreNone,
-            ignoreNeighbours,
-            ignoreAll
+            ignoreNone = 0,
+            ignoreSource = 3,
+            ignoreSourceAndNeighbours = 4,
+            ignoreNeighbours = 2,
+            ignoreAll = 1
         }
 
         [System.Serializable]
@@ -578,7 +570,6 @@ namespace Zombie1111_uDestruction
                 {
 
                     DestroyImmediate(allFracParents[i].parentRb);
-                    DestroyImmediate(allFracParents[i].fParent);
 
                     for (int ii = 0; ii < allFracParents[i].partIndexes.Count; ii += 1)
                     {
@@ -714,7 +705,6 @@ namespace Zombie1111_uDestruction
             /// The parents rigidbody. mass = (childPartCount * massDensity * phyMainOptions.massMultiplier), isKinematic is updated based on phyMainOptions.MainPhysicsType
             /// </summary>
             public Rigidbody parentRb;
-            public FractureParent fParent;
             public List<int> partIndexes;
         }
 
@@ -932,7 +922,6 @@ namespace Zombie1111_uDestruction
             }
 
             verticsLinkedThreaded = optLinked.ToArray();
-            Debug.Log(verticsLinkedThreaded.Length);
 
             //change rendVertexIndexes to contain verticsLinkedThreaded indexes
             for (int i = 0; i < allParts.Length; i++)
@@ -1041,7 +1030,7 @@ namespace Zombie1111_uDestruction
         public int triIndex = 0;
         public Transform debugTrans = null;
 
-        private class boneWeData
+        private class BoneWeData
         {
             public float weight = 0.0f;
             public int boneIndex = 0;
@@ -1171,8 +1160,12 @@ namespace Zombie1111_uDestruction
 
             for (int i = 0; i < allParts.Length; i += 1)
             {
-                if (generationQuality != GenerationQuality.high && (kinematicPartStatus.Length > 0 || generationQuality == GenerationQuality.low))
+                bool didSimple = false;
+
+                if (colliderType != ColliderType.mesh || generationQuality == GenerationQuality.normal)
                 {
+                    didSimple = true;
+
                     colCount = phyScene.OverlapBox(worldMeshes[i].bounds.center,
                         worldMeshes[i].bounds.extents * 1.05f,
                         lapCols,
@@ -1180,10 +1173,10 @@ namespace Zombie1111_uDestruction
                         Physics.AllLayers,
                         QueryTriggerInteraction.Ignore);
 
-                    Gen_getKinematicAndNeighboursFromTrans(lapCols, colCount, i, generationQuality != GenerationQuality.low);
+                    Gen_getKinematicAndNeighboursFromTrans(lapCols, colCount, i, false);
                 }
 
-                if (generationQuality == GenerationQuality.low) continue;
+                if (didSimple == true) continue;
 
                 worldMeshes[i].GetVertices(wVerts);
 
@@ -1193,11 +1186,8 @@ namespace Zombie1111_uDestruction
                     Gen_getKinematicAndNeighboursFromTrans(lapCols, colCount, i, false);
                 }
 
-                if (generationQuality == GenerationQuality.high)
-                {
-                    lapCols = FractureHelperFunc.LinecastsBetweenPositions(wVerts, phyScene).ToArray();
-                    Gen_getKinematicAndNeighboursFromTrans(lapCols, lapCols.Length, i, false);
-                }
+                lapCols = FractureHelperFunc.LinecastsBetweenPositions(wVerts, phyScene).ToArray();
+                Gen_getKinematicAndNeighboursFromTrans(lapCols, lapCols.Length, i, false);
             }
 
             //update parent info
@@ -1263,45 +1253,30 @@ namespace Zombie1111_uDestruction
                 {
                     //mesh
                     newCol = partTrans.GetOrAddComponent<MeshCollider>();
-                    //newCol.convex = true;
-                    //newCol.sharedMesh = partMesh;
-                    //newCol.sharedMaterial = phyMat;
-                    //return newCol;
                 }
-                else if (colliderType == ColliderType.boxLarge)
+                else if (colliderType == ColliderType.box)
                 {
-                    //box large
+                    //box
                     newCol = partTrans.GetOrAddComponent<BoxCollider>();
-                    //newCol.size = partMesh.bounds.size;
-                    //newCol.sharedMaterial = phyMat;
-                    //return newCol;
                 }
-                else if (colliderType == ColliderType.boxSmall)
+                else if (colliderType == ColliderType.capsule)
                 {
-                    //box small
-                    newCol = partTrans.GetOrAddComponent<BoxCollider>();
-                    //newCol.size = Vector3.one * ((Mathf.Abs(partMesh.bounds.extents.x) + Mathf.Abs(partMesh.bounds.extents.y) + Mathf.Abs(partMesh.bounds.extents.z)) / 3.0f);
-                    //newCol.sharedMaterial = phyMat;
-                    //return newCol;
-                }
-                else if (colliderType == ColliderType.sphereLarge)
-                {
-                    //sphere large
-                    newCol = partTrans.GetOrAddComponent<SphereCollider>();
-                    //newCol.radius = (Mathf.Abs(partMesh.bounds.extents.x) + Mathf.Abs(partMesh.bounds.extents.y) + Mathf.Abs(partMesh.bounds.extents.z)) / 3.0f;
-                    //newCol.sharedMaterial = phyMat;
-                    //return newCol;
+                    //capsule
+                    newCol = partTrans.GetOrAddComponent<CapsuleCollider>();
                 }
                 else
                 {
-                    //sphere small
+                    //sphere
                     newCol = partTrans.GetOrAddComponent<SphereCollider>();
-                    //newCol.radius = partMesh.bounds.extents.magnitude / 3.0f;
-                    //newCol.sharedMaterial = phyMat;
-                    //return newCol;
                 }
 
-                FractureHelperFunc.SetColliderFromFromPoints(newCol, partTrans, FractureHelperFunc.ConvertPositionsWithMatrix(partMesh.vertices, partTrans.localToWorldMatrix), true, false);
+                FractureHelperFunc.SetColliderFromFromPoints(
+                    newCol,
+                    partTrans,
+                    FractureHelperFunc.ConvertPositionsWithMatrix(partMesh.vertices, partTrans.localToWorldMatrix),
+                    true,
+                    colliderType == ColliderType.sphereSmall);
+
                 newCol.sharedMaterial = phyMat;
                 newCol.hasModifiableContacts = true; //This must always be true for all fracture colliders
                 return newCol;
@@ -1347,7 +1322,8 @@ namespace Zombie1111_uDestruction
             //get per mesh scale, so each mesh can get ~equally sized
             List<Mesh> meshes = meshesToFracture.Select(meshData => meshData.mesh).ToList();
             List<float> meshScales = FractureHelperFunc.GetPerMeshScale(meshes, useMeshBounds);
-            if (dynamicChunkCount == true) totalChunkCount = Mathf.CeilToInt(totalChunkCount * FractureHelperFunc.GetBoundingBoxVolume(FractureHelperFunc.GetCompositeMeshBounds(meshes.ToArray())));
+            Bounds meshBounds = FractureHelperFunc.GetCompositeMeshBounds(meshes.ToArray());
+            if (dynamicChunkCount == true) totalChunkCount = Mathf.CeilToInt(totalChunkCount * FractureHelperFunc.GetBoundingBoxVolume(meshBounds));
             meshes.Clear();
 
             if (mustConfirmHighCount == true && totalChunkCount > 500)
@@ -1361,14 +1337,14 @@ namespace Zombie1111_uDestruction
             //fractrue the meshes into chunks that are ~equally sized
             for (int i = 0; i < meshesToFracture.Count; i += 1)
             {
-                Gen_fractureMesh(meshesToFracture[i].mesh, ref meshes, Mathf.RoundToInt(totalChunkCount * meshScales[i]));
+                Gen_fractureMesh(meshesToFracture[i].mesh, ref meshes, Mathf.RoundToInt(totalChunkCount * meshScales[i]), meshBounds);
                 nextOgMeshId += 1;
             }
 
             //return the result
             return meshes;
 
-            void Gen_fractureMesh(Mesh meshToFrac, ref List<Mesh> newMeshes, int chunkCount)
+            void Gen_fractureMesh(Mesh meshToFrac, ref List<Mesh> newMeshes, int chunkCount, Bounds bound)
             {
                 //fractures the given mesh into pieces and adds the new pieces to the newMeshes list
                 if (chunkCount <= 1)
@@ -1404,9 +1380,29 @@ namespace Zombie1111_uDestruction
                     var fractureTool = new NvFractureTool();
                     fractureTool.setRemoveIslands(false);
                     fractureTool.setSourceMesh(nvMesh);
-                    var sites = new NvVoronoiSitesGenerator(nvMesh);
-                    sites.uniformlyGenerateSitesInMesh(chunkCount);
-                    fractureTool.voronoiFracturing(0, sites);
+
+                    if (randomness >= 1.0f)
+                    {
+                        var sites = new NvVoronoiSitesGenerator(nvMesh);
+                        sites.uniformlyGenerateSitesInMesh(chunkCount);
+                        fractureTool.voronoiFracturing(0, sites);
+                    }
+                    else
+                    {
+                        // Calculate the volume of the mesh bounds
+                        float totalVolume = meshBounds.size.x * meshBounds.size.y * meshBounds.size.z;
+
+                        // Calculate the approximate volume of each resulting chunk
+                        float chunkVolume = totalVolume / (chunkCount / 3.0f);
+
+                        // Calculate the number of slices needed in each axis
+                        int slicesX = Mathf.FloorToInt(meshBounds.size.x / Mathf.Pow(chunkVolume, 1f / 3f));
+                        int slicesY = Mathf.FloorToInt(meshBounds.size.y / Mathf.Pow(chunkVolume, 1f / 3f));
+                        int slicesZ = Mathf.FloorToInt(meshBounds.size.z / Mathf.Pow(chunkVolume, 1f / 3f));
+
+                        fractureTool.slicing(0, new() { slices = new Vector3Int(slicesX, slicesY, slicesZ), angle_variations = randomness * 1.1f, offset_variations = randomness * 0.6f }, false);
+                    }
+
                     fractureTool.finalizeFracturing();
 
                     //extract mesh chunks from nvBlast
@@ -1664,7 +1660,7 @@ namespace Zombie1111_uDestruction
             fracRend.sharedMesh.boneWeights = newBoneWe;
 
             //add colliders to real skinned bones
-            List<boneWeData> colBoneWe = new();
+            List<BoneWeData> colBoneWe = new();
             float weight = 0.0f;
             int boneIndex = 0;
             int weListI;
@@ -1745,10 +1741,12 @@ namespace Zombie1111_uDestruction
                 }
 
                 FractureHelperFunc.MergeSimilarVectors(ref partWver, worldDis);
-                FractureHelperFunc.SetColliderFromFromPoints(allSkinPartCols[i], allSkinPartCols[i].transform, partWver.ToArray(), false, false);
-                //allParts[i].trans.SetPositionAndRotation(allSkinPartCols[i].transform.position, allSkinPartCols[i].transform.rotation);
-                //newMatrixs[i] = allParts[i].trans.worldToLocalMatrix * fracRend.localToWorldMatrix;
-                //FractureHelperFunc.SetColliderFromFromPoints(allParts[i].col, allParts[i].trans, partWver.ToArray(), false, false);
+                FractureHelperFunc.SetColliderFromFromPoints(
+                    allSkinPartCols[i],
+                    allSkinPartCols[i].transform,
+                    partWver.ToArray(),
+                    false,
+                    colliderType == ColliderType.sphereSmall);
 
                 //move allPart cols to match defualt skinned pose
                 //for (int rvI = 0; rvI < allParts[i].rendVertexIndexes.Count; rvI += 1)
@@ -1910,12 +1908,9 @@ namespace Zombie1111_uDestruction
             globalHandler.AddReferencesFromFracture(this);
 
             //assign variabels for destruction
-            impactRadius = globalHandler.impactZoneRadius;
-            impactRadiusSquared = impactRadius * impactRadius;
             ogObjectLayer = gameObject.layer;
             des_partsBrokeness = new float[allParts.Length];
             AllRendBones = fracRend.bones;
-            des_partsOffset = new Vector3[allParts.Length];
             des_partsToBreak = new();
             des_newParents = new();
 
@@ -1923,19 +1918,18 @@ namespace Zombie1111_uDestruction
             if (vertexDisplacementStenght > 0.0f || doVertexColors == true)
             {
                 mDef_verUse = new();
-                mDef_verNow = new Vector3[fracRend.sharedMesh.vertexCount];
+                mDef_linkWVer = new Vector3[verticsLinkedThreaded.Length];
                 des_linkForceApply = new float[verticsLinkedThreaded.Length];
                 des_linkForceApplied = new float[verticsLinkedThreaded.Length];
                 des_linkVer = new int[verticsLinkedThreaded.Length];
                 fracRend.sharedMesh.GetVertices(mDef_verUse);
-                mDef_verDefAmount = new float[mDef_verUse.Count];
                 if (isRealSkinnedM == false) verticsBonesThreaded = fracRend.sharedMesh.boneWeights.Select(bone => bone.boneIndex0).ToArray();
                 else verticsBonesThreaded = boneWe_broken.Select(bone => bone.boneIndex0).ToArray();
 
                 //set vertex color
                 mDef_verColUse = new();
                 fracRend.sharedMesh.GetColors(mDef_verColUse);
-                if (mDef_verColUse.Count <= 0) mDef_verColUse = new Color[mDef_verNow.Length].ToList();
+                if (mDef_verColUse.Count <= 0) mDef_verColUse = new Color[fracRend.sharedMesh.vertexCount].ToList();
             }
 
             //assign variabels for repair system
@@ -1967,7 +1961,7 @@ namespace Zombie1111_uDestruction
             }
 
             //disable collision with neighbours, can this be done in edit mode once after generating the fracture?
-            if (selfCollisionRule == SelfCollideWithRule.ignoreNeighbours)
+            if (selfCollisionRule == SelfCollideWithRule.ignoreNeighbours || selfCollisionRule == SelfCollideWithRule.ignoreSourceAndNeighbours)
             {
                 for (int i = 0; i < allParts.Length; i++)
                 {
@@ -2013,7 +2007,10 @@ namespace Zombie1111_uDestruction
 
             //FixedUpdate is called before collsionModifyEvent
             //apply destruction result
-            if (calcDesThread_isActive == true) DestructionSolverComplete();
+            if (calcDesThread_isActive == true)
+            {
+                DestructionSolverComplete();
+            }
 
             //Start update fracRend bones data job
             BoneHandleJob_run();
@@ -2325,10 +2322,7 @@ namespace Zombie1111_uDestruction
             //add rigidbody to parent
             SetNewParentProperties();
 
-            //add parent script to parent
-            allFracParents[newParentIndex].fParent = pTrans.GetOrAddComponent<FractureParent>();
-            allFracParents[newParentIndex].fParent.fractureDaddy = this;
-            allFracParents[newParentIndex].fParent.thisParentIndex = newParentIndex;
+            //make sure to update parent properties
             parentIndexesToUpdate.Add(newParentIndex);
 
             return newParentIndex;
@@ -2520,7 +2514,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// The position of all vertics in world space (Updated when deformation is calculated)
         /// </summary>
-        private Vector3[] mDef_verNow;
+        private Vector3[] mDef_linkWVer;
 
         /// <summary>
         /// Contains all vertics of the skinned mesh in localspace (skinnedmesh vertics is assigned with this array when applying deformation)
@@ -2531,11 +2525,6 @@ namespace Zombie1111_uDestruction
         /// Contains the color of each vertex. (Skinnedmesh vertex colors are assigned with this array when applying deformation)
         /// </summary>
         private List<Color> mDef_verColUse = new();
-
-        /// <summary>
-        /// How much damage each vertics has taken (deformation+colors). 0 = no damage, 1 = completely damaged
-        /// </summary>
-        private float[] mDef_verDefAmount;
 
         /// <summary>
         /// Each intList contains all vertices that share the ~same position. Each vertex only exists once.
@@ -2743,7 +2732,7 @@ namespace Zombie1111_uDestruction
 
                 Run_breakPart(
                     des_partsToBreak[i].partIndex,
-                    damComputing[des_partsToBreak[i].impIndex].impVelocity,
+                    des_partsToBreak[i].impIndex < 0 ? Vector3.zero : damComputing[des_partsToBreak[i].impIndex].impVelocity,
                     des_partsToBreak[i].forceConsumed,
                     des_partsToBreak[i].forceApplied);
             }
@@ -2761,6 +2750,7 @@ namespace Zombie1111_uDestruction
                 | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
                 | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
 
+            //recalc normals are slow, try implement custom to run on other thread
             if (recalculateOnDisplacement == NormalRecalcMode.normalsOnly) fracRend.sharedMesh.RecalculateNormals();
             else if (recalculateOnDisplacement == NormalRecalcMode.normalsAndTagents)
             {
@@ -2773,7 +2763,9 @@ namespace Zombie1111_uDestruction
             {
                 Run_setPartsParent(
                     des_newParents[i].partsToInclude,
-                    des_newParents[i].velToGive / Math.Max(1.0f, des_newParents[i].partsToInclude.Count * massDensity * phyMainOptions.massMultiplier));
+                    des_newParents[i].velToGive / Math.Max(1.0f, des_newParents[i].partsToInclude.Count * phyMainOptions.massMultiplier),
+                    //des_newParents[i].velToGive / des_newParents[i].partsToInclude.Count,
+                    -1);
             }
         }
 
@@ -2785,6 +2777,26 @@ namespace Zombie1111_uDestruction
             {
                 foreach (var kvp in damToCompute)
                 {
+                    if (selfCollisionRule == SelfCollideWithRule.ignoreSourceAndNeighbours || selfCollisionRule == SelfCollideWithRule.ignoreSource)
+                    {
+                        //ignore collision between rb cause and hit parts (ignore source)
+                        Rigidbody rbCause = kvp.Value.rbCauseImp;
+
+                        if (rbCause != null)
+                        {
+                            foreach (Collider col in rbCause.GetComponentsInChildren<Collider>())
+                            {
+                                if (col.attachedRigidbody != rbCause) continue;
+
+                                foreach (var imp in kvp.Value.impPoints)
+                                {
+                                    Physics.IgnoreCollision(col, allParts[imp.partIndex].col);
+                                    if (isRealSkinnedM == true) Physics.IgnoreCollision(col, allSkinPartCols[imp.partIndex]);
+                                }
+                            }
+                        }
+                    }
+
                     damComputing.Add(kvp.Value);
                 }
 
@@ -2794,8 +2806,6 @@ namespace Zombie1111_uDestruction
             damPartsUsedZeroI = damPartsUsed.Count;
 
             //run compute thread
-            des_parentPartIndexes = allFracParents.Select(fParent => fParent.partIndexes).ToArray();
-
             if (multithreadedDestruction == true) calcDesThread = Task.Run(() => DestructionSolverThread());
             else DestructionSolverThread();
             calcDesThread_isActive = true;
@@ -2819,18 +2829,14 @@ namespace Zombie1111_uDestruction
         private List<DesToBreak> des_partsToBreak;
         private List<DesNewParent> des_newParents;
         private float[] des_partsBrokeness = new float[0];
-        private Vector3[] des_partsOffset;
-        private List<int>[] des_parentPartIndexes;
         private float[] des_linkForceApply;
         private float[] des_linkForceApplied;
         private int[] des_linkVer;
-        private float impactRadius;
-        private float impactRadiusSquared;
         private HashSet<int> des_usedLinked = new();
 
         private void DestructionSolverThread()
         {
-            Debug_toggleTimer();
+            //Debug_toggleTimer();
 
             //do destruction, solve destruction
             //clear old result
@@ -2849,6 +2855,99 @@ namespace Zombie1111_uDestruction
             for (int i = 0; i < damComputing.Count; i++)
             {
                 CalcImpSource(i);
+            }
+
+            //get parts that needs a new parent
+            int ogPartI;
+            int ogParentI;
+            HashSet<int> partsSearched = new();
+            HashSet<int> usedParents = new();
+            List<int> setOpen = new();
+            bool isKin;
+            bool parentIsUsed;
+            int toBreakCount = des_partsToBreak.Count;
+            int openCount;
+            Dictionary<int, int> parentPartCounts = new();
+
+            for (int i = 0; i < toBreakCount; i++)
+            {
+                ogPartI = des_partsToBreak[i].partIndex;
+                ogParentI = allParts[ogPartI].parentIndex;
+
+                foreach (int nP in allParts[ogPartI].neighbourParts)
+                {
+                    if (des_partsBrokeness[nP] >= 1.0f || partsSearched.Add(nP) == false) continue;
+
+                    //get all connected parts
+                    isKin = false;
+                    setOpen.Clear();
+                    setOpen.Add(nP);
+                    openCount = 1;
+
+                    for (int ii = 0; ii < openCount; ii++)
+                    {
+                        foreach (int nnP in allParts[setOpen[ii]].neighbourParts)
+                        {
+                            if (des_partsBrokeness[nnP] >= 1.0f || partsSearched.Add(nnP) == false) continue;
+                            if (kinematicPartStatus[nnP] == true) isKin = true;
+
+                            openCount++;
+                            setOpen.Add(nnP);
+                        }
+                    }
+
+                    //break parts if too small parent
+                    if (openCount < minAllowedMainPhySize)
+                    {
+                        foreach (int partI in setOpen)
+                        {
+                            des_partsBrokeness[partI] = 1.0f;
+                            AddNewToBreak(partI, 0.0f, -1, false);
+                        }
+
+                        continue;
+                    }
+
+                    //get if new parent is needed
+                    parentIsUsed = usedParents.Add(ogParentI);
+                    if (parentPartCounts.TryAdd(ogParentI, allFracParents[ogParentI].partIndexes.Count - openCount - toBreakCount) == false)
+                    {
+                        parentPartCounts[ogParentI] -= openCount;
+                    }
+
+                    parentPartCounts.TryGetValue(ogParentI, out int parentCount);
+
+                    if (isKin == true || parentCount <= 0)
+                    {
+                        parentPartCounts[ogParentI] += openCount;
+                        continue;
+                    }
+
+                    if ((ogParentI == 0 && phyMainOptions.mainPhysicsType == OptMainPhysicsType.overlappingIsKinematic)
+                       || parentCount >= openCount)
+                    {
+                        OpenSetNeedsNewParent();
+                        continue;
+                    }
+                    else parentPartCounts[ogParentI] += openCount;
+                }
+            }
+
+            void OpenSetNeedsNewParent()
+            {
+                Vector3 parentVel = Vector3.zero;
+                HashSet<int> parentParts = setOpen.ToHashSet();
+
+                for (int i = 0; i < des_partsToBreak.Count; i++)
+                {
+                    foreach (int nP in allParts[des_partsToBreak[i].partIndex].neighbourParts)
+                    {
+                        if (parentParts.Contains(nP) == true) parentVel += damComputing[des_partsToBreak[i].impIndex].impVelocity * des_partsToBreak[i].forceConsumed;
+                        //if (parentParts.Contains(nP) == true) parentVel += damComputing[des_partsToBreak[i].impIndex].impVelocity * ((des_partsToBreak[i].forceApplied + des_partsToBreak[i].forceConsumed) / 2.0f);
+                    }
+                }
+
+                des_newParents.Add(new() { partsToInclude = parentParts, velToGive = parentVel });
             }
 
             float cDis;
@@ -2916,7 +3015,7 @@ namespace Zombie1111_uDestruction
                         vI = des_linkVer[lI];
                         if (vI < 0) continue;
 
-                        falloffValue = MathF.Pow(GetClosestImpPoint(mDef_verNow[vI]) * falloffStrenght, falloffPower);
+                        falloffValue = MathF.Pow(GetClosestImpPoint(mDef_linkWVer[lI]) * falloffStrenght, falloffPower);
                         des_linkForceApply[lI] = ((impForce / math.max(falloffValue, 1.0f)) - (falloffValue * falloffHardness)) / allPartsResistance[partI];
 
                         if (des_linkForceApply[lI] <= 0.0001f) continue;
@@ -2959,11 +3058,10 @@ namespace Zombie1111_uDestruction
                     vZero = des_linkVer[lI];
                     if (vZero < 0) continue;
 
-                    mDef_verNow[vZero] += des_linkForceApply[lI] * vertexDisplacementStenght * impDir;
+                    mDef_linkWVer[lI] += des_linkForceApply[lI] * vertexDisplacementStenght * impDir;
                     tempCol = mDef_verColUse[vZero];
                     tempCol.a = des_linkForceApplied[lI];
-                    mDef_verColUse[vZero] = tempCol;
-
+                    
                     foreach (int vI in verticsLinkedThreaded[lI].intList)
                     {
                         mDef_verColUse[vI] = tempCol;
@@ -2976,7 +3074,7 @@ namespace Zombie1111_uDestruction
                 //partVerForce /= allParts[partI].rendVertexIndexes.Count;
 
 
-                Debug_toggleTimer();
+                //Debug_toggleTimer("solver ");
 
 #if UNITY_EDITOR
                 if (debugMode == DebugMode.showDestruction)
@@ -2984,7 +3082,7 @@ namespace Zombie1111_uDestruction
                     foreach (FractureGlobalHandler.ImpPoint iPoint in impPoints)
                     {
 
-                        FractureHelperFunc.Debug_drawDisc(iPoint.impPos, impDir, impactRadius, 6);
+                        FractureHelperFunc.Debug_drawDisc(iPoint.impPos, impDir, partAvgBoundsExtent, 6);
 
                     }
 
@@ -3006,13 +3104,17 @@ namespace Zombie1111_uDestruction
                         //closePos = iPoint.impPos;
                     }
 
-                    return minFalloffDistance > closeDis ? minFalloffDistance : closeDis;
+                    //return minFalloffDistance > closeDis ? minFalloffDistance : closeDis;
+                    closeDis -= minFalloffDistance;
+                    return closeDis < 0.0f ? 0.0f : closeDis;
                 }
             }
 
             void AddNewToBreak(int partIndex, float forceApplied, int impIndex, bool wasDirectHit)
             {
-                float forceCons = (1.0f - (des_partsBrokeness[partIndex] - forceApplied)) * (allPartsResistance[partIndex] / damComputing[impIndex].impForce);
+                float forceCons = impIndex < 0 ? 0.0f :
+                    ((1.0f - (des_partsBrokeness[partIndex] - forceApplied)) * (allPartsResistance[partIndex] / damComputing[impIndex].impForce));
+
                 des_partsToBreak.Add(new()
                 {
                     forceConsumed = forceCons,
@@ -3033,14 +3135,17 @@ namespace Zombie1111_uDestruction
         {
             if (allParts[partIndex].parentIndex < 0) return;
 
+
             //update parent
             Vector3 partWorldPosition = GetPartWorldPosition(partIndex);
             allFracParents[allParts[partIndex].parentIndex].parentRb.AddForceAtPosition(
-                forceConsumed / Math.Max(1.0f, allFracParents[allParts[partIndex].parentIndex].parentRb.mass) * breakVelocity,
+                forceConsumed / Math.Max(1.0f, allFracParents[allParts[partIndex].parentIndex].partIndexes.Count * phyMainOptions.massMultiplier) * breakVelocity,
+                //forceConsumed / allFracParents[allParts[partIndex].parentIndex].partIndexes.Count * breakVelocity,
                 partWorldPosition,
                 ForceMode.VelocityChange);
 
             Run_setPartParent(partIndex, -1, true);
+
 
             //setup physics for the part
             if (phyMainOptions.mainPhysicsType != OptMainPhysicsType.overlappingIsKinematic || kinematicPartStatus[partIndex] == false)
@@ -3326,7 +3431,6 @@ namespace Zombie1111_uDestruction
                     //reset part vertics force, pos and color
                     foreach (int vI in allParts[partIndex].rendVertexIndexes)
                     {
-                        mDef_verDefAmount[vI] = 0.0f;
                         mDef_verUse[vI] = rep_verticsOrginal[vI];
 
                         tempColor = mDef_verColUse[vI];
@@ -3364,7 +3468,7 @@ namespace Zombie1111_uDestruction
         //debug stopwatch
         private System.Diagnostics.Stopwatch stopwatch = new();
 
-        private void Debug_toggleTimer()
+        private void Debug_toggleTimer(string note = "")
         {
             if (stopwatch.IsRunning == false)
             {
@@ -3373,7 +3477,7 @@ namespace Zombie1111_uDestruction
             else
             {
                 stopwatch.Stop();
-                Debug.Log("time: " + stopwatch.Elapsed.TotalMilliseconds + "ms");
+                Debug.Log(note + "time: " + stopwatch.Elapsed.TotalMilliseconds + "ms");
             }
         }
 
@@ -3532,11 +3636,13 @@ namespace Zombie1111_uDestruction
             int vI = -1;
             foreach (int lI in allParts[partIndex].rendVertexIndexes)
             {
+                //continue if this linkVer has already been calculated
                 if (des_usedLinked.Add(lI) == false)
                 {
                     continue;
                 }
 
+                //get a ver in the link that is for a part that aint broken
                 vI = -1;
 
                 foreach (int vIi in verticsLinkedThreaded[lI].intList)
@@ -3547,13 +3653,16 @@ namespace Zombie1111_uDestruction
                     break;
                 }
 
+                //If all link vers are for a broken part stop, (Should never happen)
                 if (vI < 0)
                 {
                     des_linkVer[lI] = -1;
                     des_usedLinked.Remove(lI);
+                    Debug.LogError("Wtf, how can all vers be broken");
                     break;
                 }
 
+                //transform the ver into world space
                 mBake_weight = boneWe_current[vI];
                 mBake_bm0 = mBake_boneMatrices[mBake_weight.boneIndex0];
                 mBake_bm1 = mBake_boneMatrices[mBake_weight.boneIndex1];
@@ -3575,7 +3684,7 @@ namespace Zombie1111_uDestruction
                 mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
                 mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
 
-                mDef_verNow[vI] = mBake_vms.MultiplyPoint3x4(mDef_verUse[vI]);
+                mDef_linkWVer[lI] = mBake_vms.MultiplyPoint3x4(mDef_verUse[vI]);
             }
 
             return vI;
@@ -3607,42 +3716,16 @@ namespace Zombie1111_uDestruction
             mBake_vms.m22 = mBake_bm0.m22 * mBake_weight.weight0 + mBake_bm1.m22 * mBake_weight.weight1 + mBake_bm2.m22 * mBake_weight.weight2 + mBake_bm3.m22 * mBake_weight.weight3;
             mBake_vms.m23 = mBake_bm0.m23 * mBake_weight.weight0 + mBake_bm1.m23 * mBake_weight.weight1 + mBake_bm2.m23 * mBake_weight.weight2 + mBake_bm3.m23 * mBake_weight.weight3;
 
-            Vector3 newVerUse = mBake_vms.MultiplyPoint3x4(mDef_verNow[verIndex]);
+            Vector3 newVerUse = mBake_vms.MultiplyPoint3x4(mDef_linkWVer[linkedIndex]);
+            //offsetDir = mBake_vms.MultiplyVector(offsetDir) * mBake_vms.lossyScale.magnitude;
+            //offsetDir = mBake_vms.MultiplyVector(offsetDir);
 
             foreach (int vI in verticsLinkedThreaded[linkedIndex].intList)
             {
                 if (des_partsBrokeness[verticsPartThreaded[vI]] >= 1.0f) continue;
                 mDef_verUse[vI] = newVerUse;
+                //mDef_verUse[vI] -= (offsetDir * des_partsOffset[verticsPartThreaded[vI]].magnitude);
             }
-        }
-
-        private Task calcDefThread = null;
-        private DesPartsUsed[] defToUse = null;
-
-        private IEnumerator ComputeDeformation()
-        {
-            //get the parts to use in deformation calc
-            defToUse = damPartsUsed.ToArray();
-            damPartsUsed.Clear();
-            yield return new WaitForEndOfFrame();
-            ////run the compute deformation thread
-            //calcDefThread = Task.Run(() => ComputeDeformationThread());
-            //while (calcDefThread.IsCompleted == false && calcDefThread.IsFaulted == false) yield return null;
-            //
-            //if (calcDefThread.IsFaulted == true)
-            //{
-            //    //when error accure
-            //    Debug.LogException(calcDefThread.Exception);
-            //    Debug.LogWarning("A race may have accured while computing deformation for " + transform.name);
-            //    calcDefThread = null;
-            //    yield break;
-            //}
-
-            calcDefThread = null;
-
-            //apply deformation
-            fracRend.sharedMesh.SetVertices(mDef_verUse, 0, mDef_verUse.Count, UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
-            fracRend.sharedMesh.SetColors(mDef_verColUse, 0, mDef_verColUse.Count, UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
         }
 
         #endregion MeshDeformation

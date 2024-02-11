@@ -252,8 +252,6 @@ namespace Zombie1111_uDestruction
             }
 
             //denoise impact points and register them
-            bool didAnyBreak;
-
             for (int i = 0; i < impPairs.Count; i++)
             {
                 //Debug.Log("count " +impPairs[i].impPoints.Count + " divide " + impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent + "ogforce " + impPairs[i].impForce);

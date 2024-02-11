@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using Unity.VisualScripting.Antlr3.Runtime;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -289,6 +288,13 @@ namespace Zombie1111_uDestruction
             Vector3 lineToPoint = position - linePosition;
             float t = Vector3.Dot(lineToPoint, lineDirection) / lineDirection.sqrMagnitude;
             return linePosition + Mathf.Clamp01(t) * lineDirection;
+        }
+
+        public static Vector3 ClosestPointOnLine_doubleSided(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
+        {
+            Vector3 lineToPoint = position - linePosition;
+            float t = Vector3.Dot(lineToPoint, lineDirection) / lineDirection.sqrMagnitude;
+            return linePosition + t * lineDirection;
         }
 
         /// <summary>
@@ -1059,9 +1065,89 @@ namespace Zombie1111_uDestruction
                 mCol.enabled = !mCol.enabled;
                 mCol.enabled = !mCol.enabled;
             }
-            else if (col is BoxCollider)
+            else if (col is BoxCollider bCol)
             {
+                Vector3 extents = Vector3.one * 0.001f;
+                float cDis;
+                Vector3 tPos = colTrans.position;
+                Vector3 tFor = colTrans.forward;
+                Vector3 tSide = colTrans.right;
+                Vector3 tUp = colTrans.up;
 
+                foreach (Vector3 wPos in possWorld)
+                {
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
+                    if (cDis > extents.z) extents.z = cDis;
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tSide), tPos);
+                    if (cDis > extents.x) extents.x = cDis;
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tUp), tPos);
+                    if (cDis > extents.y) extents.y = cDis;
+                }
+
+                bCol.size = extents * 2.0f;
+            }
+            else if (col is SphereCollider sCol)
+            {
+                Vector3 extents = Vector3.one * 0.001f;
+                float cDis;
+                Vector3 tPos = colTrans.position;
+                Vector3 tFor = colTrans.forward;
+                Vector3 tSide = colTrans.right;
+                Vector3 tUp = colTrans.up;
+
+                foreach (Vector3 wPos in possWorld)
+                {
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
+                    if (cDis > extents.z) extents.z = cDis;
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tSide), tPos);
+                    if (cDis > extents.x) extents.x = cDis;
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tUp), tPos);
+                    if (cDis > extents.y) extents.y = cDis;
+                }
+
+                if (preferTooSmall == true) sCol.radius = Mathf.Max(extents.x, extents.y, extents.z);
+                else sCol.radius = extents.magnitude;
+            }
+            else if (col is CapsuleCollider cCol)
+            {
+                Vector3 extents = Vector3.one * 0.001f;
+                float cDis;
+                Vector3 tPos = colTrans.position;
+                Vector3 tFor = colTrans.forward;
+                Vector3 tSide = colTrans.right;
+                Vector3 tUp = colTrans.up;
+
+                foreach (Vector3 wPos in possWorld)
+                {
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
+                    if (cDis > extents.z) extents.z = cDis;
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tSide), tPos);
+                    if (cDis > extents.x) extents.x = cDis;
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tUp), tPos);
+                    if (cDis > extents.y) extents.y = cDis;
+                }
+
+                if (extents.x > extents.y && extents.x > extents.z)
+                {
+                    // X-axis is the longest
+                    cCol.direction = 0;
+                    cCol.height = extents.x * 2.0f;
+                    cCol.radius = Mathf.Max(extents.y, extents.z);
+                }
+                else if (extents.y > extents.x && extents.y > extents.z)
+                {
+                    // Y-axis is the longest
+                    cCol.direction = 1;
+                    cCol.height = extents.y * 2.0f;
+                    cCol.radius = Mathf.Max(extents.x, extents.z);
+                }
+                else
+                {
+                    // Z-axis is the longest (or all axes are equal)
+                    cCol.direction = 2;
+                    cCol.height = extents.z * 2.0f;
+                    cCol.radius = Mathf.Max(extents.x, extents.y);
+                }
             }
         }
 
