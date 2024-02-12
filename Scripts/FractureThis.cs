@@ -16,6 +16,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine.Jobs;
 using Unity.Collections;
 using Unity.Jobs;
+using JetBrains.Annotations;
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -185,6 +186,7 @@ namespace Zombie1111_uDestruction
         [SerializeField] private NormalRecalcMode recalculateOnDisplacement = NormalRecalcMode.normalsOnly;
         [SerializeField] private bool doVertexColors = false;
         [SerializeField] private bool setVertexColorOnBreak = true;
+        [SerializeField][Range(0.0f, 1.0f)] private float colliderUpdateThreshold = 0.1f;
 
         [Space(10)]
         [Header("Material")]
@@ -363,8 +365,7 @@ namespace Zombie1111_uDestruction
             mesh,
             box,
             capsule,
-            sphereLarge,
-            sphereSmall
+            sphere
         }
 
         private enum SelfCollideWithRule
@@ -716,9 +717,9 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public Collider col;
             /// <summary>
-            /// The vertex indexes on the main renderer that is for this part. mainMesh.vertics[rendVertexIndexes[0]] = thisMesh.vertics[0]
+            /// The index of the linkedVers this part uses. (Is fracRend ver indexes durring frac gen)
             /// </summary>
-            public List<int> rendVertexIndexes;
+            public List<int> rendLinkVerIndexes;
             public List<int> neighbourParts;
 
             /// <summary>
@@ -732,7 +733,7 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public Transform trans;
         }
-
+        
         /// <summary>
         /// Verifies that a valid globalHandler exists and assigns it, returns false if no valid globalHandler exists
         /// </summary>
@@ -926,7 +927,7 @@ namespace Zombie1111_uDestruction
             //change rendVertexIndexes to contain verticsLinkedThreaded indexes
             for (int i = 0; i < allParts.Length; i++)
             {
-                allParts[i].rendVertexIndexes.Clear();
+                allParts[i].rendLinkVerIndexes.Clear();
             }
 
             int partI;
@@ -936,7 +937,7 @@ namespace Zombie1111_uDestruction
                 foreach (int vI in verticsLinkedThreaded[i].intList)
                 {
                     partI = verticsPartThreaded[vI];
-                    if (allParts[partI].rendVertexIndexes.Contains(i) == false) allParts[partI].rendVertexIndexes.Add(i);
+                    if (allParts[partI].rendLinkVerIndexes.Contains(i) == false) allParts[partI].rendLinkVerIndexes.Add(i);
 
                 }
             }
@@ -1057,7 +1058,7 @@ namespace Zombie1111_uDestruction
             tempFracVerOgMeshId = new int[vertics.Length];
             for (int i = 0; i < fParts.Length; i += 1)
             {
-                foreach (int vI in fParts[i].rendVertexIndexes)
+                foreach (int vI in fParts[i].rendLinkVerIndexes)
                 {
                     tempFracVerOgMeshId[vI] = tempPartOgMeshId[i];
                 }
@@ -1080,7 +1081,7 @@ namespace Zombie1111_uDestruction
             BoneWeight[] boneW = new BoneWeight[comMesh.vertexCount];
             for (int i = 0; i < fParts.Length; i += 1)
             {
-                foreach (int vI in fParts[i].rendVertexIndexes)
+                foreach (int vI in fParts[i].rendLinkVerIndexes)
                 {
                     boneW[vI].weight0 = 1.0f;
                     boneW[vI].boneIndex0 = i;
@@ -1106,7 +1107,7 @@ namespace Zombie1111_uDestruction
             verticsPartThreaded = new int[vertics.Length];
             for (int i = 0; i < allParts.Length; i += 1)
             {
-                foreach (int vI in allParts[i].rendVertexIndexes)
+                foreach (int vI in allParts[i].rendLinkVerIndexes)
                 {
                     verticsPartThreaded[vI] = i;
                 }
@@ -1140,7 +1141,7 @@ namespace Zombie1111_uDestruction
                 meshes[i] = FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(meshes[i]), newT.worldToLocalMatrix); //Instantiate new mesh to keep worldSpaceMeshes
 
                 //the part data is created here
-                FracParts newP = new() { trans = newT, col = Gen_createPartCollider(newT, meshes[i], phyMatToUse), rendVertexIndexes = new(), partBrokenness = 0.0f, neighbourParts = new(), parentIndex = 0 };
+                FracParts newP = new() { trans = newT, col = Gen_createPartCollider(newT, meshes[i], phyMatToUse), rendLinkVerIndexes = new(), partBrokenness = 0.0f, neighbourParts = new(), parentIndex = 0 };
                 allParts[i] = newP;
             }
 
@@ -1252,30 +1253,38 @@ namespace Zombie1111_uDestruction
                 if (colliderType == ColliderType.mesh)
                 {
                     //mesh
-                    newCol = partTrans.GetOrAddComponent<MeshCollider>();
+                    MeshCollider mCol = partTrans.GetOrAddComponent<MeshCollider>();
+                    mCol.convex = true;
+                    mCol.sharedMesh = new();
+                    newCol = mCol;
                 }
                 else if (colliderType == ColliderType.box)
                 {
                     //box
-                    newCol = partTrans.GetOrAddComponent<BoxCollider>();
+                    BoxCollider bCol = partTrans.GetOrAddComponent<BoxCollider>();
+                    newCol = bCol;
                 }
                 else if (colliderType == ColliderType.capsule)
                 {
                     //capsule
-                    newCol = partTrans.GetOrAddComponent<CapsuleCollider>();
+                    CapsuleCollider cCol = partTrans.GetOrAddComponent<CapsuleCollider>();
+                    newCol = cCol;
                 }
                 else
                 {
                     //sphere
-                    newCol = partTrans.GetOrAddComponent<SphereCollider>();
+                    SphereCollider sCol = partTrans.GetOrAddComponent<SphereCollider>();
+                    newCol = sCol;
                 }
+
+                Vector3[] partWVers = FractureHelperFunc.ConvertPositionsWithMatrix(partMesh.vertices, partTrans.localToWorldMatrix);
+
+                partTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(
+    FractureHelperFunc.ConvertPositionsWithMatrix(partMesh.vertices, partTrans.localToWorldMatrix));
 
                 FractureHelperFunc.SetColliderFromFromPoints(
                     newCol,
-                    partTrans,
-                    FractureHelperFunc.ConvertPositionsWithMatrix(partMesh.vertices, partTrans.localToWorldMatrix),
-                    true,
-                    colliderType == ColliderType.sphereSmall);
+                    FractureHelperFunc.ConvertPositionsWithMatrix(partWVers, partTrans.worldToLocalMatrix));
 
                 newCol.sharedMaterial = phyMat;
                 newCol.hasModifiableContacts = true; //This must always be true for all fracture colliders
@@ -1669,7 +1678,7 @@ namespace Zombie1111_uDestruction
 
             for (int i = 0; i < allParts.Length; i += 1)
             {
-                foreach (int vI in allParts[i].rendVertexIndexes)
+                foreach (int vI in allParts[i].rendLinkVerIndexes)
                 {
                     for (int ii = 0; ii < 4; ii++)
                     {
@@ -1735,7 +1744,7 @@ namespace Zombie1111_uDestruction
                 partWver.Clear();
                 usedNors.Clear();
 
-                foreach (int vI in allParts[i].rendVertexIndexes)
+                foreach (int vI in allParts[i].rendLinkVerIndexes)
                 {
                     partWver.Add(fracWVer[vI]);
                 }
@@ -1743,14 +1752,11 @@ namespace Zombie1111_uDestruction
                 FractureHelperFunc.MergeSimilarVectors(ref partWver, worldDis);
                 FractureHelperFunc.SetColliderFromFromPoints(
                     allSkinPartCols[i],
-                    allSkinPartCols[i].transform,
-                    partWver.ToArray(),
-                    false,
-                    colliderType == ColliderType.sphereSmall);
+                    FractureHelperFunc.ConvertPositionsWithMatrix(partWver.ToArray(), allSkinPartCols[i].transform.worldToLocalMatrix));
 
                 //move allPart cols to match defualt skinned pose
                 //for (int rvI = 0; rvI < allParts[i].rendVertexIndexes.Count; rvI += 1)
-                foreach (int rvI in allParts[i].rendVertexIndexes)
+                foreach (int rvI in allParts[i].rendLinkVerIndexes)
                 {
                     alreadyTested = false;
 
@@ -1825,14 +1831,14 @@ namespace Zombie1111_uDestruction
         {
             if (toDefualt == false)
             {
-                foreach (int vI in allParts[partIndex].rendVertexIndexes)
+                foreach (int vI in allParts[partIndex].rendLinkVerIndexes)
                 {
                     boneWe_current[vI] = boneWe_broken[vI];
                 }
             }
             else
             {
-                foreach (int vI in allParts[partIndex].rendVertexIndexes)
+                foreach (int vI in allParts[partIndex].rendLinkVerIndexes)
                 {
                     boneWe_current[vI] = boneWe_defualt[vI];
                 }
@@ -2032,6 +2038,32 @@ namespace Zombie1111_uDestruction
                 int parentToUpdate = parentIndexesToUpdate.FirstOrDefault();
                 if (parentToUpdate >= 0 && parentToUpdate < allFracParents.Count) Run_updateParentInfo(parentToUpdate);
                 parentIndexesToUpdate.Remove(parentToUpdate);
+            }
+
+            if (des_colLocalVers.Count > 0)
+            {
+                Debug_toggleTimer();
+
+                //update a part collider
+                using var enumerator = des_colLocalVers.Keys.GetEnumerator();
+                if (enumerator.MoveNext())
+                {
+                    int partI = enumerator.Current;
+                    FractureHelperFunc.SetColliderFromFromPoints(allParts[partI].col, des_colLocalVers[partI]);
+                    //Collider col = allParts[partI].col;
+                    //((MeshCollider)col).sharedMesh.SetVertices(des_colLocalVers[partI], 0, des_colLocalVers[partI].Length,
+                    //  UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
+                    //  | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
+                    //  | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
+                    //  | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
+                    //
+                    //col.enabled = false;
+                    //col.enabled = true;
+
+                    des_colLocalVers.Remove(partI);
+                }
+
+                Debug_toggleTimer();
             }
 
             //Make sure late fixedUpdate runs
@@ -2512,7 +2544,7 @@ namespace Zombie1111_uDestruction
         public SkinnedMeshRenderer fracRend = null;
 
         /// <summary>
-        /// The position of all vertics in world space (Updated when deformation is calculated)
+        /// The world position of one of the vertices that is for a non broken part in this link (Updated when calc des for a part using this link)
         /// </summary>
         private Vector3[] mDef_linkWVer;
 
@@ -2826,6 +2858,8 @@ namespace Zombie1111_uDestruction
             public Vector3 velToGive;
         }
 
+
+
         private List<DesToBreak> des_partsToBreak;
         private List<DesNewParent> des_newParents;
         private float[] des_partsBrokeness = new float[0];
@@ -2833,6 +2867,11 @@ namespace Zombie1111_uDestruction
         private float[] des_linkForceApplied;
         private int[] des_linkVer;
         private HashSet<int> des_usedLinked = new();
+
+        /// <summary>
+        /// Uses part index as key, contains the position of each linkedVer the part uses in the parts bone local space
+        /// </summary>
+        private Dictionary<int, Vector3[]> des_colLocalVers = new();
 
         private void DestructionSolverThread()
         {
@@ -3002,11 +3041,11 @@ namespace Zombie1111_uDestruction
                     RealtimeVer_prepareChange(partI);
 
                     //loop through all part vertices and get the force applied to them
-                    foreach (int lI in allParts[partI].rendVertexIndexes)//verify thread safety
+                    foreach (int lI in allParts[partI].rendLinkVerIndexes)//verify thread safety
                     {
                         if (des_linkForceApply[lI] > 0.0f)
                         {
-                            if (des_linkForceApply[lI] <= 0.0001f) continue;
+                            if (des_linkForceApply[lI] < 0.01f) continue;
                             if (highestForceApplied < des_linkForceApply[lI]) highestForceApplied = des_linkForceApply[lI];
                             continue; //continue if already calculated
                         }
@@ -3018,7 +3057,7 @@ namespace Zombie1111_uDestruction
                         falloffValue = MathF.Pow(GetClosestImpPoint(mDef_linkWVer[lI]) * falloffStrenght, falloffPower);
                         des_linkForceApply[lI] = ((impForce / math.max(falloffValue, 1.0f)) - (falloffValue * falloffHardness)) / allPartsResistance[partI];
 
-                        if (des_linkForceApply[lI] <= 0.0001f) continue;
+                        if (des_linkForceApply[lI] < 0.01f) continue;
                         if (highestForceApplied < des_linkForceApply[lI]) highestForceApplied = des_linkForceApply[lI];
                     }
 
@@ -3047,7 +3086,7 @@ namespace Zombie1111_uDestruction
                 foreach (int lI in des_usedLinked)
                 {
                     des_linkForceApply[lI] = Math.Min(des_linkForceApply[lI], 1.0f - des_linkForceApplied[lI]);
-                    if (des_linkForceApply[lI] <= 0.00001f)
+                    if (des_linkForceApply[lI] < 0.01f)
                     {
                         //partVerForce += des_verForceApplied[vI];
                         continue;
@@ -3068,6 +3107,31 @@ namespace Zombie1111_uDestruction
                     }
 
                     RealtimeVer_prepareApply(lI, vZero);
+                }
+
+                if (colliderUpdateThreshold < 1.0f)
+                {
+                    //register part as deformed so we can update its collider later
+                    foreach (int partII in oList)
+                    {
+                        if (des_partsBrokeness[partII] >= 1.0f) continue;
+
+                        bool didDeform = false;
+
+                        Vector3[] colVers = new Vector3[allParts[partII].rendLinkVerIndexes.Count];
+                        int colI = 0;
+
+                        foreach (int lI in allParts[partII].rendLinkVerIndexes)
+                        {
+                            colVers[colI] = allFracBonesLToW[partII].inverse.MultiplyPoint3x4(mDef_linkWVer[lI]);
+                            colI++;
+
+                            if (des_linkForceApply[lI] >= colliderUpdateThreshold) didDeform = true;
+                        }
+
+                        if (didDeform == false) continue;
+                        des_colLocalVers[partII] = colVers;
+                    }
                 }
 
                 //Offset the part and save part vertics offsets
@@ -3407,7 +3471,7 @@ namespace Zombie1111_uDestruction
                 //move vertics and colors towards orginal
                 if (repairSupport == DestructionRepairSupport.fullHigh)
                 {
-                    foreach (int vI in allParts[partIndex].rendVertexIndexes)
+                    foreach (int vI in allParts[partIndex].rendLinkVerIndexes)
                     {
                         tempVec = rep_verticsOrginal[vI] - mDef_verUse[vI];
                         if (tempVec.sqrMagnitude > 0.0001f) isRepaired = false;
@@ -3429,7 +3493,7 @@ namespace Zombie1111_uDestruction
                     rep_partsNowRotation[partIndex] = ogWorldRot;
 
                     //reset part vertics force, pos and color
-                    foreach (int vI in allParts[partIndex].rendVertexIndexes)
+                    foreach (int vI in allParts[partIndex].rendLinkVerIndexes)
                     {
                         mDef_verUse[vI] = rep_verticsOrginal[vI];
 
@@ -3634,7 +3698,7 @@ namespace Zombie1111_uDestruction
         private int RealtimeVer_prepareChange(int partIndex)
         {
             int vI = -1;
-            foreach (int lI in allParts[partIndex].rendVertexIndexes)
+            foreach (int lI in allParts[partIndex].rendLinkVerIndexes)
             {
                 //continue if this linkVer has already been calculated
                 if (des_usedLinked.Add(lI) == false)

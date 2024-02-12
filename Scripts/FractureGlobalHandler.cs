@@ -17,6 +17,7 @@ namespace Zombie1111_uDestruction
     {
         [Header("Global Fracture Config")]
         [SerializeField] private float damageThreshold = 2.0f;
+        [SerializeField] private bool syncFpsWithFixedUpdate = false;
         public float impactZoneRadius = 0.1f;
 
         private ConcurrentDictionary<int, GlobalFracData> partsColInstanceId = new();
@@ -98,6 +99,8 @@ namespace Zombie1111_uDestruction
                 rigidbodiesInstanceId.AddRange(handlers[i].rigidbodiesInstanceId);
                 Destroy(handlers[i]);
             }
+
+            ogFixedTimeStep = Time.fixedDeltaTime;
         }
 
         public void OnEnable()
@@ -110,6 +113,28 @@ namespace Zombie1111_uDestruction
         {
             Physics.ContactModifyEvent -= ModificationEvent;
             Physics.ContactModifyEventCCD -= ModificationEvent;
+        }
+
+        private float syncTime = 0.0f;
+        private int syncFrames = 0;
+        private float ogFixedTimeStep;
+
+        private void Update()
+        {
+            if (syncFpsWithFixedUpdate == true)
+            {
+                syncTime += Time.unscaledDeltaTime;
+                syncFrames++;
+        
+                if (syncTime >= 10.0f)
+                {
+                    Time.fixedDeltaTime = MathF.Min(syncTime / syncFrames, ogFixedTimeStep);
+        
+                    Debug.Log(MathF.Min(syncTime / syncFrames, ogFixedTimeStep));
+                    syncTime = 0.0f;
+                    syncFrames = 0;
+                }
+            }
         }
 
         public void AddReferencesFromFracture(FractureThis addFrom)

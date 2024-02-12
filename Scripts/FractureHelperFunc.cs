@@ -786,7 +786,7 @@ namespace Zombie1111_uDestruction
                 //link combined vertices to fracture part
                 for (int ii = 0; ii < vertices.Length; ii += 1)
                 {
-                    fracParts[i].rendVertexIndexes.Add(combinedVertices.Count + ii);
+                    fracParts[i].rendLinkVerIndexes.Add(combinedVertices.Count + ii);
                 }
 
                 // Append the vertex data to the combined lists
@@ -1053,28 +1053,32 @@ namespace Zombie1111_uDestruction
         /// Modifies to given collider mesh/size/radius based on the given positions as good as possible
         /// </summary>
         /// <param name="col"></param>
-        /// <param name="possWorld"></param>
-        public static void SetColliderFromFromPoints(Collider col, Transform colTrans, Vector3[] possWorld, bool allowMovingTrans = true, bool preferTooSmall = false)
+        /// <param name="possLocal"></param>
+        public static void SetColliderFromFromPoints(Collider col, Vector3[] possLocal)
         {
-            if (allowMovingTrans == true) colTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(possWorld);
+            Transform colTrans = col.transform;
 
             if (col is MeshCollider mCol)
             {
-                mCol.convex = true;
-                mCol.sharedMesh = new() { vertices = FractureHelperFunc.ConvertPositionsWithMatrix(possWorld, colTrans.worldToLocalMatrix) };
-                mCol.enabled = !mCol.enabled;
-                mCol.enabled = !mCol.enabled;
+                mCol.sharedMesh.SetVertices(possLocal, 0, possLocal.Length,
+                      UnityEngine.Rendering.MeshUpdateFlags.DontValidateIndices
+                | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
+                | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
+                | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
             }
             else if (col is BoxCollider bCol)
             {
+                bCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
+                possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
+
                 Vector3 extents = Vector3.one * 0.001f;
                 float cDis;
-                Vector3 tPos = colTrans.position;
+                Vector3 tPos = bCol.bounds.center;
                 Vector3 tFor = colTrans.forward;
                 Vector3 tSide = colTrans.right;
                 Vector3 tUp = colTrans.up;
 
-                foreach (Vector3 wPos in possWorld)
+                foreach (Vector3 wPos in possLocal)
                 {
                     cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
@@ -1088,14 +1092,17 @@ namespace Zombie1111_uDestruction
             }
             else if (col is SphereCollider sCol)
             {
+                sCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
+                possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
+
                 Vector3 extents = Vector3.one * 0.001f;
                 float cDis;
-                Vector3 tPos = colTrans.position;
+                Vector3 tPos = sCol.bounds.center;
                 Vector3 tFor = colTrans.forward;
                 Vector3 tSide = colTrans.right;
                 Vector3 tUp = colTrans.up;
 
-                foreach (Vector3 wPos in possWorld)
+                foreach (Vector3 wPos in possLocal)
                 {
                     cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
@@ -1105,19 +1112,22 @@ namespace Zombie1111_uDestruction
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
-                if (preferTooSmall == true) sCol.radius = Mathf.Max(extents.x, extents.y, extents.z);
-                else sCol.radius = extents.magnitude;
+                extents.Scale(colTrans.localToWorldMatrix.lossyScale);
+                sCol.radius = Mathf.Max(extents.x, extents.y, extents.z);
             }
             else if (col is CapsuleCollider cCol)
             {
+                cCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
+                possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
+
                 Vector3 extents = Vector3.one * 0.001f;
                 float cDis;
-                Vector3 tPos = colTrans.position;
+                Vector3 tPos = cCol.bounds.center;
                 Vector3 tFor = colTrans.forward;
                 Vector3 tSide = colTrans.right;
                 Vector3 tUp = colTrans.up;
 
-                foreach (Vector3 wPos in possWorld)
+                foreach (Vector3 wPos in possLocal)
                 {
                     cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
@@ -1149,6 +1159,10 @@ namespace Zombie1111_uDestruction
                     cCol.radius = Mathf.Max(extents.x, extents.y);
                 }
             }
+
+            if (col.enabled == false) return;
+            col.enabled = false;
+            col.enabled = true;
         }
 
         /// <summary>
