@@ -56,7 +56,7 @@ namespace Zombie1111_uDestruction
 
             public FractureThis.IntList[] saved_verticsLinkedThreaded = new FractureThis.IntList[0];
             public float[] saved_partsOgResistanceThreaded = new float[0];
-            public FractureThis.FracParts[] saved_allParts = new FractureThis.FracParts[0];
+            public FractureThis.FracPart[] saved_allParts = new FractureThis.FracPart[0];
             public bool[] saved_kinematicPartStatus = new bool[0];
             public int[] saved_verticsPartThreaded = new int[0];
             public BoneWeight[] saved_boneWe_broken = new BoneWeight[0];

@@ -347,8 +347,6 @@ namespace Zombie1111_uDestruction
             for (int i = 0; i < meshTris.Length; i += 3)
             {
                 //if (Vector3.Dot(meshWorldNors[meshTris[i]].normalized, nor.normalized) < 0.5f) continue;
-                //Debug.DrawLine(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i]] + (meshWorldNors[meshTris[i]].normalized * 0.01f), Color.red, 10.0f);
-                //Debug.DrawLine(poss[0], poss[0] + (nor * 0.01f), Color.yellow, 10.0f);
 
                 //if (meshVerIds[meshTris[i]] != id) continue;
 
@@ -902,7 +900,7 @@ namespace Zombie1111_uDestruction
         /// <param name="fracMeshes">Must have same lenght as fracParts</param>
         /// <param name="fracParts"></param>
         /// <returns></returns>
-        public static Mesh CombineMeshes(List<Mesh> fracMeshes, ref FractureThis.FracParts[] fracParts)
+        public static Mesh CombineMeshes(Mesh[] fracMeshes, ref FractureThis.FracPart[] fracParts)
         {
             List<Vector3> combinedVertices = new List<Vector3>();
             List<Vector3> combinedNormals = new List<Vector3>();
@@ -912,7 +910,7 @@ namespace Zombie1111_uDestruction
             //List<BoneWeight> combinedBones = new List<BoneWeight>();
             int vertexOffset = 0;
 
-            for (int i = 0; i < fracMeshes.Count; i += 1)
+            for (int i = 0; i < fracMeshes.Length; i += 1)
             {
                 Mesh mesh = fracMeshes[i];
 

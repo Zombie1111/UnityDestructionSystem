@@ -614,15 +614,18 @@ namespace Zombie1111_uDestruction
 
                     DestroyImmediate(allFracParents[i].parentRb);
 
-                    for (int ii = 0; ii < allFracParents[i].partIndexes.Count; ii += 1)
+                    for (int ii = 0; ii < allFracParents[i].partIndexes.Count; ii++)
                     {
-                        if (saved_allPartsCol.Length <= 0)
+                        if (saved_allPartsCol.Length != allFracParents[i].partIndexes.Count && allParts.Length != allFracParents[i].partIndexes.Count)
                         {
                             Debug.LogError(transform.name + " parts list was for some weird reason cleared before parts was removed (You must delete them manually)");
                             break;
                         }
 
-                        if (saved_allPartsCol[allFracParents[i].partIndexes[ii]] != null) DestroyImmediate(saved_allPartsCol[allFracParents[i].partIndexes[ii]].gameObject);
+                        if (saved_allPartsCol.Length != allFracParents[i].partIndexes.Count) if (allParts[allFracParents[i].partIndexes[ii]].col != null)
+                                DestroyImmediate(allParts[allFracParents[i].partIndexes[ii]].trans.gameObject);
+                        else if (saved_allPartsCol[allFracParents[i].partIndexes[ii]] != null)
+                                DestroyImmediate(saved_allPartsCol[allFracParents[i].partIndexes[ii]].gameObject);
                     }
 
                     continue;
@@ -641,7 +644,7 @@ namespace Zombie1111_uDestruction
             allSkinPartCols = new Collider[0];
             allFracParents.Clear();
             verticsLinkedThreaded = new IntList[0];
-            allParts = new FracParts[0];
+            allParts = new FracPart[0];
             allPartsResistance = new float[0];
             boneWe_broken = new BoneWeight[0];
 
@@ -735,8 +738,6 @@ namespace Zombie1111_uDestruction
 
         #region GenerateFractureSystem
 
-        private int[] tempFracVerOgMeshId = null; //only set during the mesh fracturing process
-        private List<int> tempPartOgMeshId = null; //only set during the mesh fracturing process
         private OrginalObjData tempOgRealSkin = null; //only set during the mesh fracturing process
 
         [System.Serializable]
@@ -752,7 +753,7 @@ namespace Zombie1111_uDestruction
         }
 
         [System.Serializable]
-        public struct FracParts
+        public struct FracPart
         {
             /// <summary>
             /// The part collider
@@ -840,57 +841,8 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public bool Gen_fractureObject(bool isPrefabAsset = false)
         {
-#if UNITY_EDITOR
-            //set if should always count as prefab asset
-            eOnly_isPrefabAsset = isPrefabAsset;
-
-            //if prefab instance, fracture on the prefab asset
-            if (GetFracturePrefabType() == 1)
-            {
-                bool okFrac = true;
-                bool didFindFrac = false;
-                string prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(gameObject);
-                PrefabUtility.ApplyObjectOverride(this, prefabPath, InteractionMode.AutomatedAction);
-
-                using (var editingScope = new PrefabUtility.EditPrefabContentsScope(prefabPath))
-                {
-                    //This script properties must always be synced
-                    foreach (FractureThis fracT in editingScope.prefabContentsRoot.GetComponentsInChildren<FractureThis>())
-                    {
-                        if (okFrac == true) okFrac = fracT.Gen_fractureObject(true);
-                        else fracT.Gen_fractureObject(true);
-
-                        didFindFrac = true;
-                    }
-                }
-
-                if (didFindFrac == false)
-                {
-                    Debug.LogError(transform.name + " prefab does not contain the fracture script (Have you applied overrides?)");
-                    return false;
-                }
-
-                return okFrac;
-            }
-#endif
-
-            //return if required stuff is missing
-            VerifyGlobalHandler();
-
-            if (saveAsset == null && (globalHandler == null || globalHandler.TryCreateTempSaveAsset(this) == false))
-            {
-                Debug.LogError("You must assign a saveAsset to " + transform.name);
-                return false;
-            }
-
-            if (gameObject.GetComponentsInParent<FractureThis>().Length > 1 || gameObject.GetComponentsInChildren<FractureThis>().Length > 1)
-            {
-                Debug.LogError("Cannot fracture " + transform.name + " because there is another fracture script in any of its parents or children");
-                return false;
-            }
-
-            //fracture the object
-            GameObject objectToFracture = gameObject;
+            //verify if we can continue with fracturing here or on prefab
+            if (Gen_checkIfContinueWithFrac(out bool didFracOther, isPrefabAsset) == false) return didFracOther;
 
             //restore orginal data
             Gen_loadAndMaybeSaveOgData(false);
@@ -899,37 +851,38 @@ namespace Zombie1111_uDestruction
             float worldScaleDis = worldScale * 0.0001f;
             tempOgRealSkin = new();
 
-            List<MeshData> meshesToFracture = Gen_getMeshesToFracture(objectToFracture, false, worldScaleDis);
-            if (meshesToFracture == null) return false;
-
+            List<MeshData> meshesToFracW = Gen_getMeshesToFracture(gameObject, false, worldScaleDis);
+            if (meshesToFracW == null) return false;
 
             //Fracture the meshes into pieces
-            tempPartOgMeshId = new();
-            List<Mesh> fracturedMeshes = Gen_fractureMeshes(meshesToFracture, fractureCount, dynamicFractureCount, worldScaleDis, seed, true);
-            if (fracturedMeshes == null) return false;
+            List<MeshWG> partMeshesW = Gen_fractureMeshes(meshesToFracW, fractureCount, dynamicFractureCount, worldScaleDis, seed, true);
+            if (partMeshesW == null) return false;
 
             //Save current orginal data (Save as late as possible)
             Gen_loadAndMaybeSaveOgData(true);
 
-            //setup part basics, like defualt frac parent, create parts transform+colliders, convert mesh to localspace
-            List<Mesh> fracturedMeshesLocal = Gen_setupPartBasics(new(fracturedMeshes), physicsMat);
-            if (fracturedMeshesLocal == null)
+            //create parts, like defualt frac parent, create parts transform+colliders, convert part meshes to localspace
+            Mesh[] partMeshesL = Gen_setupPartBase(partMeshesW, physicsMat);
+            if (partMeshesL == null)
             {
                 Gen_loadAndMaybeSaveOgData(false);
                 return false;
             }
 
             //setup fracture renderer, setup renderer
-            Gen_setupRenderer(ref allParts, fracturedMeshes, transform, matInside_defualt, matOutside_defualt);
+            Gen_setupRenderer(partMeshesW, meshesToFracW, transform, matInside_defualt, matOutside_defualt);
+            Gen_loadAndMaybeSaveOgData(false);
+            return false; //debug remove later
+
+            //setup more advanced part data
+            Gen_setupPartStructure(partMeshesW);
 
             //setup real skinned mesh
             if (isRealSkinnedM == true)
             {
-                Gen_setupSkinnedMesh(tempOgRealSkin.ogMesh, tempOgRealSkin.ogBones, tempOgRealSkin.ogRootBone.localToWorldMatrix, fracturedMeshes);
+                Gen_setupSkinnedMesh(tempOgRealSkin.ogMesh, tempOgRealSkin.ogBones, tempOgRealSkin.ogRootBone.localToWorldMatrix);
             }
 
-            tempPartOgMeshId = null;
-            tempFracVerOgMeshId = null;
             tempOgRealSkin = null;
 
             //apply resistance multipliers to parts
@@ -945,7 +898,62 @@ namespace Zombie1111_uDestruction
             if (fracRend.bones.Length > 500) Debug.LogWarning(transform.name + " has " + fracRend.bones.Length + " bones (skinnedMeshRenderers seems to have a limitation of ~500 bones before it breaks)");
             if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.LogWarning(transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
             if (transform.TryGetComponent<Rigidbody>(out _) == true) Debug.LogWarning(transform.name + " has a rigidbody and it may cause issues. Its recommended to remove it and use the fracture physics options instead");
-            Debug.Log("Fractured " + objectToFracture.transform.name + " into " + fracturedMeshesLocal.Count + " parts, total vertex count = " + fracturedMeshes.Sum(mesh => mesh.vertexCount));
+            Debug.Log("Fractured " + transform.name + " into " + partMeshesL.Length + " parts, total vertex count = " + partMeshesW.Sum(meshWG => meshWG.mesh.vertexCount));
+
+            return true;
+        }
+
+        /// <summary>
+        /// Returns true if we should continue with the fracture process
+        /// </summary>
+        /// <returns></returns>
+        private bool Gen_checkIfContinueWithFrac(out bool didFracOther, bool isPrefabAsset)
+        {
+#if UNITY_EDITOR
+            //set if should always count as prefab asset
+            eOnly_isPrefabAsset = isPrefabAsset;
+
+            //if prefab instance, fracture on the prefab asset
+            if (GetFracturePrefabType() == 1)
+            {
+                didFracOther = true;
+                bool didFindFrac = false;
+                string prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(gameObject);
+                PrefabUtility.ApplyObjectOverride(this, prefabPath, InteractionMode.AutomatedAction);
+
+                using (var editingScope = new PrefabUtility.EditPrefabContentsScope(prefabPath))
+                {
+                    //This script properties must always be synced
+                    foreach (FractureThis fracT in editingScope.prefabContentsRoot.GetComponentsInChildren<FractureThis>())
+                    {
+                        if (didFracOther == true) didFracOther = fracT.Gen_fractureObject(true);
+                        else fracT.Gen_fractureObject(true);
+
+                        didFindFrac = true;
+                    }
+                }
+
+                if (didFindFrac == false) Debug.LogError(transform.name + " prefab asset does not contain the fracture script (Have you applied overrides?)");
+
+                return false;
+            }
+#endif
+
+            //return if required stuff is missing
+            VerifyGlobalHandler();
+            didFracOther = false;
+
+            if (saveAsset == null && (globalHandler == null || globalHandler.TryCreateTempSaveAsset(this) == false))
+            {
+                Debug.LogError("You must assign a saveAsset to " + transform.name);
+                return false;
+            }
+
+            if (gameObject.GetComponentsInParent<FractureThis>().Length > 1 || gameObject.GetComponentsInChildren<FractureThis>().Length > 1)
+            {
+                Debug.LogError("Cannot fracture " + transform.name + " because there is another fracture script in any of its parents or children");
+                return false;
+            }
 
             return true;
         }
@@ -984,38 +992,6 @@ namespace Zombie1111_uDestruction
 
                 }
             }
-
-            ////verticsLinkedThreaded should only contain the ~same vertices for the same part
-            //for (int i = 0; i < verticsLinkedThreaded.Length; i++)
-            //{
-            //    int requiredPart = verticsPartThreaded[i];
-            //    verticsLinkedThreaded[i].intList.Remove(i);
-            //    for (int ii = verticsLinkedThreaded[i].intList.Count - 1; ii >= 0; ii--)
-            //    {
-            //        if (verticsPartThreaded[verticsLinkedThreaded[i].intList[ii]] == requiredPart) continue;
-            //
-            //        verticsLinkedThreaded[i].intList.RemoveAt(ii);
-            //    }
-            //}
-            //
-            ////rendVertexIndexes should only contain one of the ~same vertices
-            //for (int i = 0; i < allParts.Length; i++)
-            //{
-            //    for (int ii = allParts[i].rendVertexIndexes.Count - 1; ii >= 0; ii--)
-            //    {
-            //        if (ii >= allParts[i].rendVertexIndexes.Count)
-            //        {
-            //            continue;
-            //        }
-            //
-            //        int vI = allParts[i].rendVertexIndexes[ii];
-            //        foreach (int nVi in verticsLinkedThreaded[vI].intList)
-            //        {
-            //            if (nVi == vI) continue;
-            //            allParts[i].rendVertexIndexes.Remove(nVi);
-            //        }
-            //    }
-            //}
         }
 
         /// <summary>
@@ -1081,51 +1057,85 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Creates a meshfilter+render on rendHolder and assigns it with proper values. Also updates fParts rendVertexIndexes
+        /// Creates a meshfilter+render on rendHolder and assigns it with proper values. Also updates allParts rendVertexIndexes
         /// </summary>
         /// <param name="fParts"></param>
-        /// <param name="partMeshes"></param>
+        /// <param name="partMeshesW"></param>
         /// <param name="rendHolder"></param>
         /// <param name="matInside"></param>
         /// <param name="matOutside"></param>
-        private void Gen_setupRenderer(ref FracParts[] fParts, List<Mesh> partMeshes, Transform rendHolder, Material matInside, Material matOutside)
+        private void Gen_setupRenderer(List<MeshWG> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, Material matInside, Material matOutside)
         {
-            //combine meshes
-            Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshes, ref fParts);
+            //combine meshes and set allparts rendVertexIndexes
+            //Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshesW, ref fParts);
+            Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshesW.Select(fM => fM.mesh).ToArray(), ref allParts);
 
-            Vector3[] vertics = comMesh.vertices;
+            Vector3[] cVers = comMesh.vertices;
             float worldDis = worldScale * 0.01f;//0.01??
 
             //get all vertics ogMesh id
-            tempFracVerOgMeshId = new int[vertics.Length];
-            for (int i = 0; i < fParts.Length; i += 1)
+            int[] cVerOgMeshI = new int[cVers.Length];
+            for (int i = 0; i < allParts.Length; i++)
             {
-                foreach (int vI in fParts[i].rendLinkVerIndexes)
+                foreach (int vI in allParts[i].rendLinkVerIndexes)
                 {
-                    tempFracVerOgMeshId[vI] = tempPartOgMeshId[i];
+                    cVerOgMeshI[vI] = partMeshesW[i].mGroupSourceI;
                 }
             }
-
-            //get all vertics at the ~same position using the same ogMesh
-            verticsLinkedThreaded = new IntList[vertics.Length];
-
+            
+            //get all vertics that share the ~same position and has the same ogMesh
+            verticsLinkedThreaded = new IntList[cVers.Length];
+            
             Parallel.For(0, verticsLinkedThreaded.Length, i =>
             {
-                List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(vertics, tempFracVerOgMeshId, vertics[i], tempFracVerOgMeshId[i], worldDis, -1);
-
+                List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(cVers, cVerOgMeshI, cVers[i], cVerOgMeshI[i], worldDis, -1);
+            
                 lock (verticsLinkedThreaded)
                 {
                     verticsLinkedThreaded[i] = new() { intList = intList };
                 }
             });
 
+            //get all tris and vers from the sourceMeshes
+            int[][] oTriss = new int[sourceMeshesW.Count][];
+            Vector3[][] oVerss = new Vector3[sourceMeshesW.Count][];
+            for (int i = 0; i < sourceMeshesW.Count; i++)
+            {
+                oTriss[i] = sourceMeshesW[i].mesh.triangles;
+                oVerss[i] = sourceMeshesW[i].mesh.vertices;
+            }
+
+            //get the most similar og triangel for every triangel on the comMesh
+            int[] cTris = comMesh.triangles;
+            int ctL = cTris.Length / 3;
+            NativeArray<int> closeOTris = new(ctL, Allocator.Temp);
+
+            Parallel.For(0, ctL, i =>
+            {
+                int tI = i * 3;
+                int oI = cVerOgMeshI[cTris[tI]];
+
+                closeOTris[i] = FractureHelperFunc.GetClosestTriOnMesh(
+                    oVerss[oI],
+                    oTriss[oI],
+                    new Vector3[3] { cVers[cTris[tI]], cVers[cTris[tI + 1]], cVers[cTris[tI + 2]] },
+                    worldDis);
+            });
+
+            //note for myself, next task is to get the most similar og vertex for every vertex on the comMesh.
+            //So we can use that for real boneWeights and to get what parts can be neighbours. Also to get submeshes for materials
+            //We already know the most similar tris (Not fully tested tho)
+
+            closeOTris.Dispose();
+
+            //convert mesh to renderer local space
             comMesh = FractureHelperFunc.ConvertMeshWithMatrix(comMesh, rendHolder.worldToLocalMatrix);
 
             //setup combined mesh bones
             BoneWeight[] boneW = new BoneWeight[comMesh.vertexCount];
-            for (int i = 0; i < fParts.Length; i += 1)
+            for (int i = 0; i < allParts.Length; i++)
             {
-                foreach (int vI in fParts[i].rendLinkVerIndexes)
+                foreach (int vI in allParts[i].rendLinkVerIndexes)
                 {
                     boneW[vI].weight0 = 1.0f;
                     boneW[vI].boneIndex0 = i;
@@ -1133,7 +1143,7 @@ namespace Zombie1111_uDestruction
             }
 
             comMesh.boneWeights = boneW;
-            comMesh.bindposes = fParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
+            comMesh.bindposes = allParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
 
             //setup vertex colors
             if (doVertexColors == true) comMesh.colors = Enumerable.Repeat(new Color(1.0f, 1.0f, 1.0f, 0.0f), comMesh.vertexCount).ToArray();
@@ -1143,13 +1153,13 @@ namespace Zombie1111_uDestruction
             SkinnedMeshRenderer sRend = rendHolder.GetOrAddComponent<SkinnedMeshRenderer>();
             sRend.enabled = true;
             sRend.rootBone = rendHolder;
-            sRend.bones = fParts.Select(part => part.col.transform).ToArray();
+            sRend.bones = allParts.Select(part => part.col.transform).ToArray();
             sRend.sharedMaterials = new Material[2] { matInside, matOutside };
             sRend.sharedMesh = comMesh;
 
             //setup verticsPartThreaded
-            verticsPartThreaded = new int[vertics.Length];
-            for (int i = 0; i < allParts.Length; i += 1)
+            verticsPartThreaded = new int[cVers.Length];
+            for (int i = 0; i < allParts.Length; i++)
             {
                 foreach (int vI in allParts[i].rendLinkVerIndexes)
                 {
@@ -1158,131 +1168,42 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        private List<Mesh> Gen_setupPartBasics(List<Mesh> meshes, PhysicMaterial phyMatToUse)
+        /// <summary>
+        /// Create parts for all meshes in the given list, meshes must be in worldspace.  Returns partMeshesW but in part localspace
+        /// </summary>
+        private Mesh[] Gen_setupPartBase(List<MeshWG> partMeshesW, PhysicMaterial phyMatToUse)
         {
-            //save the world space meshes
-            Mesh[] worldMeshes = meshes.ToArray();
+            //create a array to store localspace meshes
+            Mesh[] partMeshesL = new Mesh[partMeshesW.Count];
 
             //create defualt parent
             int parentIndex = Run_createNewParent(Vector3.zero);
-            allFracParents[parentIndex].partIndexes = Enumerable.Range(0, meshes.Count).ToList();
+            allFracParents[parentIndex].partIndexes = Enumerable.Range(0, partMeshesW.Count).ToList();
             Transform parentTrans = allFracParents[parentIndex].parentTrans;
 
             //create part transforms
-            allParts = new FracParts[meshes.Count];
+            allParts = new FracPart[partMeshesW.Count];
 
-            for (int i = 0; i < meshes.Count; i += 1)
+            for (int i = 0; i < partMeshesW.Count; i += 1)
             {
                 Transform newT = new GameObject("Part(" + i + ")_" + transform.name).transform;
 #if UNITY_EDITOR
                 if (Application.isPlaying == false) StageUtility.PlaceGameObjectInCurrentStage(newT.gameObject);
 #endif
                 newT.SetParent(parentTrans);
-                newT.SetPositionAndRotation(FractureHelperFunc.GetMedianPosition(meshes[i].vertices), parentTrans.rotation);
+                newT.SetPositionAndRotation(FractureHelperFunc.GetMedianPosition(partMeshesW[i].mesh.vertices), parentTrans.rotation);
                 newT.localScale = Vector3.one;
                 newT.gameObject.layer = gameObject.layer;
 
-                meshes[i] = FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(meshes[i]), newT.worldToLocalMatrix); //Instantiate new mesh to keep worldSpaceMeshes
+                partMeshesL[i] = FractureHelperFunc.ConvertMeshWithMatrix(Instantiate(partMeshesW[i].mesh), newT.worldToLocalMatrix); //Instantiate new mesh to keep worldSpaceMeshes
 
                 //the part data is created here
-                FracParts newP = new() { trans = newT, col = Gen_createPartCollider(newT, meshes[i], phyMatToUse), rendLinkVerIndexes = new(), partBrokenness = 0.0f, neighbourParts = new(), parentIndex = 0 };
+                FracPart newP = new() { trans = newT, col = Gen_createPartCollider(newT, partMeshesL[i], phyMatToUse), rendLinkVerIndexes = new(), partBrokenness = 0.0f, neighbourParts = new(), parentIndex = 0 };
                 allParts[i] = newP;
             }
 
-            //setup part neighbours and isKinematic
-            //get physics scene
-            PhysicsScene phyScene = gameObject.scene.GetPhysicsScene();
-
-            //perform the checks to get neighbours and isKinematic
-            List<Vector3> wVerts = new();
-
-            float worldDis = worldScale * 0.01f;
-            if (phyMainOptions.mainPhysicsType == OptMainPhysicsType.overlappingIsKinematic) kinematicPartStatus = new bool[allParts.Length];
-            else kinematicPartStatus = new bool[0];
-
-            Collider[] lapCols = new Collider[200]; //This is never allowed to be too small;
-            int colCount;
-
-            for (int i = 0; i < allParts.Length; i += 1)
-            {
-                bool didSimple = false;
-
-                if (colliderType != ColliderType.mesh || generationQuality == GenerationQuality.normal)
-                {
-                    didSimple = true;
-
-                    colCount = phyScene.OverlapBox(worldMeshes[i].bounds.center,
-                        worldMeshes[i].bounds.extents * 1.05f,
-                        lapCols,
-                        Quaternion.identity,
-                        Physics.AllLayers,
-                        QueryTriggerInteraction.Ignore);
-
-                    Gen_getKinematicAndNeighboursFromTrans(lapCols, colCount, i, false);
-                }
-
-                if (didSimple == true) continue;
-
-                worldMeshes[i].GetVertices(wVerts);
-
-                for (int ii = 0; ii < wVerts.Count; ii += 1)
-                {
-                    colCount = phyScene.OverlapSphere(wVerts[ii], worldDis, lapCols, Physics.AllLayers, QueryTriggerInteraction.Ignore);
-                    Gen_getKinematicAndNeighboursFromTrans(lapCols, colCount, i, false);
-                }
-
-                lapCols = FractureHelperFunc.LinecastsBetweenPositions(wVerts, phyScene).ToArray();
-                Gen_getKinematicAndNeighboursFromTrans(lapCols, lapCols.Length, i, false);
-            }
-
-            //update parent info
-            Run_updateParentInfo(0);
-
-            //verify that all parts are connected in its defualt state
-            List<int> conParts = new() { 0 };
-            for (int i = 0; i < conParts.Count; i += 1)
-            {
-                foreach (int nI in allParts[conParts[i]].neighbourParts)
-                {
-                    if (conParts.Contains(nI) == true) continue;
-
-                    conParts.Add(nI);
-                }
-            }
-
-            if (conParts.Count != allParts.Length) Debug.LogError("Not all parts in " + transform.name + " are connected, make sure there are no floating triangels. (This may cause issues at runtime)");
-
             //return meshes since it has been converted to parent localspace
-            return meshes;
-
-            void Gen_getKinematicAndNeighboursFromTrans(Collider[] overlapCols, int colCount, int ogPi, bool kinematicOnly = false)
-            {
-                FractureThis pFracThis;
-                int nearI;
-
-                for (int i = 0; i < colCount; i += 1)
-                {
-                    //get part index from hit trans
-                    pFracThis = overlapCols[i].GetComponentInParent<FractureThis>();
-
-                    nearI = Run_tryGetPartIndexFromString(overlapCols[i].transform.name);
-                    if (nearI == ogPi) continue;
-
-                    if (nearI < 0)
-                    {
-                        //hit is not a neighbour part
-                        if (kinematicPartStatus.Length > 0 && pFracThis == null)
-                        {
-                            kinematicPartStatus[ogPi] = true;
-                        }
-                    }
-                    else if (allParts[ogPi].neighbourParts.Contains(nearI) == false && pFracThis == this)
-                    {
-                        //hit is a new neighbour part, add to neighbour part list
-                        if (kinematicOnly == false) allParts[ogPi].neighbourParts.Add(nearI);
-                    }
-                }
-            }
+            return partMeshesL;
 
             Collider Gen_createPartCollider(Transform partTrans, Mesh partMesh, PhysicMaterial phyMat)
             {
@@ -1337,6 +1258,104 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Gets neighbours and kinematic status for all parts
+        /// </summary>
+        private void Gen_setupPartStructure(List<MeshWG> partMeshesW)
+        {
+            //setup part neighbours and isKinematic
+            //get physics scene
+            PhysicsScene phyScene = gameObject.scene.GetPhysicsScene();
+
+            //perform the overlap checks to get neighbours and isKinematic
+            List<Vector3> wVerts = new();
+
+            float worldDis = worldScale * 0.01f;
+            if (phyMainOptions.mainPhysicsType == OptMainPhysicsType.overlappingIsKinematic) kinematicPartStatus = new bool[allParts.Length];
+            else kinematicPartStatus = new bool[0];
+
+            Collider[] lapCols = new Collider[200]; //This is never allowed to be too small;
+            int colCount;
+
+            for (int i = 0; i < allParts.Length; i++)
+            {
+                bool didSimple = false;
+
+                if (colliderType != ColliderType.mesh || generationQuality == GenerationQuality.normal)
+                {
+                    didSimple = true;
+
+                    colCount = phyScene.OverlapBox(partMeshesW[i].mesh.bounds.center,
+                        partMeshesW[i].mesh.bounds.extents * 1.05f,
+                        lapCols,
+                        Quaternion.identity,
+                        Physics.AllLayers,
+                        QueryTriggerInteraction.Ignore);
+
+                    Gen_getKinematicAndNeighboursFromTrans(lapCols, colCount, i, false);
+                }
+
+                if (didSimple == true) continue;
+
+                partMeshesW[i].mesh.GetVertices(wVerts);
+
+                for (int ii = 0; ii < wVerts.Count; ii++)
+                {
+                    colCount = phyScene.OverlapSphere(wVerts[ii], worldDis, lapCols, Physics.AllLayers, QueryTriggerInteraction.Ignore);
+                    Gen_getKinematicAndNeighboursFromTrans(lapCols, colCount, i, false);
+                }
+
+                lapCols = FractureHelperFunc.LinecastsBetweenPositions(wVerts, phyScene).ToArray();
+                Gen_getKinematicAndNeighboursFromTrans(lapCols, lapCols.Length, i, false);
+            }
+
+            //verify that all parts are connected in its defualt state
+            List<int> conParts = new() { 0 };
+            for (int i = 0; i < conParts.Count; i += 1)
+            {
+                foreach (int nI in allParts[conParts[i]].neighbourParts)
+                {
+                    if (conParts.Contains(nI) == true) continue;
+
+                    conParts.Add(nI);
+                }
+            }
+
+            if (conParts.Count != allParts.Length) Debug.LogError("Not all parts in " + transform.name + " are connected, make sure the whole mesh is connected. (This may cause issues at runtime)");
+
+            //update parent info
+            Run_updateParentInfo(0);
+
+            void Gen_getKinematicAndNeighboursFromTrans(Collider[] overlapCols, int colCount, int ogPi, bool kinematicOnly = false)
+            {
+                FractureThis pFracThis;
+                int nearI;
+
+                for (int i = 0; i < colCount; i++)
+                {
+                    //get part index from hit trans
+                    pFracThis = overlapCols[i].GetComponentInParent<FractureThis>();
+
+                    nearI = Run_tryGetPartIndexFromString(overlapCols[i].transform.name);
+                    if (nearI == ogPi) continue;
+
+                    if (nearI < 0)
+                    {
+                        //hit is not a neighbour part
+                        if (kinematicPartStatus.Length > 0 && pFracThis == null)
+                        {
+                            kinematicPartStatus[ogPi] = true;
+                        }
+                    }
+                    else if (allParts[ogPi].neighbourParts.Contains(nearI) == false && pFracThis == this)
+                    {
+                        //hit is a new neighbour part, add to neighbour part list
+                        if (kinematicOnly == false) allParts[ogPi].neighbourParts.Add(nearI);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Contains data about meshes to fracture
         /// </summary>
         public class MeshData
@@ -1367,22 +1386,22 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns all mesh chunks that was generated from the meshesToFracture list
         /// </summary>
-        /// <param name="meshesToFracture"></param>
+        /// <param name="meshesToFrac"></param>
         /// <param name="totalChunkCount"></param>
         /// <param name="seed"></param>
         /// <returns></returns>
-        private List<Mesh> Gen_fractureMeshes(List<MeshData> meshesToFracture, int totalChunkCount, bool dynamicChunkCount, float worldScaleDis = 0.0001f, int seed = -1, bool useMeshBounds = false)
+        private List<MeshWG> Gen_fractureMeshes(List<MeshData> meshesToFrac, int totalChunkCount, bool dynamicChunkCount, float worldScaleDis = 0.0001f, int seed = -1, bool useMeshBounds = false)
         {
             //get random seed
             int nextOgMeshId = 0;
             if (seed < 0) seed = UnityEngine.Random.Range(0, int.MaxValue);
 
-            //get per mesh scale, so each mesh can get ~equally sized
-            List<Mesh> meshes = meshesToFracture.Select(meshData => meshData.mesh).ToList();
+            //get per mesh scale, so each mesh to frac get ~equally sized chunks
+            List<Mesh> meshes = meshesToFrac.Select(meshData => meshData.mesh).ToList();
             List<float> meshScales = FractureHelperFunc.GetPerMeshScale(meshes, useMeshBounds);
             Bounds meshBounds = FractureHelperFunc.GetCompositeMeshBounds(meshes.ToArray());
+
             if (dynamicChunkCount == true) totalChunkCount = Mathf.CeilToInt(totalChunkCount * FractureHelperFunc.GetBoundingBoxVolume(meshBounds));
-            meshes.Clear();
 
             if (mustConfirmHighCount == true && totalChunkCount > 500)
             {
@@ -1392,22 +1411,27 @@ namespace Zombie1111_uDestruction
             }
             else if (totalChunkCount < 500) mustConfirmHighCount = true;
 
-            //fractrue the meshes into chunks that are ~equally sized
-            for (int i = 0; i < meshesToFracture.Count; i += 1)
+            //fractrue the meshes into chunks
+            List<MeshWG> fracedMeshes = new();
+
+            for (int i = 0; i < meshesToFrac.Count; i += 1)
             {
-                Gen_fractureMesh(meshesToFracture[i].mesh, ref meshes, Mathf.RoundToInt(totalChunkCount * meshScales[i]), meshBounds);
+                Gen_fractureMesh(
+                    new() { mesh = meshesToFrac[i].mesh, mGroupId = meshesToFrac[i].mGroupId, mGroupSourceI = i },
+                    ref fracedMeshes,
+                    Mathf.RoundToInt(totalChunkCount * meshScales[i]));
+
                 nextOgMeshId += 1;
             }
 
             //return the result
-            return meshes;
+            return fracedMeshes;
 
-            void Gen_fractureMesh(Mesh meshToFrac, ref List<Mesh> newMeshes, int chunkCount, Bounds bound)
+            void Gen_fractureMesh(MeshWG meshToFrac, ref List<MeshWG> newMeshes, int chunkCount)
             {
                 //fractures the given mesh into pieces and adds the new pieces to the newMeshes list
                 if (chunkCount <= 1)
                 {
-                    tempPartOgMeshId.Add(nextOgMeshId);
                     newMeshes.Add(meshToFrac);
                     return;
                 }
@@ -1418,12 +1442,12 @@ namespace Zombie1111_uDestruction
                 NvBlastExtUnity.setSeed(seed);
 
                 var nvMesh = new NvMesh(
-                    meshToFrac.vertices,
-                    meshToFrac.normals,
-                    meshToFrac.uv,
-                    meshToFrac.vertexCount,
-                    meshToFrac.GetIndices(0),
-                    (int)meshToFrac.GetIndexCount(0)
+                    meshToFrac.mesh.vertices,
+                    meshToFrac.mesh.normals,
+                    meshToFrac.mesh.uv,
+                    meshToFrac.mesh.vertexCount,
+                    meshToFrac.mesh.GetIndices(0),
+                    (int)meshToFrac.mesh.GetIndexCount(0)
                 );
 
                 byte loopMaxAttempts = maxFractureAttempts;
@@ -1479,15 +1503,15 @@ namespace Zombie1111_uDestruction
 
                     if (meshIsValid == false) continue;
 
-                    newMeshes.AddRange(newMeshesTemp);
                     for (int i = 0; i < newMeshesTemp.Count; i += 1)
                     {
-                        tempPartOgMeshId.Add(nextOgMeshId);
+                        newMeshes.Add(new() { mesh = newMeshesTemp[i], mGroupId = meshToFrac.mGroupId, mGroupSourceI = meshToFrac.mGroupSourceI });
                     }
 
                     break;
                 }
 
+                //warn if unable to frac a chunk
                 if (meshIsValid == false)
                 {
                     Debug.LogError("Unable to fracture chunk " + nextOgMeshId + " of " + transform.name + " (Some parts of the mesh may be missing)");
@@ -1547,13 +1571,6 @@ namespace Zombie1111_uDestruction
                     }
 
                     //get defualt parent from rootbone
-                    //Transform rootBoneTrans = skinnedR.rootBone;
-                    //while (rootBoneTrans != null && rootBoneTrans.parent != transform)
-                    //{
-                    //    rootBoneTrans = rootBoneTrans.parent;
-                    //}
-                    //
-                    //if (rootBoneTrans == null || rootBoneTrans.parent != transform)
                     if (FractureHelperFunc.GetIfTransformIsAnyParent(transform, skinnedR.rootBone) == false)
                     {
                         Debug.LogError(skinnedR.transform.name + " (skinnedRend) rootBone must be a child of " + transform.name);
@@ -1614,7 +1631,7 @@ namespace Zombie1111_uDestruction
             if (getRawOnly == true) return mDatas;
 
             //split meshes into chunks
-            List<MeshWithGroup> splittedMeshes;
+            List<MeshWG> splittedMeshes;
             for (int i = mDatas.Count - 1; i >= 0; i--)
             {
                 splittedMeshes = Gen_splitMeshIntoChunks(mDatas[i].mesh, hasSkinned, worldScaleDis);
@@ -1638,10 +1655,11 @@ namespace Zombie1111_uDestruction
             return mDatas;
         }
 
-        private class MeshWithGroup
+        private class MeshWG
         {
             public Mesh mesh;
             public List<float> mGroupId;
+            public int mGroupSourceI;
         }
 
         /// <summary>
@@ -1649,10 +1667,10 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="meshToSplit"></param>
         /// <returns></returns>
-        private List<MeshWithGroup> Gen_splitMeshIntoChunks(Mesh meshToSplit, bool doBones, float worldScaleDis = 0.0001f)
+        private List<MeshWG> Gen_splitMeshIntoChunks(Mesh meshToSplit, bool doBones, float worldScaleDis = 0.0001f)
         {
             int maxLoops = 200;
-            List<MeshWithGroup> splittedMeshes = new();
+            List<MeshWG> splittedMeshes = new();
             List<Mesh> tempM;
             Color[] verCols;
             List<float> tempG;
@@ -1707,7 +1725,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Only called if real skinned mesh to copy its animated bones to fractured mesh
         /// </summary>
-        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW, List<Mesh> partMeshesWorld)
+        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW)
         {
             float worldDis = worldScale * 0.0001f;
 
@@ -2623,7 +2641,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// All the fractured parts.
         /// </summary>
-        [System.NonSerialized] public FracParts[] allParts = new FracParts[0];
+        [System.NonSerialized] public FracPart[] allParts = new FracPart[0];
 
         /// <summary>
         /// If MainPhysicsType == overlappingIsKinematic, bool for all parts that is true if the part was is inside a non fractured mesh when generated

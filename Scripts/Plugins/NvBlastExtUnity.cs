@@ -110,7 +110,7 @@ public class NvMesh : DisposablePtr
     {
         NvLogger.Log("_Mesh_Release");
 
-        _Mesh_Release(this.ptr); //Throws Exceptions even tho it is working
+        _Mesh_Release(this.ptr); //Throws Exceptions even tho everything is working
     }
 
     //Unity Helper Functions
