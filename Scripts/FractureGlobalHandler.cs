@@ -17,7 +17,7 @@ namespace Zombie1111_uDestruction
     {
         [Header("Global Fracture Config")]
         [SerializeField] private float damageThreshold = 2.0f;
-        [SerializeField] private bool syncFpsWithFixedUpdate = false;
+        [SerializeField] private bool syncFixedTimestepWithFps = false;
         public float impactZoneRadius = 0.1f;
 
         private ConcurrentDictionary<int, GlobalFracData> partsColInstanceId = new();
@@ -62,6 +62,10 @@ namespace Zombie1111_uDestruction
                 debugRigidbodyInstanceIds = rigidbodiesInstanceId.Values.ToList();
             }
         }
+
+        //debug, log destruction time
+        [System.NonSerialized] public double totalDesMs = 0.0f;
+
 #endif
 
         [System.Serializable]
@@ -105,12 +109,14 @@ namespace Zombie1111_uDestruction
 
         public void OnEnable()
         {
+            //subscribe to on col events
             Physics.ContactModifyEvent += ModificationEvent;
             Physics.ContactModifyEventCCD += ModificationEvent;
         }
 
         public void OnDisable()
         {
+            //unsubscribe from on col events
             Physics.ContactModifyEvent -= ModificationEvent;
             Physics.ContactModifyEventCCD -= ModificationEvent;
         }
@@ -121,7 +127,8 @@ namespace Zombie1111_uDestruction
 
         private void Update()
         {
-            if (syncFpsWithFixedUpdate == true)
+            //sync fixedTimestep with fps
+            if (syncFixedTimestepWithFps == true)
             {
                 syncTime += Time.unscaledDeltaTime;
                 syncFrames++;
@@ -130,7 +137,6 @@ namespace Zombie1111_uDestruction
                 {
                     Time.fixedDeltaTime = MathF.Min(syncTime / syncFrames, ogFixedTimeStep);
         
-                    Debug.Log(MathF.Min(syncTime / syncFrames, ogFixedTimeStep));
                     syncTime = 0.0f;
                     syncFrames = 0;
                 }

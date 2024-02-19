@@ -42,26 +42,6 @@ namespace TrueTrace
         private Vector3 plPos;
         private Vector3 plDir;
 
-        private void FixedUpdate()
-        {
-            if (doShoot == true && gotCod == true)
-            {
-                doShoot = false;
-                GameObject newO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                newO.transform.localScale *= 0.2f;
-                newO.transform.position = plPos;
-                Rigidbody rb = newO.AddComponent<Rigidbody>();
-                rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                rb.velocity = plDir * 20.0f;
-                rb.interpolation = RigidbodyInterpolation.Interpolate;
-                rb.mass = 1.0f;
-                debugRb = rb;
-                globalF.OnAddRigidbody(rb, 3.0f);
-                //newO.GetComponent<Collider>().hasModifiableContacts = true;
-                newO.GetComponent<Collider>().sharedMaterial = phyMat;
-                gotCod = false;
-            }
-        }
 
         private bool doShoot = false;
 
@@ -85,6 +65,24 @@ namespace TrueTrace
             if (Input.GetKeyDown(KeyCode.Mouse0) == true)
             {
                 doShoot = true;
+            }
+
+            if (doShoot == true && gotCod == true)
+            {
+                doShoot = false;
+                GameObject newO = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                newO.transform.localScale *= 0.2f;
+                newO.transform.position = plPos;
+                Rigidbody rb = newO.AddComponent<Rigidbody>();
+                rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                rb.velocity = plDir * 20.0f;
+                rb.interpolation = RigidbodyInterpolation.Interpolate;
+                rb.mass = 1.0f;
+                debugRb = rb;
+                globalF.OnAddRigidbody(rb, 3.0f);
+                //newO.GetComponent<Collider>().hasModifiableContacts = true;
+                newO.GetComponent<Collider>().sharedMaterial = phyMat;
+                gotCod = false;
             }
 
             if (doMoveCam == false) return;

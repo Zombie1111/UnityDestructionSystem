@@ -2,6 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using System.Collections.Concurrent;
+using System.Threading.Tasks;
+using Unity.VisualScripting.FullSerializer;
+
+
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -196,7 +202,7 @@ namespace Zombie1111_uDestruction
 
         public static Vector3[] ConvertPositionsWithMatrix(Vector3[] localPoss, Matrix4x4 lTwMat)
         {
-            for (int i = localPoss.Length - 1; i >= 0; i -= 1)
+            for (int i = localPoss.Length - 1; i >= 0; i--)
             {
                 //localPoss[i] = localTrans.TransformPoint(localPoss[i]);
                 localPoss[i] = lTwMat.MultiplyPoint(localPoss[i]);
@@ -207,7 +213,7 @@ namespace Zombie1111_uDestruction
 
         public static Vector3[] ConvertDirectionsWithMatrix(Vector3[] localDirs, Matrix4x4 lTwMat)
         {
-            for (int i = localDirs.Length - 1; i >= 0; i -= 1)
+            for (int i = localDirs.Length - 1; i >= 0; i--)
             {
                 localDirs[i] = lTwMat.MultiplyVector(localDirs[i]);
             }
@@ -285,16 +291,12 @@ namespace Zombie1111_uDestruction
 
         public static Vector3 ClosestPointOnLine(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
         {
-            Vector3 lineToPoint = position - linePosition;
-            float t = Vector3.Dot(lineToPoint, lineDirection) / lineDirection.sqrMagnitude;
-            return linePosition + Mathf.Clamp01(t) * lineDirection;
+            return linePosition + Mathf.Clamp01(Vector3.Dot(position - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
         }
 
         public static Vector3 ClosestPointOnLine_doubleSided(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
         {
-            Vector3 lineToPoint = position - linePosition;
-            float t = Vector3.Dot(lineToPoint, lineDirection) / lineDirection.sqrMagnitude;
-            return linePosition + t * lineDirection;
+            return linePosition + (Vector3.Dot(position - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
         }
 
         /// <summary>
@@ -541,94 +543,135 @@ namespace Zombie1111_uDestruction
         /// <param name="vertexIndexesToSplit"></param>
         /// <param name="originalMesh"></param>
         /// <returns></returns>
-        public static List<Mesh> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, Mesh orginalMesh, bool doBones)
+        public static List<Mesh> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, Mesh orginalMesh, bool doBones, FractureThis fT)
         {
-            //setup
             int[] tris = orginalMesh.triangles;
             Vector3[] verts = orginalMesh.vertices;
             Vector3[] nors = orginalMesh.normals;
             Vector2[] uvs = orginalMesh.uv;
-            BoneWeight[] bones = doBones == true ? orginalMesh.boneWeights : new BoneWeight[verts.Length];
+            BoneWeight[] bones = doBones ? orginalMesh.boneWeights : new BoneWeight[verts.Length];
+            Color[] cols = orginalMesh.colors;
 
-            List<Vector3> splitVerA = new List<Vector3>();
-            List<Vector3> splitNorA = new List<Vector3>();
-            List<Vector2> splitUvsA = new List<Vector2>();
-            List<int> splitTriA = new List<int>();
-            List<BoneWeight> splitBonA = new List<BoneWeight>();
+            // Verify mesh properties and handle mismatches if necessary
+            if (uvs.Length != verts.Length)
+            {
+                Debug.LogWarning("The uvs for the mesh " + orginalMesh.name + " may not be valid");
+                uvs = new Vector2[verts.Length];
+            }
 
-            List<Vector3> splitVerB = new List<Vector3>();
-            List<Vector3> splitNorB = new List<Vector3>();
-            List<Vector2> splitUvsB = new List<Vector2>();
-            List<int> splitTriB = new List<int>();
-            List<BoneWeight> splitBonB = new List<BoneWeight>();
+            if (nors.Length != verts.Length)
+            {
+                Debug.LogError("The mesh " + orginalMesh.name + " normal count does not match its vertex count");
+                return null;
+            }
 
-            //split faces/mesh
+            List<Vector3> splitVerA = new List<Vector3>(verts.Length);
+            List<Vector3> splitNorA = new List<Vector3>(nors.Length);
+            List<Vector2> splitUvsA = new List<Vector2>(uvs.Length);
+            List<int> splitTriA = new List<int>(tris.Length);
+            List<BoneWeight> splitBonA = new List<BoneWeight>(bones.Length);
+            List<Color> splitColsA = new List<Color>(cols.Length);
+
+            List<Vector3> splitVerB = new List<Vector3>(verts.Length);
+            List<Vector3> splitNorB = new List<Vector3>(nors.Length);
+            List<Vector2> splitUvsB = new List<Vector2>(uvs.Length);
+            List<int> splitTriB = new List<int>(tris.Length);
+            List<BoneWeight> splitBonB = new List<BoneWeight>(bones.Length);
+            List<Color> splitColsB = new List<Color>(cols.Length);
+
+            Dictionary<Vector3, int> vertexIndexMapA = new Dictionary<Vector3, int>();
+            Dictionary<Vector3, int> vertexIndexMapB = new Dictionary<Vector3, int>();
+
             for (int i = 0; i < tris.Length; i += 3)
             {
-                if (vertexIndexesToSplit.Contains(tris[i]) == true || vertexIndexesToSplit.Contains(tris[i + 1]) == true || vertexIndexesToSplit.Contains(tris[i + 2]) == true)
+                int indexA = tris[i];
+                int indexB = tris[i + 1];
+                int indexC = tris[i + 2];
+
+                bool splitA = vertexIndexesToSplit.Contains(indexA) || vertexIndexesToSplit.Contains(indexB) || vertexIndexesToSplit.Contains(indexC);
+
+                ProcessTriangle(indexA, indexB, indexC, splitA);
+            }
+
+            Mesh newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA);
+            Mesh newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB);
+
+            return new List<Mesh> { newMA, newMB };
+
+            void ProcessTriangle(int indexA, int indexB, int indexC, bool splitA)
+            {
+                int newIndexA = GetIndexOfVertex(indexA, splitA, vertexIndexMapA, verts, nors, uvs, cols, bones, splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA);
+                int newIndexB = GetIndexOfVertex(indexB, splitA, vertexIndexMapA, verts, nors, uvs, cols, bones, splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA);
+                int newIndexC = GetIndexOfVertex(indexC, splitA, vertexIndexMapA, verts, nors, uvs, cols, bones, splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA);
+
+                if (splitA)
                 {
-                    splitTriA.Add(GetIndexOfVertex(verts[tris[i]], nors[tris[i]], uvs[tris[i]], bones[tris[i]], true));
-                    splitTriA.Add(GetIndexOfVertex(verts[tris[i + 1]], nors[tris[i + 1]], uvs[tris[i + 1]], bones[tris[i + 1]], true));
-                    splitTriA.Add(GetIndexOfVertex(verts[tris[i + 2]], nors[tris[i + 2]], uvs[tris[i + 2]], bones[tris[i + 2]], true));
+                    splitTriA.Add(newIndexA);
+                    splitTriA.Add(newIndexB);
+                    splitTriA.Add(newIndexC);
                 }
                 else
                 {
-                    splitTriB.Add(GetIndexOfVertex(verts[tris[i]], nors[tris[i]], uvs[tris[i]], bones[tris[i]], false));
-                    splitTriB.Add(GetIndexOfVertex(verts[tris[i + 1]], nors[tris[i + 1]], uvs[tris[i + 1]], bones[tris[i + 1]], false));
-                    splitTriB.Add(GetIndexOfVertex(verts[tris[i + 2]], nors[tris[i + 2]], uvs[tris[i + 2]], bones[tris[i + 2]], false));
+                    splitTriB.Add(newIndexA);
+                    splitTriB.Add(newIndexB);
+                    splitTriB.Add(newIndexC);
                 }
             }
 
-            //return the new meshes
-            Mesh newMA = new Mesh();
-            newMA.vertices = splitVerA.ToArray();
-            newMA.normals = splitNorA.ToArray();
-            newMA.uv = splitUvsA.ToArray();
-            if (doBones == true) newMA.boneWeights = splitBonA.ToArray();
-            newMA.triangles = splitTriA.ToArray();
-
-            Mesh newMB = new Mesh();
-            newMB.vertices = splitVerB.ToArray();
-            newMB.normals = splitNorB.ToArray();
-            newMB.uv = splitUvsB.ToArray();
-            if (doBones == true) newMB.boneWeights = splitBonB.ToArray();
-            newMB.triangles = splitTriB.ToArray();
-
-            return new List<Mesh>() { newMA, newMB };
-
-
-            int GetIndexOfVertex(Vector3 vPos, Vector3 vNormal, Vector2 vUv, BoneWeight vBone, bool checkSplitA)
+            int GetIndexOfVertex(int index, bool splitA, Dictionary<Vector3, int> vertexIndexMap, Vector3[] vertices, Vector3[] normals, Vector2[] uvs, Color[] colors, BoneWeight[] boneWeights, List<Vector3> splitVertices, List<Vector3> splitNormals, List<Vector2> splitUVs, List<Color> splitColors, List<BoneWeight> splitBoneWeights)
             {
-                if (checkSplitA == true)
-                {
-                    for (int i = 0; i < splitVerA.Count; i += 1)
-                    {
-                        //if already contains index return it
-                        if (splitVerA[i] == vPos && splitNorA[i] == vNormal) return i;
-                    }
+                Vector3 vertex = vertices[index];
+                Vector3 normal = normals[index];
+                Vector2 uv = uvs[index];
+                Color color = colors[index];
+                BoneWeight boneWeight = boneWeights[index];
 
-                    //if not contain index, create new
-                    splitVerA.Add(vPos);
-                    splitNorA.Add(vNormal);
-                    splitUvsA.Add(vUv);
-                    if (doBones == true) splitBonA.Add(vBone);
-                    return splitVerA.Count - 1;
+                Dictionary<Vector3, int> vertexIndexMapTarget = splitA ? vertexIndexMapA : vertexIndexMapB;
+                List<Vector3> splitVerticesTarget = splitA ? splitVerA : splitVerB;
+                List<Vector3> splitNormalsTarget = splitA ? splitNorA : splitNorB;
+                List<Vector2> splitUVsTarget = splitA ? splitUvsA : splitUvsB;
+                List<Color> splitColorsTarget = splitA ? splitColsA : splitColsB;
+                List<BoneWeight> splitBoneWeightsTarget = splitA ? splitBonA : splitBonB;
+
+                if (vertexIndexMapTarget.TryGetValue(vertex, out int existingIndex))
+                {
+                    return existingIndex;
                 }
                 else
                 {
-                    for (int i = 0; i < splitVerB.Count; i += 1)
-                    {
-                        //if already contains index return it
-                        if (splitVerB[i] == vPos && splitNorB[i] == vNormal) return i;
-                    }
+                    int newIndex = splitVerticesTarget.Count;
+                    vertexIndexMapTarget[vertex] = newIndex;
 
-                    //if not contain index, create new
-                    splitVerB.Add(vPos);
-                    splitNorB.Add(vNormal);
-                    splitUvsB.Add(vUv);
-                    if (doBones == true) splitBonB.Add(vBone);
-                    return splitVerB.Count - 1;
+                    splitVerticesTarget.Add(vertex);
+                    splitNormalsTarget.Add(normal);
+                    splitUVsTarget.Add(uv);
+                    splitColorsTarget.Add(color);
+                    splitBoneWeightsTarget.Add(boneWeight);
+
+                    return newIndex;
                 }
+            }
+
+            Mesh CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles)
+            {
+                Mesh mesh = new Mesh
+                {
+                    vertices = vertices.ToArray(),
+                    normals = normals.ToArray(),
+                    uv = uvs.ToArray(),
+                    triangles = triangles.ToArray()
+                };
+
+                if (colors.Count > 0)
+                    mesh.colors = colors.ToArray();
+
+                if (boneWeights.Count > 0)
+                    mesh.boneWeights = boneWeights.ToArray();
+
+                mesh.RecalculateBounds();
+                mesh.RecalculateTangents();
+
+                return mesh;
             }
         }
 
@@ -639,34 +682,48 @@ namespace Zombie1111_uDestruction
         /// <param name="vertexIndex"></param>
         /// <param name="verDisTol">All vertics within this radius will count as the same vertex</param>
         /// <returns></returns>
-        public static HashSet<int> GetConnectedVertexIndexes(Mesh mesh, int vertexIndex, float verDisTol = 0.0001f)
+        public static HashSet<int> GetConnectedVertics(Mesh mesh, int vertexIndex, float verDisTol = 0.0001f)
         {
             //setup
-            HashSet<int> conV = new HashSet<int>();
+            HashSet<int> conV = new() { vertexIndex };
             Vector3[] vers = mesh.vertices;
             int[] tris = mesh.triangles;
-            List<int> trisToSearch = GetAllTrisAtPos(vers[vertexIndex]);
+            int trisL = tris.Length / 3;
+            List<int> trisToSearch = new();
+            HashSet<int> usedFaces = new();
+            GetAllTrisAtPos(vers[vertexIndex]);
 
             //get all connected
-            for (int i = 0; i < trisToSearch.Count; i += 1)
+            for (int i = 0; i < trisToSearch.Count; i++)
             {
-                if (conV.Add(tris[trisToSearch[i]]) == true) trisToSearch.AddRange(GetAllTrisAtPos(vers[tris[trisToSearch[i]]]));
-                if (conV.Add(tris[trisToSearch[i] + 1]) == true) trisToSearch.AddRange(GetAllTrisAtPos(vers[tris[trisToSearch[i] + 1]]));
-                if (conV.Add(tris[trisToSearch[i] + 2]) == true) trisToSearch.AddRange(GetAllTrisAtPos(vers[tris[trisToSearch[i] + 2]]));
+                if (conV.Add(tris[trisToSearch[i]]) == true) GetAllTrisAtPos(vers[tris[trisToSearch[i]]]);
+                if (conV.Add(tris[trisToSearch[i] + 1]) == true) GetAllTrisAtPos(vers[tris[trisToSearch[i] + 1]]);
+                if (conV.Add(tris[trisToSearch[i] + 2]) == true) GetAllTrisAtPos(vers[tris[trisToSearch[i] + 2]]);
             }
 
+            Debug.Log(trisToSearch.Count);
             return conV;
-
-            List<int> GetAllTrisAtPos(Vector3 pos)
+            
+            void GetAllTrisAtPos(Vector3 pos)
             {
-                List<int> trisAtPos = new List<int>();
-                for (int i = 0; i < tris.Length; i += 3)
+                //for (int i = 0; i < trisL; i++)
+                Parallel.For(0, trisL, i =>
                 {
-                    //if (Vector3.Distance(vers[tris[i]], pos) < verDisTol || Vector3.Distance(vers[tris[i + 1]], pos) < verDisTol || Vector3.Distance(vers[tris[i + 2]], pos) < verDisTol) trisAtPos.Add(i);
-                    if (Vector3.SqrMagnitude(vers[tris[i]] - pos) < verDisTol || Vector3.SqrMagnitude(vers[tris[i + 1]] - pos) < verDisTol || Vector3.SqrMagnitude(vers[tris[i + 2]] - pos) < verDisTol) trisAtPos.Add(i);
-                }
+                    int tI = i * 3;
 
-                return trisAtPos;
+                    //if (usedFaces.Contains(tI) == false)
+                    //{
+                        if ((vers[tris[tI]] - pos).sqrMagnitude < verDisTol
+                  || (vers[tris[tI + 1]] - pos).sqrMagnitude < verDisTol
+                  || (vers[tris[tI + 2]] - pos).sqrMagnitude < verDisTol)
+                        {
+                            lock (trisToSearch)
+                            {
+                                if (usedFaces.Add(tI) == true) trisToSearch.Add(tI);
+                            }
+                        }
+                    //}
+                });
             }
         }
 
@@ -713,6 +770,88 @@ namespace Zombie1111_uDestruction
             }
 
             return vAtPos;
+        }
+
+        /// <summary>
+        /// Adds all group ids that exists in the given color array to the groupIds hashset, does not include links
+        /// </summary>
+        public static void Gd_getIdsFromColors(Color[] colors, ref HashSet<List<float>> groupIds)
+        {
+            foreach (Color col in colors)
+            {
+                bool canAdd = true;
+
+                foreach (List<float> id in groupIds)
+                {
+                    if (Gd_isIdInColor(id, col) == true)
+                    {
+                        canAdd = false;
+                        break;
+                    }
+                }
+
+                if (canAdd == false) continue;
+
+                groupIds.Add(Gd_getIdFromColor(col));
+            }
+        }
+
+        /// <summary>
+        /// Returns the id from the color, does not include links, returns null if base id
+        /// </summary>
+        public static List<float> Gd_getIdFromColor(Color color)
+        {
+            if (color.r <= 0.5f) return null;
+            List<float> gIds = new()
+            {
+                color.r
+            };
+
+            if (color.g <= 0.5f) return gIds;
+            gIds.Add(color.g);
+
+            if (color.b <= 0.5f) return gIds;
+            gIds.Add(color.b);
+
+            if (color.a <= 0.5f) return gIds;
+            gIds.Add(color.a);
+
+            return gIds;
+        }
+
+        /// <summary>
+        /// Returns true if the given group id matches the id in the color, does not include links
+        /// </summary>
+        public static bool Gd_isIdInColor(List<float> id, Color color)
+        {
+            if (color.r <= 0.5f) return id == null;
+            if (id == null) return false;
+            if (id.Contains(color.r) == false) return false;
+
+            if (color.g <= 0.5f) return id.Count == 1;
+            if (id.Contains(color.g) == false) return false;
+
+            if (color.b <= 0.5f) return id.Count == 2;
+            if (id.Contains(color.b) == false) return false;
+
+            if (color.a <= 0.5f) return id.Count == 3;
+            return id.Count == 4 && id.Contains(color.a);
+        }
+
+        /// <summary>
+        /// Returns the index of all vertices that has the given id
+        /// </summary>
+        public static HashSet<int> Gd_getAllVerticesInId(Color[] verColors, List<float> id)
+        {
+            HashSet<int> verInId = new();
+            int verL = verColors.Length;
+
+            for (int i = 0; i < verL; i++)
+            {
+                if (Gd_isIdInColor(id, verColors[i]) == true) verInId.Add(i);
+            }
+
+            return verInId;
         }
 
         public static Mesh ConvertMeshWithMatrix(Mesh mesh, Matrix4x4 lTwMatrix)
@@ -1235,6 +1374,28 @@ namespace Zombie1111_uDestruction
             if (vecA.x < vecB.x) vecA.x = vecB.x;
             if (vecA.y < vecB.y) vecA.y = vecB.y;
             if (vecA.z < vecB.z) vecA.z = vecB.z;
+        }
+
+        public class HashSetComparer : IComparer<List<float>>
+        {
+            public int Compare(List<float> x, List<float> y)
+            {
+                if (x == null && y == null)
+                {
+                    return 0; // Both are null, consider them equal
+                }
+                else if (x == null)
+                {
+                    return -1; // x is null, consider it less than y
+                }
+                else if (y == null)
+                {
+                    return 1; // y is null, consider it greater than x
+                }
+
+                // Compare the total values
+                return x.Sum().CompareTo(y.Sum());
+            }
         }
 
 #if UNITY_EDITOR

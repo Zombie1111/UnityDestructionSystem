@@ -16,7 +16,9 @@ using UnityEditor.SceneManagement;
 using UnityEngine.Jobs;
 using Unity.Collections;
 using Unity.Jobs;
-using JetBrains.Annotations;
+using System.Diagnostics;
+using UnityEngine.Rendering;
+using UnityEditor.Rendering;
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -148,7 +150,7 @@ namespace Zombie1111_uDestruction
         [SerializeField] private int fractureCount = 15;
         [SerializeField] private bool dynamicFractureCount = true;
         [Tooltip("If < 1.0f, controls how random the angle of the cuts are. If >= 1.0f, voronoi is used")]
-        [SerializeField] [Range(0.0f, 1.0f)] private float randomness = 1.0f;
+        [SerializeField][Range(0.0f, 1.0f)] private float randomness = 1.0f;
         [SerializeField] private int seed = -1;
         [SerializeField] private byte maxFractureAttempts = 20;
         public GenerationQuality generationQuality = GenerationQuality.normal;
@@ -195,6 +197,13 @@ namespace Zombie1111_uDestruction
         [SerializeField] private PhysicMaterial physicsMat = null;
         public List<FracVolume> resistanceMultipliers = new();
 
+        [Space(10)]
+        [Header("Advanced")]
+        [SerializeField] private bool useGroupIds = false;
+#if UNITY_EDITOR
+        [SerializeField] private int visualizedGroupId = -1;
+#endif
+
         [System.Serializable]
         public class FracVolume
         {
@@ -211,7 +220,8 @@ namespace Zombie1111_uDestruction
 #if UNITY_EDITOR
         [Space(10)]
         [Header("Debug")]
-        [SerializeField][Tooltip("Only works at runtime or directly after fracturing")] private DebugMode debugMode = DebugMode.none;
+        [SerializeField][Tooltip("Only works at runtime")] private DebugMode debugMode = DebugMode.none;
+        private Stopwatch debugDesLog = new();
 
         private enum DebugMode
         {
@@ -263,6 +273,38 @@ namespace Zombie1111_uDestruction
 
         private void OnDrawGizmosSelected()
         {
+            //draw selected group id
+            if (visualizedGroupId < 0 || useGroupIds == false || fracRend != null) visualizedGroupId = -1;
+            else
+            {
+                List<MeshData> fracMeshes = Gen_getMeshesToFracture(gameObject, true, worldScale * 0.0001f);
+                visualizedGroupId = Mathf.Min(visualizedGroupId, md_verGroupIds.Length - 1);
+                if (fracMeshes == null || visualizedGroupId < 0) goto skipDrawGroups;
+
+                Color[] verCols;
+                Vector3[] vers;
+                List<float> gId = md_verGroupIds[visualizedGroupId];
+                Vector3 drawBoxSize = 0.05f * worldScale * Vector3.one;
+                Gizmos.color = Color.yellow;
+
+                for (int i = 0; i < fracMeshes.Count; i++)
+                {
+                    verCols = fracMeshes[i].mesh.colors;
+                    vers = fracMeshes[i].mesh.vertices;
+                    
+                    for (int vI = vers.Length - 1; vI >= 0; vI--)
+                    {
+                        if (FractureHelperFunc.Gd_isIdInColor(gId, verCols[vI]) == true)
+                        {
+                            Gizmos.DrawCube(vers[vI], drawBoxSize);
+                            continue;
+                        }
+                    }
+                }
+            }
+
+        skipDrawGroups:
+
             //draw resistance multiplier bounds
             for (int i = 0; i < resistanceMultipliers.Count; i += 1)
             {
@@ -733,7 +775,7 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public Transform trans;
         }
-        
+
         /// <summary>
         /// Verifies that a valid globalHandler exists and assigns it, returns false if no valid globalHandler exists
         /// </summary>
@@ -857,8 +899,9 @@ namespace Zombie1111_uDestruction
             float worldScaleDis = worldScale * 0.0001f;
             tempOgRealSkin = new();
 
-            List<MeshData> meshesToFracture = Gen_getMeshesToFracture(objectToFracture, worldScaleDis);
+            List<MeshData> meshesToFracture = Gen_getMeshesToFracture(objectToFracture, false, worldScaleDis);
             if (meshesToFracture == null) return false;
+
 
             //Fracture the meshes into pieces
             tempPartOgMeshId = new();
@@ -1051,7 +1094,6 @@ namespace Zombie1111_uDestruction
             Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshes, ref fParts);
 
             Vector3[] vertics = comMesh.vertices;
-            verticsLinkedThreaded = new IntList[vertics.Length];
             float worldDis = worldScale * 0.01f;//0.01??
 
             //get all vertics ogMesh id
@@ -1065,6 +1107,8 @@ namespace Zombie1111_uDestruction
             }
 
             //get all vertics at the ~same position using the same ogMesh
+            verticsLinkedThreaded = new IntList[vertics.Length];
+
             Parallel.For(0, verticsLinkedThreaded.Length, i =>
             {
                 List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(vertics, tempFracVerOgMeshId, vertics[i], tempFracVerOgMeshId[i], worldDis, -1);
@@ -1311,6 +1355,11 @@ namespace Zombie1111_uDestruction
             /// The mesh localToWorld matrix
             /// </summary>
             public Matrix4x4 lTwMatrix;
+
+            /// <summary>
+            /// The mesh group id, does not include links
+            /// </summary>
+            public List<float> mGroupId;
         }
 
         private bool mustConfirmHighCount = true;
@@ -1362,6 +1411,8 @@ namespace Zombie1111_uDestruction
                     newMeshes.Add(meshToFrac);
                     return;
                 }
+
+                Debug.Log("Frac one " + chunkCount);
 
                 //setup nvBlast
                 NvBlastExtUnity.setSeed(seed);
@@ -1458,9 +1509,9 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns the meshes to be used in fracturing. All meshes are in world space
         /// </summary>
-        /// <param name="obj"></param>
+        /// <param name="obj">The object to the get meshes from</param>
         /// <returns></returns>
-        private List<MeshData> Gen_getMeshesToFracture(GameObject obj, float worldScaleDis = 0.0001f)
+        private List<MeshData> Gen_getMeshesToFracture(GameObject obj, bool getRawOnly = false, float worldScaleDis = 0.0001f)
         {
             //Get all the meshes to fracture
             bool hasSkinned = false;
@@ -1496,13 +1547,14 @@ namespace Zombie1111_uDestruction
                     }
 
                     //get defualt parent from rootbone
-                    Transform rootBoneTrans = skinnedR.rootBone;
-                    while (rootBoneTrans != null && rootBoneTrans.parent != transform)
-                    {
-                        rootBoneTrans = rootBoneTrans.parent;
-                    }
-
-                    if (rootBoneTrans == null || rootBoneTrans.parent != transform)
+                    //Transform rootBoneTrans = skinnedR.rootBone;
+                    //while (rootBoneTrans != null && rootBoneTrans.parent != transform)
+                    //{
+                    //    rootBoneTrans = rootBoneTrans.parent;
+                    //}
+                    //
+                    //if (rootBoneTrans == null || rootBoneTrans.parent != transform)
+                    if (FractureHelperFunc.GetIfTransformIsAnyParent(transform, skinnedR.rootBone) == false)
                     {
                         Debug.LogError(skinnedR.transform.name + " (skinnedRend) rootBone must be a child of " + transform.name);
                         return null;
@@ -1514,10 +1566,13 @@ namespace Zombie1111_uDestruction
                     }
 
                     //save orginal real skinnedmesh data to use it on setup later
-                    tempOgRealSkin.ogBones = skinnedR.bones;
-                    tempOgRealSkin.ogRootBone = skinnedR.transform;
-                    tempOgRealSkin.ogMesh = Instantiate(skinnedR.sharedMesh);
-                    tempOgRealSkin.ogCompData = new() { new() { comp = skinnedR.rootBone.parent } };
+                    if (getRawOnly == false)
+                    {
+                        tempOgRealSkin.ogBones = skinnedR.bones;
+                        tempOgRealSkin.ogRootBone = skinnedR.transform;
+                        tempOgRealSkin.ogMesh = Instantiate(skinnedR.sharedMesh);
+                        tempOgRealSkin.ogCompData = new() { new() { comp = skinnedR.rootBone.parent } };
+                    }
                 }
                 else if (rend.TryGetComponent(out MeshFilter meshF) == true)
                 {
@@ -1545,28 +1600,48 @@ namespace Zombie1111_uDestruction
             }
 
             //convert all meshes to world space
-            for (int i = 0; i < mDatas.Count; i += 1)
+            HashSet<List<float>> newGroupIds = new();
+            for (int i = 0; i < mDatas.Count; i++)
             {
                 mDatas[i].mesh = FractureHelperFunc.ConvertMeshWithMatrix(mDatas[i].mesh, mDatas[i].lTwMatrix);
+                FractureHelperFunc.Gd_getIdsFromColors(mDatas[i].mesh.colors, ref newGroupIds);
             }
 
+            md_verGroupIds = newGroupIds.ToArray();
+            //Array.Sort(md_verGroupIds);
+            Array.Sort(md_verGroupIds, new FractureHelperFunc.HashSetComparer());
+
+            if (getRawOnly == true) return mDatas;
+
             //split meshes into chunks
-            List<Mesh> splittedMeshes;
-            for (int i = mDatas.Count - 1; i >= 0; i -= 1)
+            List<MeshWithGroup> splittedMeshes;
+            for (int i = mDatas.Count - 1; i >= 0; i--)
             {
                 splittedMeshes = Gen_splitMeshIntoChunks(mDatas[i].mesh, hasSkinned, worldScaleDis);
+                if (splittedMeshes == null) return null;
 
                 for (int ii = 0; ii < splittedMeshes.Count; ii += 1)
                 {
-                    mDatas.Add(new() { mesh = splittedMeshes[ii], lTwMatrix = mDatas[i].lTwMatrix, rend = mDatas[i].rend });
+                    mDatas.Add(new() {
+                        mesh = splittedMeshes[ii].mesh,
+                        lTwMatrix = mDatas[i].lTwMatrix,
+                        rend = mDatas[i].rend,
+                        mGroupId = splittedMeshes[ii].mGroupId });
                 }
 
                 mDatas.RemoveAt(i);
             }
 
+            Debug.Log(mDatas.Count);
             //return result
             isRealSkinnedM = hasSkinned;
             return mDatas;
+        }
+
+        private class MeshWithGroup
+        {
+            public Mesh mesh;
+            public List<float> mGroupId;
         }
 
         /// <summary>
@@ -1574,17 +1649,34 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="meshToSplit"></param>
         /// <returns></returns>
-        private static List<Mesh> Gen_splitMeshIntoChunks(Mesh meshToSplit, bool doBones, float worldScaleDis = 0.0001f)
+        private List<MeshWithGroup> Gen_splitMeshIntoChunks(Mesh meshToSplit, bool doBones, float worldScaleDis = 0.0001f)
         {
             int maxLoops = 200;
-            List<Mesh> splittedMeshes = new List<Mesh>();
+            List<MeshWithGroup> splittedMeshes = new();
             List<Mesh> tempM;
+            Color[] verCols;
+            List<float> tempG;
+
             while (maxLoops > 0)
             {
-                maxLoops -= 1;
+                maxLoops--;
                 if (meshToSplit.vertexCount < 4) break;
-                tempM = FractureHelperFunc.SplitMeshInTwo(FractureHelperFunc.GetConnectedVertexIndexes(meshToSplit, 0, worldScaleDis), meshToSplit, doBones);
-                splittedMeshes.Add(tempM[0]);
+
+                verCols = meshToSplit.colors;
+                if (useGroupIds == false || verCols.Length != meshToSplit.vertexCount)
+                {
+                    splittedMeshes.Add(new() { mesh = meshToSplit, mGroupId = null});
+                    return splittedMeshes;
+                }
+
+                //tempM = FractureHelperFunc.SplitMeshInTwo(FractureHelperFunc.GetConnectedVertexIndexes(meshToSplit, 0, this, worldScaleDis), meshToSplit, doBones, this);
+                tempG = FractureHelperFunc.Gd_getIdFromColor(verCols[0]);
+                tempM = FractureHelperFunc.SplitMeshInTwo(
+                    FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG), meshToSplit, doBones, this);
+
+                if (tempM == null) return null;
+
+                if (tempM[0].vertexCount >= 4) splittedMeshes.Add(new() { mesh = tempM[0], mGroupId = tempG });
                 meshToSplit = tempM[1];
             }
 
@@ -1881,11 +1973,11 @@ namespace Zombie1111_uDestruction
             }
 
             //dispose all nativeArray
-            j_boneTrans.Dispose();
-            j_fracBonesLToW.Dispose();
-            j_fracBonesPos.Dispose();
-            j_hasMoved.Dispose();
-            allFracBonesLToW.Dispose();
+            if (j_boneTrans.isCreated == true) j_boneTrans.Dispose();
+            if (j_fracBonesLToW.IsCreated == true) j_fracBonesLToW.Dispose();
+            if (j_fracBonesPos.IsCreated == true) j_fracBonesPos.Dispose();
+            if (j_hasMoved.IsCreated == true) j_hasMoved.Dispose();
+            if (allFracBonesLToW.IsCreated == true) allFracBonesLToW.Dispose();
         }
 
         private void Awake()
@@ -2019,7 +2111,8 @@ namespace Zombie1111_uDestruction
             }
 
             //Start update fracRend bones data job
-            BoneHandleJob_run();
+            //BoneHandleJob_run();
+            BoneHandleJob_complete();
 
             //sync part brokenness
             if (damBrokenessNeedsSync == true)
@@ -2042,8 +2135,6 @@ namespace Zombie1111_uDestruction
 
             if (des_colLocalVers.Count > 0)
             {
-                Debug_toggleTimer();
-
                 //update a part collider
                 using var enumerator = des_colLocalVers.Keys.GetEnumerator();
                 if (enumerator.MoveNext())
@@ -2062,8 +2153,6 @@ namespace Zombie1111_uDestruction
 
                     des_colLocalVers.Remove(partI);
                 }
-
-                Debug_toggleTimer();
             }
 
             //Make sure late fixedUpdate runs
@@ -2076,7 +2165,8 @@ namespace Zombie1111_uDestruction
 
             //This runs after collsionModifyEvent
             //Finish update fracRend bones data job
-            BoneHandleJob_complete();
+            //BoneHandleJob_complete();
+            BoneHandleJob_run();
 
             //compute destruction and deformation
             if (calcDesThread_isActive == false)
@@ -2165,6 +2255,8 @@ namespace Zombie1111_uDestruction
 
         private void BoneHandleJob_run()
         {
+            if (j_active == true) return;
+
             //Run the job
             j_job = new HandleBoneTransJob()
             {
@@ -3100,7 +3192,7 @@ namespace Zombie1111_uDestruction
                     mDef_linkWVer[lI] += des_linkForceApply[lI] * vertexDisplacementStenght * impDir;
                     tempCol = mDef_verColUse[vZero];
                     tempCol.a = des_linkForceApplied[lI];
-                    
+
                     foreach (int vI in verticsLinkedThreaded[lI].intList)
                     {
                         mDef_verColUse[vI] = tempCol;
@@ -3168,9 +3260,9 @@ namespace Zombie1111_uDestruction
                         //closePos = iPoint.impPos;
                     }
 
-                    //return minFalloffDistance > closeDis ? minFalloffDistance : closeDis;
-                    closeDis -= minFalloffDistance;
-                    return closeDis < 0.0f ? 0.0f : closeDis;
+                    return minFalloffDistance > closeDis ? minFalloffDistance : closeDis;
+                    //closeDis -= minFalloffDistance;
+                    //return closeDis < 0.0f ? 0.0f : closeDis;
                 }
             }
 
@@ -3529,10 +3621,11 @@ namespace Zombie1111_uDestruction
 
         #region HelperFunctions
 
+#if UNITY_EDITOR
         //debug stopwatch
         private System.Diagnostics.Stopwatch stopwatch = new();
 
-        private void Debug_toggleTimer(string note = "")
+        public void Debug_toggleTimer(string note = "")
         {
             if (stopwatch.IsRunning == false)
             {
@@ -3544,6 +3637,7 @@ namespace Zombie1111_uDestruction
                 Debug.Log(note + "time: " + stopwatch.Elapsed.TotalMilliseconds + "ms");
             }
         }
+#endif
 
         /// <summary>
         /// Returns true if the given collider count as a self collider (Depends on selfCollisionCanDamage)
@@ -3658,6 +3752,13 @@ namespace Zombie1111_uDestruction
 
             return 0;
         }
+
+        /// <summary>
+        /// Contains all group ids that exists in the meshes to fracture, does not include links
+        /// </summary>
+        private List<float>[] md_verGroupIds = new List<float>[0];
+
+        
 
         #endregion HelperFunctions
 
