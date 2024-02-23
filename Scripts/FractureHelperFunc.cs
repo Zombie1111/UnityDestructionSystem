@@ -351,7 +351,7 @@ namespace Zombie1111_uDestruction
                 //if (meshVerIds[meshTris[i]] != id) continue;
 
                 currentD = 0.0f;
-                for (int ii = 0; ii < poss.Length; ii += 1) currentD += (poss[ii] - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], poss[ii])).sqrMagnitude;
+                for (int ii = 0; ii < poss.Length; ii++) currentD += (poss[ii] - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], poss[ii])).sqrMagnitude;
 
                 if (currentD < bestD)
                 {
@@ -543,12 +543,25 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         public static List<Mesh> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, Mesh orginalMesh, bool doBones, FractureThis fT)
         {
+            //get ogMesh tris, vers....
             int[] tris = orginalMesh.triangles;
             Vector3[] verts = orginalMesh.vertices;
             Vector3[] nors = orginalMesh.normals;
             Vector2[] uvs = orginalMesh.uv;
             BoneWeight[] bones = doBones ? orginalMesh.boneWeights : new BoneWeight[verts.Length];
             Color[] cols = orginalMesh.colors;
+
+            //get what submesh each triangle has
+            int otL = tris.Length;
+            int[] ogTrisSubMeshI = new int[otL];
+
+            for (int i = 0; i < orginalMesh.subMeshCount; i++)
+            {
+                foreach (int tI in orginalMesh.GetTriangles(i))
+                {
+                    ogTrisSubMeshI[tI] = i;
+                }
+            }
 
             // Verify mesh properties and handle mismatches if necessary
             if (uvs.Length != verts.Length)
@@ -563,66 +576,72 @@ namespace Zombie1111_uDestruction
                 return null;
             }
 
+            //create lists to assign the splitted mesh data to
             List<Vector3> splitVerA = new List<Vector3>(verts.Length);
             List<Vector3> splitNorA = new List<Vector3>(nors.Length);
             List<Vector2> splitUvsA = new List<Vector2>(uvs.Length);
-            List<int> splitTriA = new List<int>(tris.Length);
+            List<int> splitTriA = new List<int>(otL);
             List<BoneWeight> splitBonA = new List<BoneWeight>(bones.Length);
             List<Color> splitColsA = new List<Color>(cols.Length);
+            List<int> splitLinkA = new();
 
             List<Vector3> splitVerB = new List<Vector3>(verts.Length);
             List<Vector3> splitNorB = new List<Vector3>(nors.Length);
             List<Vector2> splitUvsB = new List<Vector2>(uvs.Length);
-            List<int> splitTriB = new List<int>(tris.Length);
+            List<int> splitTriB = new List<int>(otL);
             List<BoneWeight> splitBonB = new List<BoneWeight>(bones.Length);
             List<Color> splitColsB = new List<Color>(cols.Length);
+            List<int> splitLinkB = new();
 
             Dictionary<Vector3, int> vertexIndexMapA = new Dictionary<Vector3, int>();
             Dictionary<Vector3, int> vertexIndexMapB = new Dictionary<Vector3, int>();
 
+            //split the mesh
             for (int i = 0; i < tris.Length; i += 3)
             {
-                int indexA = tris[i];
-                int indexB = tris[i + 1];
-                int indexC = tris[i + 2];
+                int vIndexA = tris[i];
+                int vIndexB = tris[i + 1];
+                int vIndexC = tris[i + 2];
 
-                bool splitA = vertexIndexesToSplit.Contains(indexA) || vertexIndexesToSplit.Contains(indexB) || vertexIndexesToSplit.Contains(indexC);
+                bool splitA = vertexIndexesToSplit.Contains(vIndexA) || vertexIndexesToSplit.Contains(vIndexB) || vertexIndexesToSplit.Contains(vIndexC);
 
-                ProcessTriangle(indexA, indexB, indexC, splitA);
+                ProcessTriangle(vIndexA, vIndexB, vIndexC, splitA, i);
             }
 
-            Mesh newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA);
-            Mesh newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB);
+            Mesh newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA, splitLinkA);
+            Mesh newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB, splitLinkB);
 
             return new List<Mesh> { newMA, newMB };
 
-            void ProcessTriangle(int indexA, int indexB, int indexC, bool splitA)
+            void ProcessTriangle(int vIndexA, int vIndexB, int vIndexC, bool splitA, int ogTrisI)
             {
-                int newIndexA = GetIndexOfVertex(indexA, splitA, vertexIndexMapA, verts, nors, uvs, cols, bones, splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA);
-                int newIndexB = GetIndexOfVertex(indexB, splitA, vertexIndexMapA, verts, nors, uvs, cols, bones, splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA);
-                int newIndexC = GetIndexOfVertex(indexC, splitA, vertexIndexMapA, verts, nors, uvs, cols, bones, splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA);
+                int newIndexA = GetIndexOfVertex(vIndexA, splitA, verts, nors, uvs, cols, bones);
+                int newIndexB = GetIndexOfVertex(vIndexB, splitA, verts, nors, uvs, cols, bones);
+                int newIndexC = GetIndexOfVertex(vIndexC, splitA, verts, nors, uvs, cols, bones);
 
                 if (splitA)
                 {
                     splitTriA.Add(newIndexA);
                     splitTriA.Add(newIndexB);
                     splitTriA.Add(newIndexC);
+                    splitLinkA.Add(ogTrisI);
                 }
                 else
                 {
                     splitTriB.Add(newIndexA);
                     splitTriB.Add(newIndexB);
                     splitTriB.Add(newIndexC);
+                    splitLinkB.Add(ogTrisI);
                 }
             }
 
-            int GetIndexOfVertex(int index, bool splitA, Dictionary<Vector3, int> vertexIndexMap, Vector3[] vertices, Vector3[] normals, Vector2[] uvs, Color[] colors, BoneWeight[] boneWeights, List<Vector3> splitVertices, List<Vector3> splitNormals, List<Vector2> splitUVs, List<Color> splitColors, List<BoneWeight> splitBoneWeights)
+            int GetIndexOfVertex(int vIndex, bool splitA, Vector3[] vertices, Vector3[] normals, Vector2[] uvs, Color[] colors, BoneWeight[] boneWeights)
             {
-                Vector3 vertex = vertices[index];
-                Vector3 normal = normals[index];
-                Vector2 uv = uvs[index];
-                Color color = colors[index];
-                BoneWeight boneWeight = boneWeights[index];
+                Vector3 vertex = vertices[vIndex];
+                Vector3 normal = normals[vIndex];
+                Vector2 uv = uvs[vIndex];
+                Color color = colors[vIndex];
+                BoneWeight boneWeight = boneWeights[vIndex];
 
                 Dictionary<Vector3, int> vertexIndexMapTarget = splitA ? vertexIndexMapA : vertexIndexMapB;
                 List<Vector3> splitVerticesTarget = splitA ? splitVerA : splitVerB;
@@ -650,16 +669,16 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            Mesh CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles)
+            Mesh CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> ogTrisI)
             {
-                Mesh mesh = new Mesh
+                Mesh mesh = new()
                 {
                     vertices = vertices.ToArray(),
                     normals = normals.ToArray(),
                     uv = uvs.ToArray(),
                     triangles = triangles.ToArray()
                 };
-
+                
                 if (colors.Count > 0)
                     mesh.colors = colors.ToArray();
 
@@ -755,13 +774,13 @@ namespace Zombie1111_uDestruction
         /// <param name="vIndexToIgnore"></param>
         /// <param name="verticsIds">Must have the same lenght as vertics</param>
         /// <returns></returns>
-        public static List<int> GetAllVertexIndexesAtPos_id(Vector3[] vertics, int[] verticsIds, Vector3 pos, int id, float verDisTol = 0.0001f, int vIndexToIgnore = -1)
+        public static List<int> GetAllVertexIndexesAtPos_id(Vector3[] vertics, int[] verticsIds, Vector3 pos, int id, float verDisTol = 0.0001f)
         {
             List<int> vAtPos = new();
 
             for (int i = 0; i < vertics.Length; i += 1)
             {
-                if ((vertics[i] - pos).magnitude < verDisTol && i != vIndexToIgnore && verticsIds[i] == id)
+                if ((vertics[i] - pos).magnitude < verDisTol && verticsIds[i] == id)
                 {
                     vAtPos.Add(i);
                 }

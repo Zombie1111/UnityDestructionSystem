@@ -870,17 +870,20 @@ namespace Zombie1111_uDestruction
             }
 
             //setup fracture renderer, setup renderer
-            Gen_setupRenderer(partMeshesW, meshesToFracW, transform, matInside_defualt, matOutside_defualt);
-            Gen_loadAndMaybeSaveOgData(false);
-            return false; //debug remove later
+            Gen_setupRenderer(partMeshesW, meshesToFracW, transform, matInside_defualt, matOutside_defualt, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer);
+            //Gen_loadAndMaybeSaveOgData(false);
+            //return false; //debug remove later
 
             //setup more advanced part data
             Gen_setupPartStructure(partMeshesW);
 
+            //setup fracture renderer materials
+            Gen_setupRendererMaterials(rVersOgMeshI, rVersBestOgMeshVer);
+
             //setup real skinned mesh
             if (isRealSkinnedM == true)
             {
-                Gen_setupSkinnedMesh(tempOgRealSkin.ogMesh, tempOgRealSkin.ogBones, tempOgRealSkin.ogRootBone.localToWorldMatrix);
+                Gen_setupSkinnedMesh(tempOgRealSkin.ogMesh, tempOgRealSkin.ogBones, tempOgRealSkin.ogRootBone.localToWorldMatrix, rVersOgMeshI, rVersBestOgMeshVer, meshesToFracW);
             }
 
             tempOgRealSkin = null;
@@ -1064,7 +1067,7 @@ namespace Zombie1111_uDestruction
         /// <param name="rendHolder"></param>
         /// <param name="matInside"></param>
         /// <param name="matOutside"></param>
-        private void Gen_setupRenderer(List<MeshWG> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, Material matInside, Material matOutside)
+        private void Gen_setupRenderer(List<MeshWG> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, Material matInside, Material matOutside, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer)
         {
             //combine meshes and set allparts rendVertexIndexes
             //Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshesW, ref fParts);
@@ -1082,13 +1085,15 @@ namespace Zombie1111_uDestruction
                     cVerOgMeshI[vI] = partMeshesW[i].mGroupSourceI;
                 }
             }
-            
+
+            rVersOgMeshI = cVerOgMeshI;
+
             //get all vertics that share the ~same position and has the same ogMesh
             verticsLinkedThreaded = new IntList[cVers.Length];
             
             Parallel.For(0, verticsLinkedThreaded.Length, i =>
             {
-                List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(cVers, cVerOgMeshI, cVers[i], cVerOgMeshI[i], worldDis, -1);
+                List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(cVers, cVerOgMeshI, cVers[i], cVerOgMeshI[i], worldDis);
             
                 lock (verticsLinkedThreaded)
                 {
@@ -1104,6 +1109,8 @@ namespace Zombie1111_uDestruction
                 oTriss[i] = sourceMeshesW[i].mesh.triangles;
                 oVerss[i] = sourceMeshesW[i].mesh.vertices;
             }
+
+            Debug_toggleTimer();
 
             //get the most similar og triangel for every triangel on the comMesh
             int[] cTris = comMesh.triangles;
@@ -1122,10 +1129,89 @@ namespace Zombie1111_uDestruction
                     worldDis);
             });
 
+            Debug_toggleTimer();
+
             //note for myself, next task is to get the most similar og vertex for every vertex on the comMesh.
             //So we can use that for real boneWeights and to get what parts can be neighbours. Also to get submeshes for materials
             //We already know the most similar tris (Not fully tested tho)
 
+            Debug_toggleTimer();
+
+            int cvL = cVers.Length;
+            int[] closeOVer = Enumerable.Repeat(-1, cvL).ToArray();
+
+            Parallel.For(0, cvL, i =>
+            {
+                if (closeOVer[i] == -1)
+                {
+                    //get all tris that uses these vers
+                    HashSet<int> vPoss = verticsLinkedThreaded[i].intList.ToHashSet();
+                    lock (closeOVer)
+                    {
+                        foreach (int vI in vPoss)
+                        {
+                            closeOVer[vI] = -2;
+                        }
+                    }
+
+                    Dictionary<int, int> simTriss = new();
+                    int tI;
+
+                    for (int ii = 0; ii < ctL; ii++)
+                    {
+                        tI = ii * 3;
+                        if (vPoss.Contains(cTris[tI]) == false && vPoss.Contains(cTris[tI + 1]) == false && vPoss.Contains(cTris[tI + 2]) == false) continue;
+
+                        if (simTriss.ContainsKey(closeOTris[ii]) == true) simTriss[closeOTris[ii]] += 1;
+                        else simTriss[closeOTris[ii]] = 1;
+
+                        //break;//better performance, but worse quality??
+                    }
+
+                    if (simTriss.Count == 0)
+                    {
+                        //if simTriss somehow so 0, reset closeVer
+                        if (closeOVer[i] == -2)
+                        {
+                            lock (closeOVer)
+                            {
+                                foreach (int vI in vPoss)
+                                {
+                                    closeOVer[vI] = -1;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        //get the best ver for every ver in con
+                        int oI = cVerOgMeshI[i];
+                        tI = simTriss.Aggregate((x, y) => x.Value > y.Value ? x : y).Key;
+
+                        int bestVi = FractureHelperFunc.GetClosestPointInArray(
+                            new Vector3[3] { oVerss[oI][oTriss[oI][tI]], oVerss[oI][oTriss[oI][tI + 1]], oVerss[oI][oTriss[oI][tI + 2]] },
+                            cVers[i],
+                            worldDis);
+
+                        bestVi = oTriss[oI][tI + bestVi];
+
+                        //write the best ver to the array for all vers in con at this pos
+                        Debug.DrawLine(cVers[i], oVerss[oI][bestVi], Color.magenta ,10.0f);
+
+                        lock (closeOVer)
+                        {
+                            foreach (int vI in vPoss)
+                            {
+                                closeOVer[vI] = bestVi;
+                            }
+                        }
+                    }
+                }
+            });
+
+            Debug_toggleTimer();
+
+            rVersBestOgMeshVer = closeOVer;
             closeOTris.Dispose();
 
             //convert mesh to renderer local space
@@ -1145,9 +1231,6 @@ namespace Zombie1111_uDestruction
             comMesh.boneWeights = boneW;
             comMesh.bindposes = allParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
 
-            //setup vertex colors
-            if (doVertexColors == true) comMesh.colors = Enumerable.Repeat(new Color(1.0f, 1.0f, 1.0f, 0.0f), comMesh.vertexCount).ToArray();
-
             //set renderer
             comMesh.OptimizeIndexBuffers(); //should be safe to call since vertics order does not change
             SkinnedMeshRenderer sRend = rendHolder.GetOrAddComponent<SkinnedMeshRenderer>();
@@ -1166,6 +1249,14 @@ namespace Zombie1111_uDestruction
                     verticsPartThreaded[vI] = i;
                 }
             }
+        }
+
+        private void Gen_setupRendererMaterials(int[] rVersOgMeshI, int[] rVersBestOgMeshVer)
+        {
+            //set vertex colors
+            if (doVertexColors == true) fracRend.sharedMesh.colors = Enumerable.Repeat(new Color(1.0f, 1.0f, 1.0f, 0.0f), fracRend.sharedMesh.vertexCount).ToArray();
+
+            //get materials to use
         }
 
         /// <summary>
@@ -1555,7 +1646,13 @@ namespace Zombie1111_uDestruction
                     }
 
                     SkinnedMeshRenderer skinnedR = (SkinnedMeshRenderer)rend;
-                    newMData.mesh = Instantiate(skinnedR.sharedMesh);
+                    if (getRawOnly == false) newMData.mesh = Instantiate(skinnedR.sharedMesh);
+                    else
+                    {
+                        newMData.mesh = new();
+                        skinnedR.BakeMesh(newMData.mesh, true);
+                    }
+
                     hasSkinned = true;
                     Vector3 rScale = skinnedR.transform.lossyScale;
 
@@ -1605,8 +1702,8 @@ namespace Zombie1111_uDestruction
 
                 if (FractureHelperFunc.IsMeshValid(newMData.mesh, worldScaleDis) == false) continue; //continue if mesh is invalid
 
-                newMData.rend = rend;
                 newMData.lTwMatrix = rend.transform.localToWorldMatrix;
+                newMData.rend = rend;
                 mDatas.Add(newMData);
             }
 
@@ -1693,7 +1790,6 @@ namespace Zombie1111_uDestruction
                     FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG), meshToSplit, doBones, this);
 
                 if (tempM == null) return null;
-
                 if (tempM[0].vertexCount >= 4) splittedMeshes.Add(new() { mesh = tempM[0], mGroupId = tempG });
                 meshToSplit = tempM[1];
             }
@@ -1725,7 +1821,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Only called if real skinned mesh to copy its animated bones to fractured mesh
         /// </summary>
-        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW)
+        private void Gen_setupSkinnedMesh(Mesh skinMesh, Transform[] skinBones, Matrix4x4 skinLtW, int[] rVersOgMeshI, int[] rVersBestOgMeshVer, List<MeshData> sourceMeshesW)
         {
             float worldDis = worldScale * 0.0001f;
 
@@ -1741,39 +1837,34 @@ namespace Zombie1111_uDestruction
                 newMatrixs.Add(skinMesh.bindposes[i]);
             }
 
-            //set boneWeights
-            skinMesh = FractureHelperFunc.ConvertMeshWithMatrix(skinMesh, skinLtW);
-            FractureHelperFunc.Debug_drawMesh(skinMesh, false, 40.0f);
-
-            BoneWeight[] skinBoneWe = skinMesh.boneWeights.ToArray();
-            Vector3[] skinWVer = skinMesh.vertices;
-            int[] skinTris = skinMesh.triangles;
-            int[] fracTris = fracRend.sharedMesh.triangles;
+            //get source mesh bone weights and offset bone indexes
             boneWe_broken = fracRend.sharedMesh.boneWeights.ToArray();
             BoneWeight[] newBoneWe = new BoneWeight[boneWe_broken.Length];
             Vector3[] fracWVer = FractureHelperFunc.ConvertPositionsWithMatrix(fracRend.sharedMesh.vertices, fracRend.localToWorldMatrix);
             Vector3[] fracWNor = FractureHelperFunc.ConvertDirectionsWithMatrix(fracRend.sharedMesh.normals, fracRend.localToWorldMatrix);
-            List<int> unusedVers = Enumerable.Range(0, fracWVer.Length).ToList();
+            BoneWeight[][] oMeshWeights = new BoneWeight[sourceMeshesW.Count][];
 
-            //link vertics bone weights with best weight on skinned mesh
-            int verI;
-
-            while (unusedVers.Count > 0)
+            for (int i = 0; i < oMeshWeights.Length; i++)
             {
-                verI = unusedVers[0];
-                unusedVers.RemoveAt(0);
+                oMeshWeights[i] = sourceMeshesW[i].mesh.boneWeights;
 
-                BoneWeight newWe = GetBestWeightForVertex(verI);
-                newBoneWe[verI] = newWe;
-
-                foreach (int vIi in verticsLinkedThreaded[verI].intList)
+                for (int ii = 0; ii < oMeshWeights[i].Length; ii++)
                 {
-                    unusedVers.Remove(vIi);
-                    newBoneWe[vIi] = newWe;
+                    oMeshWeights[i][ii].boneIndex0 += boneIShift;
+                    oMeshWeights[i][ii].boneIndex1 += boneIShift;
+                    oMeshWeights[i][ii].boneIndex2 += boneIShift;
+                    oMeshWeights[i][ii].boneIndex3 += boneIShift;
                 }
             }
 
-            //assign updated data to mesh and renderer
+            //assign bone weights on fracRend with best weights on skinned mesh
+            int rvL = rVersOgMeshI.Length;
+
+            for (int i = 0; i < rvL; i++)
+            {
+                newBoneWe[i] = oMeshWeights[rVersOgMeshI[i]][rVersBestOgMeshVer[i]];
+            }
+
             fracRend.bones = newBones.ToArray();
             fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
             fracRend.sharedMesh.boneWeights = newBoneWe;
@@ -1865,7 +1956,6 @@ namespace Zombie1111_uDestruction
                     FractureHelperFunc.ConvertPositionsWithMatrix(partWver.ToArray(), allSkinPartCols[i].transform.worldToLocalMatrix));
 
                 //move allPart cols to match defualt skinned pose
-                //for (int rvI = 0; rvI < allParts[i].rendVertexIndexes.Count; rvI += 1)
                 foreach (int rvI in allParts[i].rendLinkVerIndexes)
                 {
                     alreadyTested = false;
@@ -1893,48 +1983,10 @@ namespace Zombie1111_uDestruction
                     fracWVerOg = sMesh.vertices;
                     fracWNorOg = sMesh.normals;
                 }
-
-                // Calculate the new bind pose matrix
-                //Matrix4x4 desiredLocalTransform = Matrix4x4.TRS(allSkinPartCols[i].transform.position, Quaternion.identity, Vector3.one);
-                //newMatrixs[i] = desiredLocalTransform * newMatrixs[i];
-                //
-                //// Update only the translation part of the transform
-                //newMatrixs[i].SetColumn(3, new Vector4(allSkinPartCols[i].transform.position.x, allSkinPartCols[i].transform.position.y, allSkinPartCols[i].transform.position.z, 1.0f));
-                //allParts[i].trans.SetPositionAndRotation(allSkinPartCols[i].transform.position, allSkinPartCols[i].transform.rotation);
-                //newMatrixs[i] = allParts[i].trans.worldToLocalMatrix * fracRend.localToWorldMatrix;
-
-                //int rvI = 0;
-                //Vector3 rotationAxis = Vector3.Cross(fracWNorOg[allParts[i].rendVertexIndexes[rvI]], fracWNor[allParts[i].rendVertexIndexes[rvI]]);
-                //float rotationAngle = Vector3.SignedAngle(fracWNorOg[allParts[i].rendVertexIndexes[rvI]], fracWNor[allParts[i].rendVertexIndexes[rvI]], rotationAxis);
-                //allParts[i].trans.RotateAround(fracWVerOg[allParts[i].rendVertexIndexes[rvI]], rotationAxis, rotationAngle);
-
-
-
-
             }
 
             fracRend.sharedMesh.boneWeights = newBoneWe;
             fracRend.sharedMesh.bindposes = newMatrixs.ToArray();
-
-            BoneWeight GetBestWeightForVertex(int fracVi)
-            {
-                //get the closest skinned triangel and its total bones and their total weight
-                BoneWeight newWe;
-
-                int fracTriTemp = FractureHelperFunc.FindTriangleIndexWithVertex(fracTris, fracVi);
-                int closeSkinTriI = FractureHelperFunc.GetClosestTriOnMesh(skinWVer, skinTris,
-                    new Vector3[3] { fracWVer[fracTris[fracTriTemp]], fracWVer[fracTris[fracTriTemp + 1]],
-                        fracWVer[fracTris[fracTriTemp + 2]] }, worldDis);
-
-                int closeSkinTriAdd = FractureHelperFunc.GetClosestPointInArray(new Vector3[3] { skinWVer[skinTris[closeSkinTriI]], skinWVer[skinTris[closeSkinTriI + 1]], skinWVer[skinTris[closeSkinTriI + 2]] }, fracWVer[fracVi], worldDis);
-                newWe = skinBoneWe[skinTris[closeSkinTriI + closeSkinTriAdd]];
-                newWe.boneIndex0 += boneIShift;
-                newWe.boneIndex1 += boneIShift;
-                newWe.boneIndex2 += boneIShift;
-                newWe.boneIndex3 += boneIShift;
-
-                return newWe;
-            }
         }
 
         private void Run_setBoneWeights(int partIndex, bool toDefualt)
