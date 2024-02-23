@@ -19,6 +19,7 @@ using Unity.Jobs;
 using System.Diagnostics;
 using UnityEngine.Rendering;
 using UnityEditor.Rendering;
+using System.Xml;
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -606,7 +607,7 @@ namespace Zombie1111_uDestruction
             }
 
             //destroy all frac parents
-            for (int i = 0; i < allFracParents.Count; i += 1)
+            for (int i = 0; i < allFracParents.Count; i++)
             {
                 if (allFracParents[i].parentTrans == null || allFracParents[i].parentTrans.parent != transform) continue;
                 if (i == 0 && isRealSkinnedM == true)
@@ -622,7 +623,7 @@ namespace Zombie1111_uDestruction
                             break;
                         }
 
-                        if (saved_allPartsCol.Length != allFracParents[i].partIndexes.Count) if (allParts[allFracParents[i].partIndexes[ii]].col != null)
+                        if (saved_allPartsCol.Length != allFracParents[i].partIndexes.Count && allParts[allFracParents[i].partIndexes[ii]].col != null)
                                 DestroyImmediate(allParts[allFracParents[i].partIndexes[ii]].trans.gameObject);
                         else if (saved_allPartsCol[allFracParents[i].partIndexes[ii]] != null)
                                 DestroyImmediate(saved_allPartsCol[allFracParents[i].partIndexes[ii]].gameObject);
@@ -635,7 +636,7 @@ namespace Zombie1111_uDestruction
             }
 
             //remove real skin bone cols
-            for (int i = 0; i < allSkinPartCols.Length; i += 1)
+            for (int i = 0; i < allSkinPartCols.Length; i++)
             {
                 if (allSkinPartCols[i] == null || FractureHelperFunc.GetIfTransformIsAnyParent(transform, allSkinPartCols[i].transform) == false) continue;
                 DestroyImmediate(allSkinPartCols[i]);
@@ -855,7 +856,7 @@ namespace Zombie1111_uDestruction
             if (meshesToFracW == null) return false;
 
             //Fracture the meshes into pieces
-            List<MeshWG> partMeshesW = Gen_fractureMeshes(meshesToFracW, fractureCount, dynamicFractureCount, worldScaleDis, seed, true);
+            List<MeshData> partMeshesW = Gen_fractureMeshes(meshesToFracW, fractureCount, dynamicFractureCount, worldScaleDis, seed, true);
             if (partMeshesW == null) return false;
 
             //Save current orginal data (Save as late as possible)
@@ -874,11 +875,12 @@ namespace Zombie1111_uDestruction
             //Gen_loadAndMaybeSaveOgData(false);
             //return false; //debug remove later
 
+            //setup fracture renderer materials
+            Gen_setupRendererMaterials(rVersOgMeshI, rVersBestOgMeshVer, meshesToFracW);
+
+
             //setup more advanced part data
             Gen_setupPartStructure(partMeshesW);
-
-            //setup fracture renderer materials
-            Gen_setupRendererMaterials(rVersOgMeshI, rVersBestOgMeshVer);
 
             //setup real skinned mesh
             if (isRealSkinnedM == true)
@@ -1067,7 +1069,7 @@ namespace Zombie1111_uDestruction
         /// <param name="rendHolder"></param>
         /// <param name="matInside"></param>
         /// <param name="matOutside"></param>
-        private void Gen_setupRenderer(List<MeshWG> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, Material matInside, Material matOutside, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer)
+        private void Gen_setupRenderer(List<MeshData> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, Material matInside, Material matOutside, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer)
         {
             //combine meshes and set allparts rendVertexIndexes
             //Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshesW, ref fParts);
@@ -1251,18 +1253,79 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        private void Gen_setupRendererMaterials(int[] rVersOgMeshI, int[] rVersBestOgMeshVer)
+        private void Gen_setupRendererMaterials(int[] rVersOgMeshI, int[] rVersBestOgMeshVer, List<MeshData> sourceMeshesW)
         {
             //set vertex colors
             if (doVertexColors == true) fracRend.sharedMesh.colors = Enumerable.Repeat(new Color(1.0f, 1.0f, 1.0f, 0.0f), fracRend.sharedMesh.vertexCount).ToArray();
 
-            //get materials to use
+            //get what materials to use
+            int[][] ogVersSubMeshI = new int[sourceMeshesW.Count][]; //What submesh a given vertex has in sourceMesh[i]
+            Dictionary<int, int>[] ogSubConSub = new Dictionary<int, int>[sourceMeshesW.Count]; //What submesh in fracMesh a given submesh in sourceMesh[i] has
+            Dictionary<Material, int> cSubMeshMat = new(); //The submesh index a given material has in fracMesh
+            Mesh tempOM;
+            int cNextSubMeshI = 0;
+
+            for (int i = 0; i < sourceMeshesW.Count; i++)
+            {
+                ogSubConSub[i] = new();
+                tempOM = sourceMeshesW[i].mesh;
+                ogVersSubMeshI[i] = new int[tempOM.vertexCount];
+
+                for (int sI = 0; sI < tempOM.subMeshCount; sI++)
+                {
+                    foreach (int tI in tempOM.GetTriangles(sI))
+                    {
+                        ogVersSubMeshI[i][tI] = sI;
+                    }
+
+                    if (cSubMeshMat.ContainsKey(sourceMeshesW[i].subMeshMats[sI]) == false)
+                    {
+                        cSubMeshMat.Add(sourceMeshesW[i].subMeshMats[sI], cNextSubMeshI);
+                        cNextSubMeshI++;
+                    }
+
+                    ogSubConSub[i].Add(sI, cSubMeshMat[sourceMeshesW[i].subMeshMats[sI]]);
+                }
+            }
+
+            Debug.Log(cSubMeshMat.Count);
+
+            //get submeshes for each material in fracMesh
+            List<int>[] newTrisSub = new List<int>[cSubMeshMat.Count];
+            int[] cTris = fracRend.sharedMesh.triangles;
+            int ctL = cTris.Length;
+
+            for (int i = 0; i < newTrisSub.Length; i++)
+            {
+                newTrisSub[i] = new();
+            }
+
+            for (int i = 0; i < ctL; i += 3)
+            {
+                int oMeshI = rVersOgMeshI[cTris[i]];
+                int oVerI = rVersBestOgMeshVer[cTris[i]];
+                int oSubI = ogVersSubMeshI[oMeshI][oVerI];
+                int cSubI = ogSubConSub[oMeshI][oSubI];
+
+                newTrisSub[cSubI].Add(cTris[i]);
+                newTrisSub[cSubI].Add(cTris[i + 1]);
+                newTrisSub[cSubI].Add(cTris[i + 2]);
+            }
+
+            //assign materials and submeshes to fracMesh and fracRend
+            fracRend.sharedMaterials = cSubMeshMat.Keys.ToArray();
+            fracRend.sharedMesh.subMeshCount = newTrisSub.Length;
+
+            for (int i = 0; i < newTrisSub.Length; i++)
+            {
+                fracRend.sharedMesh.SetTriangles(newTrisSub[i], i);
+            }
         }
 
         /// <summary>
         /// Create parts for all meshes in the given list, meshes must be in worldspace.  Returns partMeshesW but in part localspace
         /// </summary>
-        private Mesh[] Gen_setupPartBase(List<MeshWG> partMeshesW, PhysicMaterial phyMatToUse)
+        private Mesh[] Gen_setupPartBase(List<MeshData> partMeshesW, PhysicMaterial phyMatToUse)
         {
             //create a array to store localspace meshes
             Mesh[] partMeshesL = new Mesh[partMeshesW.Count];
@@ -1351,7 +1414,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Gets neighbours and kinematic status for all parts
         /// </summary>
-        private void Gen_setupPartStructure(List<MeshWG> partMeshesW)
+        private void Gen_setupPartStructure(List<MeshData> partMeshesW)
         {
             //setup part neighbours and isKinematic
             //get physics scene
@@ -1446,31 +1509,31 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        /// <summary>
-        /// Contains data about meshes to fracture
-        /// </summary>
-        public class MeshData
-        {
-            /// <summary>
-            /// The mesh
-            /// </summary>
-            public Mesh mesh;
-
-            /// <summary>
-            /// The render used to render the mesh
-            /// </summary>
-            public Renderer rend;
-
-            /// <summary>
-            /// The mesh localToWorld matrix
-            /// </summary>
-            public Matrix4x4 lTwMatrix;
-
-            /// <summary>
-            /// The mesh group id, does not include links
-            /// </summary>
-            public List<float> mGroupId;
-        }
+        ///// <summary>
+        ///// Contains data about meshes to fracture
+        ///// </summary>
+        //public class MeshData
+        //{
+        //    /// <summary>
+        //    /// The mesh
+        //    /// </summary>
+        //    public Mesh mesh;
+        //
+        //    /// <summary>
+        //    /// The render used to render the mesh
+        //    /// </summary>
+        //    public Renderer rend;
+        //
+        //    /// <summary>
+        //    /// The mesh localToWorld matrix
+        //    /// </summary>
+        //    public Matrix4x4 lTwMatrix;
+        //
+        //    /// <summary>
+        //    /// The mesh group id, does not include links
+        //    /// </summary>
+        //    public List<float> mGroupId;
+        //}
 
         private bool mustConfirmHighCount = true;
 
@@ -1481,7 +1544,7 @@ namespace Zombie1111_uDestruction
         /// <param name="totalChunkCount"></param>
         /// <param name="seed"></param>
         /// <returns></returns>
-        private List<MeshWG> Gen_fractureMeshes(List<MeshData> meshesToFrac, int totalChunkCount, bool dynamicChunkCount, float worldScaleDis = 0.0001f, int seed = -1, bool useMeshBounds = false)
+        private List<MeshData> Gen_fractureMeshes(List<MeshData> meshesToFrac, int totalChunkCount, bool dynamicChunkCount, float worldScaleDis = 0.0001f, int seed = -1, bool useMeshBounds = false)
         {
             //get random seed
             int nextOgMeshId = 0;
@@ -1503,12 +1566,13 @@ namespace Zombie1111_uDestruction
             else if (totalChunkCount < 500) mustConfirmHighCount = true;
 
             //fractrue the meshes into chunks
-            List<MeshWG> fracedMeshes = new();
+            List<MeshData> fracedMeshes = new();
 
             for (int i = 0; i < meshesToFrac.Count; i += 1)
             {
                 Gen_fractureMesh(
-                    new() { mesh = meshesToFrac[i].mesh, mGroupId = meshesToFrac[i].mGroupId, mGroupSourceI = i },
+                    //new() { mesh = meshesToFrac[i].mesh, mGroupId = meshesToFrac[i].mGroupId, mGroupSourceI = i },
+                    new() { mesh = FractureHelperFunc.MergeSubMeshes(meshesToFrac[i].mesh), mGroupId = meshesToFrac[i].mGroupId, mGroupSourceI = i },
                     ref fracedMeshes,
                     Mathf.RoundToInt(totalChunkCount * meshScales[i]));
 
@@ -1518,7 +1582,7 @@ namespace Zombie1111_uDestruction
             //return the result
             return fracedMeshes;
 
-            void Gen_fractureMesh(MeshWG meshToFrac, ref List<MeshWG> newMeshes, int chunkCount)
+            void Gen_fractureMesh(MeshData meshToFrac, ref List<MeshData> newMeshes, int chunkCount)
             {
                 //fractures the given mesh into pieces and adds the new pieces to the newMeshes list
                 if (chunkCount <= 1)
@@ -1716,7 +1780,7 @@ namespace Zombie1111_uDestruction
             //convert all meshes to world space
             HashSet<List<float>> newGroupIds = new();
             for (int i = 0; i < mDatas.Count; i++)
-            {
+            {                
                 mDatas[i].mesh = FractureHelperFunc.ConvertMeshWithMatrix(mDatas[i].mesh, mDatas[i].lTwMatrix);
                 FractureHelperFunc.Gd_getIdsFromColors(mDatas[i].mesh.colors, ref newGroupIds);
             }
@@ -1728,19 +1792,27 @@ namespace Zombie1111_uDestruction
             if (getRawOnly == true) return mDatas;
 
             //split meshes into chunks
-            List<MeshWG> splittedMeshes;
+            List<MeshData> splittedMeshes;
             for (int i = mDatas.Count - 1; i >= 0; i--)
             {
-                splittedMeshes = Gen_splitMeshIntoChunks(mDatas[i].mesh, hasSkinned, worldScaleDis);
+                //get submesh materials from renderer
+                mDatas[i].subMeshMats = mDatas[i].rend.sharedMaterials.ToList();
+                int subMeshCountDiff = mDatas[i].mesh.subMeshCount - mDatas[i].subMeshMats.Count;
+                if (subMeshCountDiff > 0) mDatas[i].subMeshMats.AddRange(new Material[subMeshCountDiff]);
+
+                //split the mesh
+                splittedMeshes = Gen_splitMeshIntoChunks(mDatas[i], hasSkinned, worldScaleDis);
                 if (splittedMeshes == null) return null;
 
+                //add split result
                 for (int ii = 0; ii < splittedMeshes.Count; ii += 1)
                 {
                     mDatas.Add(new() {
                         mesh = splittedMeshes[ii].mesh,
                         lTwMatrix = mDatas[i].lTwMatrix,
                         rend = mDatas[i].rend,
-                        mGroupId = splittedMeshes[ii].mGroupId });
+                        mGroupId = splittedMeshes[ii].mGroupId,
+                        subMeshMats = splittedMeshes[ii].subMeshMats});
                 }
 
                 mDatas.RemoveAt(i);
@@ -1752,11 +1824,17 @@ namespace Zombie1111_uDestruction
             return mDatas;
         }
 
-        private class MeshWG
+        /// <summary>
+        /// Contains a mesh and data about it, only used durring fracture process
+        /// </summary>
+        public class MeshData
         {
             public Mesh mesh;
             public List<float> mGroupId;
             public int mGroupSourceI;
+            public Matrix4x4 lTwMatrix;
+            public Renderer rend;
+            public List<Material> subMeshMats;
         }
 
         /// <summary>
@@ -1764,23 +1842,23 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="meshToSplit"></param>
         /// <returns></returns>
-        private List<MeshWG> Gen_splitMeshIntoChunks(Mesh meshToSplit, bool doBones, float worldScaleDis = 0.0001f)
+        private List<MeshData> Gen_splitMeshIntoChunks(MeshData meshToSplit, bool doBones, float worldScaleDis = 0.0001f)
         {
             int maxLoops = 200;
-            List<MeshWG> splittedMeshes = new();
-            List<Mesh> tempM;
+            List<MeshData> splittedMeshes = new();
+            List<MeshData> tempM;
             Color[] verCols;
             List<float> tempG;
 
             while (maxLoops > 0)
             {
                 maxLoops--;
-                if (meshToSplit.vertexCount < 4) break;
+                if (meshToSplit.mesh.vertexCount < 4) break;
 
-                verCols = meshToSplit.colors;
-                if (useGroupIds == false || verCols.Length != meshToSplit.vertexCount)
+                verCols = meshToSplit.mesh.colors;
+                if (useGroupIds == false || verCols.Length != meshToSplit.mesh.vertexCount)
                 {
-                    splittedMeshes.Add(new() { mesh = meshToSplit, mGroupId = null});
+                    splittedMeshes.Add(new() { mesh = meshToSplit.mesh, mGroupId = null});
                     return splittedMeshes;
                 }
 
@@ -1790,7 +1868,7 @@ namespace Zombie1111_uDestruction
                     FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG), meshToSplit, doBones, this);
 
                 if (tempM == null) return null;
-                if (tempM[0].vertexCount >= 4) splittedMeshes.Add(new() { mesh = tempM[0], mGroupId = tempG });
+                if (tempM[0].mesh.vertexCount >= 4) splittedMeshes.Add(new() { mesh = tempM[0].mesh, mGroupId = tempG, subMeshMats = tempM[0].subMeshMats });
                 meshToSplit = tempM[1];
             }
 

@@ -541,9 +541,10 @@ namespace Zombie1111_uDestruction
         /// <param name="vertexIndexesToSplit"></param>
         /// <param name="originalMesh"></param>
         /// <returns></returns>
-        public static List<Mesh> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, Mesh orginalMesh, bool doBones, FractureThis fT)
+        public static List<FractureThis.MeshData> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, FractureThis.MeshData orginalMeshD, bool doBones, FractureThis fT)
         {
             //get ogMesh tris, vers....
+            Mesh orginalMesh = orginalMeshD.mesh;
             int[] tris = orginalMesh.triangles;
             Vector3[] verts = orginalMesh.vertices;
             Vector3[] nors = orginalMesh.normals;
@@ -551,15 +552,15 @@ namespace Zombie1111_uDestruction
             BoneWeight[] bones = doBones ? orginalMesh.boneWeights : new BoneWeight[verts.Length];
             Color[] cols = orginalMesh.colors;
 
-            //get what submesh each triangle has
+            //get what submesh each vertex has
             int otL = tris.Length;
-            int[] ogTrisSubMeshI = new int[otL];
+            int[] ogVersSubMeshI = new int[verts.Length];
 
             for (int i = 0; i < orginalMesh.subMeshCount; i++)
             {
                 foreach (int tI in orginalMesh.GetTriangles(i))
                 {
-                    ogTrisSubMeshI[tI] = i;
+                    ogVersSubMeshI[tI] = i;
                 }
             }
 
@@ -608,10 +609,10 @@ namespace Zombie1111_uDestruction
                 ProcessTriangle(vIndexA, vIndexB, vIndexC, splitA, i);
             }
 
-            Mesh newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA, splitLinkA);
-            Mesh newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB, splitLinkB);
+            FractureThis.MeshData newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA, splitLinkA);
+            FractureThis.MeshData newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB, splitLinkB);
 
-            return new List<Mesh> { newMA, newMB };
+            return new List<FractureThis.MeshData> { newMA, newMB };
 
             void ProcessTriangle(int vIndexA, int vIndexB, int vIndexC, bool splitA, int ogTrisI)
             {
@@ -669,7 +670,7 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            Mesh CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> ogTrisI)
+            FractureThis.MeshData CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> ogTrisI)
             {
                 Mesh mesh = new()
                 {
@@ -685,11 +686,76 @@ namespace Zombie1111_uDestruction
                 if (boneWeights.Count > 0)
                     mesh.boneWeights = boneWeights.ToArray();
 
+                if (triangles.Count == 0) return new() { mesh = mesh, subMeshMats = new() };
+
+                //set submesh                
+                Dictionary<int, int> usedOgSubI = new()
+                {
+                    //{ ogVersSubMeshI[tris[ogTrisI[0]]], 0 }
+                };
+                
+                List<List<int>> newSubTrisI = new()
+                {
+                    //mesh.GetTriangles(0).ToList()
+                };
+                
+                int tI, ogSubI, subI;
+                List<Material> newSubMats = new();
+
+                for (int i = 0; i < ogTrisI.Count; i++)
+                {
+                    tI = i * 3;
+                    ogSubI = ogVersSubMeshI[tris[ogTrisI[i]]];
+                    usedOgSubI.TryAdd(ogSubI, newSubTrisI.Count);
+                    subI = usedOgSubI[ogSubI];
+
+                    //if (ogSubI == 8) Debug_drawBox(vertices[triangles[tI]], 0.1f, Color.yellow, 10.0f);
+
+                    if (subI == newSubTrisI.Count)
+                    {
+                        newSubMats.Add(orginalMeshD.subMeshMats[ogSubI]);
+                        newSubTrisI.Add(new() { triangles[tI], triangles[tI + 1], triangles[tI + 2] });
+                    }
+                    else
+                    {
+                        newSubTrisI[subI].Add(triangles[tI]);
+                        newSubTrisI[subI].Add(triangles[tI + 1]);
+                        newSubTrisI[subI].Add(triangles[tI + 2]);
+                    }
+                }
+                
+                mesh.subMeshCount = newSubTrisI.Count;
+
+                for (int i = 0; i < newSubTrisI.Count; i++)
+                {
+                    mesh.SetTriangles(newSubTrisI[i], i);
+                }
+
                 mesh.RecalculateBounds();
                 mesh.RecalculateTangents();
 
-                return mesh;
+                return new() { mesh = mesh, subMeshMats = newSubMats };
             }
+        }
+
+        /// <summary>
+        /// Returns a new instance of the given mesh but all submeshes are merged into one
+        /// </summary>
+        /// <param name="mesh"></param>
+        /// <returns></returns>
+        public static Mesh MergeSubMeshes(Mesh mesh)
+        {
+            return new() {
+                vertices = mesh.vertices,
+                triangles = mesh.triangles,
+                normals = mesh.normals,
+                bindposes = mesh.bindposes,
+                boneWeights = mesh.boneWeights,
+                uv = mesh.uv,
+                colors = mesh.colors,
+                bounds = mesh.bounds,
+                tangents = mesh.tangents
+            };
         }
 
         /// <summary>
