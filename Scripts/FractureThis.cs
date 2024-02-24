@@ -878,7 +878,6 @@ namespace Zombie1111_uDestruction
             //setup fracture renderer materials
             Gen_setupRendererMaterials(rVersOgMeshI, rVersBestOgMeshVer, meshesToFracW);
 
-
             //setup more advanced part data
             Gen_setupPartStructure(partMeshesW);
 
@@ -1118,6 +1117,8 @@ namespace Zombie1111_uDestruction
             int[] cTris = comMesh.triangles;
             int ctL = cTris.Length / 3;
             NativeArray<int> closeOTris = new(ctL, Allocator.Temp);
+            int cvL = cVers.Length;
+            int[] closeOVer = Enumerable.Repeat(-1, cvL).ToArray();
 
             Parallel.For(0, ctL, i =>
             {
@@ -1128,7 +1129,36 @@ namespace Zombie1111_uDestruction
                     oVerss[oI],
                     oTriss[oI],
                     new Vector3[3] { cVers[cTris[tI]], cVers[cTris[tI + 1]], cVers[cTris[tI + 2]] },
-                    worldDis);
+                    0.0f);
+
+                Vector3[] oTrisPoss = new Vector3[3] { oVerss[oI][oTriss[oI][closeOTris[i]]], oVerss[oI][oTriss[oI][closeOTris[i] + 1]], oVerss[oI][oTriss[oI][closeOTris[i] + 2]] };
+
+                lock (closeOVer)
+                {
+                    if (closeOVer[cTris[tI]] < 0)
+                    {
+                        closeOVer[cTris[tI]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                          oTrisPoss,
+                          cVers[cTris[tI]],
+                          worldDis)];
+                    }
+
+                    if (closeOVer[cTris[tI + 1]] < 0)
+                    {
+                        closeOVer[cTris[tI + 1]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                          oTrisPoss,
+                          cVers[cTris[tI + 1]],
+                          worldDis)];
+                    }
+
+                    if (closeOVer[cTris[tI + 2]] < 0)
+                    {
+                        closeOVer[cTris[tI + 2]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                          oTrisPoss,
+                          cVers[cTris[tI + 2]],
+                          worldDis)];
+                    }
+                }
             });
 
             Debug_toggleTimer();
@@ -1139,77 +1169,75 @@ namespace Zombie1111_uDestruction
 
             Debug_toggleTimer();
 
-            int cvL = cVers.Length;
-            int[] closeOVer = Enumerable.Repeat(-1, cvL).ToArray();
 
-            Parallel.For(0, cvL, i =>
-            {
-                if (closeOVer[i] == -1)
-                {
-                    //get all tris that uses these vers
-                    HashSet<int> vPoss = verticsLinkedThreaded[i].intList.ToHashSet();
-                    lock (closeOVer)
-                    {
-                        foreach (int vI in vPoss)
-                        {
-                            closeOVer[vI] = -2;
-                        }
-                    }
-
-                    Dictionary<int, int> simTriss = new();
-                    int tI;
-
-                    for (int ii = 0; ii < ctL; ii++)
-                    {
-                        tI = ii * 3;
-                        if (vPoss.Contains(cTris[tI]) == false && vPoss.Contains(cTris[tI + 1]) == false && vPoss.Contains(cTris[tI + 2]) == false) continue;
-
-                        if (simTriss.ContainsKey(closeOTris[ii]) == true) simTriss[closeOTris[ii]] += 1;
-                        else simTriss[closeOTris[ii]] = 1;
-
-                        //break;//better performance, but worse quality??
-                    }
-
-                    if (simTriss.Count == 0)
-                    {
-                        //if simTriss somehow so 0, reset closeVer
-                        if (closeOVer[i] == -2)
-                        {
-                            lock (closeOVer)
-                            {
-                                foreach (int vI in vPoss)
-                                {
-                                    closeOVer[vI] = -1;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        //get the best ver for every ver in con
-                        int oI = cVerOgMeshI[i];
-                        tI = simTriss.Aggregate((x, y) => x.Value > y.Value ? x : y).Key;
-
-                        int bestVi = FractureHelperFunc.GetClosestPointInArray(
-                            new Vector3[3] { oVerss[oI][oTriss[oI][tI]], oVerss[oI][oTriss[oI][tI + 1]], oVerss[oI][oTriss[oI][tI + 2]] },
-                            cVers[i],
-                            worldDis);
-
-                        bestVi = oTriss[oI][tI + bestVi];
-
-                        //write the best ver to the array for all vers in con at this pos
-                        Debug.DrawLine(cVers[i], oVerss[oI][bestVi], Color.magenta ,10.0f);
-
-                        lock (closeOVer)
-                        {
-                            foreach (int vI in vPoss)
-                            {
-                                closeOVer[vI] = bestVi;
-                            }
-                        }
-                    }
-                }
-            });
+            //Parallel.For(0, cvL, i =>
+            //{
+            //    if (closeOVer[i] == -1)
+            //    {
+            //        //get all tris that uses these vers
+            //        HashSet<int> vPoss = verticsLinkedThreaded[i].intList.ToHashSet();
+            //        lock (closeOVer)
+            //        {
+            //            foreach (int vI in vPoss)
+            //            {
+            //                closeOVer[vI] = -2;
+            //            }
+            //        }
+            //
+            //        Dictionary<int, int> simTriss = new();
+            //        int tI;
+            //
+            //        for (int ii = 0; ii < ctL; ii++)
+            //        {
+            //            tI = ii * 3;
+            //            if (vPoss.Contains(cTris[tI]) == false && vPoss.Contains(cTris[tI + 1]) == false && vPoss.Contains(cTris[tI + 2]) == false) continue;
+            //
+            //            if (simTriss.ContainsKey(closeOTris[ii]) == true) simTriss[closeOTris[ii]] += 1;
+            //            else simTriss[closeOTris[ii]] = 1;
+            //
+            //            //break;//better performance, but worse quality??
+            //        }
+            //
+            //        if (simTriss.Count == 0)
+            //        {
+            //            //if simTriss somehow so 0, reset closeVer
+            //            if (closeOVer[i] == -2)
+            //            {
+            //                lock (closeOVer)
+            //                {
+            //                    foreach (int vI in vPoss)
+            //                    {
+            //                        closeOVer[vI] = -1;
+            //                    }
+            //                }
+            //            }
+            //        }
+            //        else
+            //        {
+            //            //get the best ver for every ver in con
+            //            int oI = cVerOgMeshI[i];
+            //            tI = simTriss.Aggregate((x, y) => x.Value > y.Value ? x : y).Key;
+            //
+            //            int bestVi = FractureHelperFunc.GetClosestPointInArray(
+            //                new Vector3[3] { oVerss[oI][oTriss[oI][tI]], oVerss[oI][oTriss[oI][tI + 1]], oVerss[oI][oTriss[oI][tI + 2]] },
+            //                cVers[i],
+            //                worldDis);
+            //
+            //            bestVi = oTriss[oI][tI + bestVi];
+            //
+            //            ////write the best ver to the array for all vers in con at this pos
+            //            //Debug.DrawLine(cVers[i], oVerss[oI][bestVi], Color.magenta ,10.0f);
+            //
+            //            lock (closeOVer)
+            //            {
+            //                foreach (int vI in vPoss)
+            //                {
+            //                    closeOVer[vI] = bestVi;
+            //                }
+            //            }
+            //        }
+            //    }
+            //});
 
             Debug_toggleTimer();
 
@@ -1241,6 +1269,8 @@ namespace Zombie1111_uDestruction
             sRend.bones = allParts.Select(part => part.col.transform).ToArray();
             sRend.sharedMaterials = new Material[2] { matInside, matOutside };
             sRend.sharedMesh = comMesh;
+            sRend.sharedMesh.RecalculateNormals();
+            sRend.sharedMesh.RecalculateTangents();
 
             //setup verticsPartThreaded
             verticsPartThreaded = new int[cVers.Length];
@@ -1255,6 +1285,17 @@ namespace Zombie1111_uDestruction
 
         private void Gen_setupRendererMaterials(int[] rVersOgMeshI, int[] rVersBestOgMeshVer, List<MeshData> sourceMeshesW)
         {
+
+            Vector3[][] oVers = new Vector3[sourceMeshesW.Count][];
+
+            for (int i = 0; i < sourceMeshesW.Count; i++)
+            {
+                oVers[i] = sourceMeshesW[i].mesh.vertices;
+            }
+
+            Vector3[] cVers = FractureHelperFunc.ConvertPositionsWithMatrix(fracRend.sharedMesh.vertices, fracRend.transform.localToWorldMatrix);
+
+
             //set vertex colors
             if (doVertexColors == true) fracRend.sharedMesh.colors = Enumerable.Repeat(new Color(1.0f, 1.0f, 1.0f, 0.0f), fracRend.sharedMesh.vertexCount).ToArray();
 
@@ -1290,10 +1331,12 @@ namespace Zombie1111_uDestruction
 
             Debug.Log(cSubMeshMat.Count);
 
+
             //get submeshes for each material in fracMesh
             List<int>[] newTrisSub = new List<int>[cSubMeshMat.Count];
             int[] cTris = fracRend.sharedMesh.triangles;
             int ctL = cTris.Length;
+
 
             for (int i = 0; i < newTrisSub.Length; i++)
             {
@@ -1306,6 +1349,8 @@ namespace Zombie1111_uDestruction
                 int oVerI = rVersBestOgMeshVer[cTris[i]];
                 int oSubI = ogVersSubMeshI[oMeshI][oVerI];
                 int cSubI = ogSubConSub[oMeshI][oSubI];
+
+                //if (oMeshI == 0) Debug.DrawLine(oVers[oVerI], cVers[cTris[i]], Color.blue, 20.0f);
 
                 newTrisSub[cSubI].Add(cTris[i]);
                 newTrisSub[cSubI].Add(cTris[i + 1]);
@@ -1858,19 +1903,33 @@ namespace Zombie1111_uDestruction
                 verCols = meshToSplit.mesh.colors;
                 if (useGroupIds == false || verCols.Length != meshToSplit.mesh.vertexCount)
                 {
-                    splittedMeshes.Add(new() { mesh = meshToSplit.mesh, mGroupId = null});
+                    splittedMeshes.Add(new() { mesh = meshToSplit.mesh, mGroupId = null, subMeshMats = meshToSplit.rend.sharedMaterials.ToList() });
+
+                    //for (int i = 0; i < splittedMeshes.Count; i++)
+                    //{
+                    //    FractureHelperFunc.Debug_drawMaterial(splittedMeshes[i], debugMat);
+                    //}
+
                     return splittedMeshes;
                 }
 
                 //tempM = FractureHelperFunc.SplitMeshInTwo(FractureHelperFunc.GetConnectedVertexIndexes(meshToSplit, 0, this, worldScaleDis), meshToSplit, doBones, this);
                 tempG = FractureHelperFunc.Gd_getIdFromColor(verCols[0]);
                 tempM = FractureHelperFunc.SplitMeshInTwo(
-                    FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG), meshToSplit, doBones, this);
+                    FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG), meshToSplit, doBones, this, null);
 
                 if (tempM == null) return null;
                 if (tempM[0].mesh.vertexCount >= 4) splittedMeshes.Add(new() { mesh = tempM[0].mesh, mGroupId = tempG, subMeshMats = tempM[0].subMeshMats });
                 meshToSplit = tempM[1];
             }
+
+            if (meshToSplit.mesh.vertexCount >= 4) splittedMeshes.Add(meshToSplit);
+            //FractureHelperFunc.Debug_drawMesh(splittedMeshes[0].mesh, false, 10.0f);
+
+            //for (int i = 0; i < splittedMeshes.Count; i++)
+            //{
+            //    FractureHelperFunc.Debug_drawMaterial(splittedMeshes[i], debugMat);
+            //}
 
             return splittedMeshes;
         }

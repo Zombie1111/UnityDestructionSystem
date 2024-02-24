@@ -5,6 +5,8 @@ using UnityEngine;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using Unity.VisualScripting.FullSerializer;
+using UnityEngine.Rendering;
+
 
 
 
@@ -541,68 +543,80 @@ namespace Zombie1111_uDestruction
         /// <param name="vertexIndexesToSplit"></param>
         /// <param name="originalMesh"></param>
         /// <returns></returns>
-        public static List<FractureThis.MeshData> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, FractureThis.MeshData orginalMeshD, bool doBones, FractureThis fT)
+        public static List<FractureThis.MeshData> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, FractureThis.MeshData orginalMeshD, bool doBones, FractureThis fT, Material dMat)
         {
             //get ogMesh tris, vers....
-            Mesh orginalMesh = orginalMeshD.mesh;
-            int[] tris = orginalMesh.triangles;
-            Vector3[] verts = orginalMesh.vertices;
-            Vector3[] nors = orginalMesh.normals;
-            Vector2[] uvs = orginalMesh.uv;
-            BoneWeight[] bones = doBones ? orginalMesh.boneWeights : new BoneWeight[verts.Length];
-            Color[] cols = orginalMesh.colors;
+            Mesh oMesh = orginalMeshD.mesh;
+            int[] oTris = oMesh.triangles;
+            Vector3[] oVerts = oMesh.vertices;
+            Vector3[] oNors = oMesh.normals;
+            Vector2[] oUvs = oMesh.uv;
+            BoneWeight[] oBones = doBones ? oMesh.boneWeights : new BoneWeight[oVerts.Length];
+            Color[] oCols = oMesh.colors;
 
             //get what submesh each vertex has
-            int otL = tris.Length;
-            int[] ogVersSubMeshI = new int[verts.Length];
+            int otL = oTris.Length;
+            int[] ogTrisSubMeshI = new int[oTris.Length];//What submesh index a given vertex has in the ogMesh
 
-            for (int i = 0; i < orginalMesh.subMeshCount; i++)
+            for (int sI = 0; sI < oMesh.subMeshCount; sI++)
             {
-                foreach (int tI in orginalMesh.GetTriangles(i))
+                SubMeshDescriptor subMesh = oMesh.GetSubMesh(sI);
+                int indexEnd = (subMesh.indexStart / 3) + (subMesh.indexCount / 3);
+
+                for (int tI = (subMesh.indexStart / 3); tI < indexEnd; tI++)
                 {
-                    ogVersSubMeshI[tI] = i;
+                    ogTrisSubMeshI[tI] = sI;
                 }
+
+                //Debug.Log(oMesh.GetSubMesh(i).indexStart + " " + oMesh.GetSubMesh(i).indexCount + " " + i);
+                //foreach (int vI in oMesh.GetTriangles(i))
+                //{
+                //    ttc++;
+                //    ogVersSubMeshI[vI] = i;
+                //}
             }
+
 
             // Verify mesh properties and handle mismatches if necessary
-            if (uvs.Length != verts.Length)
+            if (oUvs.Length != oVerts.Length)
             {
-                Debug.LogWarning("The uvs for the mesh " + orginalMesh.name + " may not be valid");
-                uvs = new Vector2[verts.Length];
+                Debug.LogWarning("The uvs for the mesh " + oMesh.name + " may not be valid");
+                oUvs = new Vector2[oVerts.Length];
             }
 
-            if (nors.Length != verts.Length)
+            if (oNors.Length != oVerts.Length)
             {
-                Debug.LogError("The mesh " + orginalMesh.name + " normal count does not match its vertex count");
+                Debug.LogError("The mesh " + oMesh.name + " normal count does not match its vertex count");
                 return null;
             }
 
             //create lists to assign the splitted mesh data to
-            List<Vector3> splitVerA = new List<Vector3>(verts.Length);
-            List<Vector3> splitNorA = new List<Vector3>(nors.Length);
-            List<Vector2> splitUvsA = new List<Vector2>(uvs.Length);
+            List<Vector3> splitVerA = new List<Vector3>(oVerts.Length);
+            List<Vector3> splitNorA = new List<Vector3>(oNors.Length);
+            List<Vector2> splitUvsA = new List<Vector2>(oUvs.Length);
             List<int> splitTriA = new List<int>(otL);
-            List<BoneWeight> splitBonA = new List<BoneWeight>(bones.Length);
-            List<Color> splitColsA = new List<Color>(cols.Length);
+            List<BoneWeight> splitBonA = new List<BoneWeight>(oBones.Length);
+            List<Color> splitColsA = new List<Color>(oCols.Length);
             List<int> splitLinkA = new();
 
-            List<Vector3> splitVerB = new List<Vector3>(verts.Length);
-            List<Vector3> splitNorB = new List<Vector3>(nors.Length);
-            List<Vector2> splitUvsB = new List<Vector2>(uvs.Length);
+            List<Vector3> splitVerB = new List<Vector3>(oVerts.Length);
+            List<Vector3> splitNorB = new List<Vector3>(oNors.Length);
+            List<Vector2> splitUvsB = new List<Vector2>(oUvs.Length);
             List<int> splitTriB = new List<int>(otL);
-            List<BoneWeight> splitBonB = new List<BoneWeight>(bones.Length);
-            List<Color> splitColsB = new List<Color>(cols.Length);
+            List<BoneWeight> splitBonB = new List<BoneWeight>(oBones.Length);
+            List<Color> splitColsB = new List<Color>(oCols.Length);
             List<int> splitLinkB = new();
 
             Dictionary<Vector3, int> vertexIndexMapA = new Dictionary<Vector3, int>();
             Dictionary<Vector3, int> vertexIndexMapB = new Dictionary<Vector3, int>();
 
+            //######Everything works above this
             //split the mesh
-            for (int i = 0; i < tris.Length; i += 3)
+            for (int i = 0; i < oTris.Length; i += 3)
             {
-                int vIndexA = tris[i];
-                int vIndexB = tris[i + 1];
-                int vIndexC = tris[i + 2];
+                int vIndexA = oTris[i];
+                int vIndexB = oTris[i + 1];
+                int vIndexC = oTris[i + 2];
 
                 bool splitA = vertexIndexesToSplit.Contains(vIndexA) || vertexIndexesToSplit.Contains(vIndexB) || vertexIndexesToSplit.Contains(vIndexC);
 
@@ -616,9 +630,9 @@ namespace Zombie1111_uDestruction
 
             void ProcessTriangle(int vIndexA, int vIndexB, int vIndexC, bool splitA, int ogTrisI)
             {
-                int newIndexA = GetIndexOfVertex(vIndexA, splitA, verts, nors, uvs, cols, bones);
-                int newIndexB = GetIndexOfVertex(vIndexB, splitA, verts, nors, uvs, cols, bones);
-                int newIndexC = GetIndexOfVertex(vIndexC, splitA, verts, nors, uvs, cols, bones);
+                int newIndexA = GetIndexOfVertex(vIndexA, splitA, oVerts, oNors, oUvs, oCols, oBones);
+                int newIndexB = GetIndexOfVertex(vIndexB, splitA, oVerts, oNors, oUvs, oCols, oBones);
+                int newIndexC = GetIndexOfVertex(vIndexC, splitA, oVerts, oNors, oUvs, oCols, oBones);
 
                 if (splitA)
                 {
@@ -670,7 +684,7 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            FractureThis.MeshData CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> ogTrisI)
+            FractureThis.MeshData CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> splitTrisOgTris)
             {
                 Mesh mesh = new()
                 {
@@ -689,38 +703,40 @@ namespace Zombie1111_uDestruction
                 if (triangles.Count == 0) return new() { mesh = mesh, subMeshMats = new() };
 
                 //set submesh                
-                Dictionary<int, int> usedOgSubI = new()
-                {
-                    //{ ogVersSubMeshI[tris[ogTrisI[0]]], 0 }
-                };
-                
-                List<List<int>> newSubTrisI = new()
-                {
-                    //mesh.GetTriangles(0).ToList()
-                };
-                
-                int tI, ogSubI, subI;
+                Dictionary<int, int> usedOgSubI = new();
+                List<List<int>> newSubTrisI = new();
                 List<Material> newSubMats = new();
+                int stI, ogSubI, subI;
 
-                for (int i = 0; i < ogTrisI.Count; i++)
+                for (int otI = 0; otI < splitTrisOgTris.Count; otI++)
                 {
-                    tI = i * 3;
-                    ogSubI = ogVersSubMeshI[tris[ogTrisI[i]]];
+                    stI = otI * 3;
+                    ogSubI = ogTrisSubMeshI[splitTrisOgTris[otI] / 3];
                     usedOgSubI.TryAdd(ogSubI, newSubTrisI.Count);
                     subI = usedOgSubI[ogSubI];
 
+                    //if (msubI == ogSubI)
+                    //{
+                    //    Debug_drawBox(oVerts[oTris[splitTrisOgTris[otI]]], 0.001f, Color.yellow, 10.0f);
+                    //    Debug_drawBox(oVerts[oTris[splitTrisOgTris[otI] + 1]], 0.001f, Color.yellow, 10.0f);
+                    //    Debug_drawBox(oVerts[oTris[splitTrisOgTris[otI] + 2]], 0.001f, Color.yellow, 10.0f);
+                    //}
+
                     //if (ogSubI == 8) Debug_drawBox(vertices[triangles[tI]], 0.1f, Color.yellow, 10.0f);
+                    //Debug.DrawLine(oVerts[oTris[splitTrisOgTris[i]]], vertices[triangles[tI]] + (Vector3.up * 0.002f), Color.red, 10.0f);
+                    //Debug.DrawLine(oVerts[oTris[splitTrisOgTris[i] + 1]], vertices[triangles[tI + 1]] + (Vector3.up * 0.002f), Color.red, 10.0f);
+                    //Debug.DrawLine(oVerts[oTris[splitTrisOgTris[i] + 2]], vertices[triangles[tI + 2]] + (Vector3.up * 0.002f), Color.red, 10.0f);
 
                     if (subI == newSubTrisI.Count)
                     {
                         newSubMats.Add(orginalMeshD.subMeshMats[ogSubI]);
-                        newSubTrisI.Add(new() { triangles[tI], triangles[tI + 1], triangles[tI + 2] });
+                        newSubTrisI.Add(new() { triangles[stI], triangles[stI + 1], triangles[stI + 2] });
                     }
                     else
                     {
-                        newSubTrisI[subI].Add(triangles[tI]);
-                        newSubTrisI[subI].Add(triangles[tI + 1]);
-                        newSubTrisI[subI].Add(triangles[tI + 2]);
+                        newSubTrisI[subI].Add(triangles[stI]);
+                        newSubTrisI[subI].Add(triangles[stI + 1]);
+                        newSubTrisI[subI].Add(triangles[stI + 2]);
                     }
                 }
                 
@@ -1573,6 +1589,30 @@ namespace Zombie1111_uDestruction
             Debug.DrawLine(corners[1], corners[5], color, duration);
             Debug.DrawLine(corners[2], corners[6], color, duration);
             Debug.DrawLine(corners[3], corners[7], color, duration);
+        }
+
+        public static void Debug_drawMaterial(FractureThis.MeshData mesh, Material mat)
+        {
+            int subI = -1;
+
+            for (int i = 0; i < mesh.subMeshMats.Count; i++)
+            {
+                if (mesh.subMeshMats[i] == mat)
+                {
+                    subI = i;
+                    break;
+                }
+            }
+
+            if (subI < 0) return;
+
+            Mesh me = mesh.mesh;
+            Vector3[] vers = me.vertices;
+
+            foreach (int vI in me.GetTriangles(subI))
+            {
+                Debug_drawBox(vers[vI], 0.005f, Color.blue, 10.0f);
+            }
         }
 #endif
     }
