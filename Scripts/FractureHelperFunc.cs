@@ -264,7 +264,7 @@ namespace Zombie1111_uDestruction
             float bestD = float.MaxValue;
             float currentD;
 
-            for (int i = 0; i < positions.Length; i += 1)
+            for (int i = 0; i < positions.Length; i++)
             {
                 currentD = (pos - positions[i]).sqrMagnitude;
 
@@ -273,7 +273,7 @@ namespace Zombie1111_uDestruction
                     bestD = currentD;
                     bestI = i;
 
-                    if (currentD < preExitTolerance) break;
+                    //if (currentD < preExitTolerance) break;
                 }
             }
 
@@ -360,7 +360,7 @@ namespace Zombie1111_uDestruction
                     bestD = currentD;
                     bestI = i;
 
-                    if (currentD < preExitTolerance) break;
+                    //if (currentD < preExitTolerance) break;
                 }
             }
 

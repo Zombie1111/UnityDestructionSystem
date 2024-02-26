@@ -20,6 +20,7 @@ using System.Diagnostics;
 using UnityEngine.Rendering;
 using UnityEditor.Rendering;
 using System.Xml;
+using System.IO;
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -133,8 +134,8 @@ namespace Zombie1111_uDestruction
             recalculateOnDisplacement = from.recalculateOnDisplacement;
             doVertexColors = from.doVertexColors;
             setVertexColorOnBreak = from.setVertexColorOnBreak;
-            matInside_defualt = from.matInside_defualt;
-            matOutside_defualt = from.matOutside_defualt;
+            insideMat_fallback = from.insideMat_fallback;
+            insideMat_nameAddition = from.insideMat_nameAddition;
             physicsMat = from.physicsMat;
 
             resistanceMultipliers = from.resistanceMultipliers;
@@ -193,8 +194,8 @@ namespace Zombie1111_uDestruction
 
         [Space(10)]
         [Header("Material")]
-        [SerializeField] private Material matInside_defualt = null;
-        [SerializeField] private Material matOutside_defualt = null;
+        [SerializeField] private Material insideMat_fallback = null;
+        [SerializeField] private string insideMat_nameAddition = "_inside";
         [SerializeField] private PhysicMaterial physicsMat = null;
         public List<FracVolume> resistanceMultipliers = new();
 
@@ -234,9 +235,25 @@ namespace Zombie1111_uDestruction
 
         private bool eOnly_globalHandlerHasBeenChecked = false;
         private int eOnly_loadedId = -1;
+        public int debug_tris;
 
         private void OnDrawGizmos()
         {
+            //SkinnedMeshRenderer rend = transform.GetComponentInChildren<SkinnedMeshRenderer>();
+            //if (rend == null) return;
+            //Vector3[] verW = FractureHelperFunc.ConvertPositionsWithMatrix(rend.sharedMesh.vertices, rend.localToWorldMatrix);
+            //int[] tris = rend.sharedMesh.triangles;
+            //
+            //int cT = FractureHelperFunc.GetClosestTriOnMesh(verW, tris, 
+            //    new Vector3[3] { verW[tris[debug_tris]], verW[tris[debug_tris + 1]], verW[tris[debug_tris + 2]] }, 0.0f);
+            //
+            //FractureHelperFunc.Debug_drawBox(verW[tris[cT]], 0.001f, Color.red, 0.0f);
+            //FractureHelperFunc.Debug_drawBox(verW[tris[cT + 1]], 0.001f, Color.red, 0.0f);
+            //FractureHelperFunc.Debug_drawBox(verW[tris[cT + 2]], 0.001f, Color.red, 0.0f);
+            //FractureHelperFunc.Debug_drawBox(verW[tris[debug_tris]], 0.002f, Color.yellow, 0.0f);
+            //FractureHelperFunc.Debug_drawBox(verW[tris[debug_tris + 1]], 0.002f, Color.yellow, 0.0f);
+            //FractureHelperFunc.Debug_drawBox(verW[tris[debug_tris + 2]], 0.002f, Color.yellow, 0.0f);
+
             if (Application.isPlaying == true) return;
 
             //load saveAsset if needed
@@ -267,7 +284,7 @@ namespace Zombie1111_uDestruction
             if (fracRend != null && fracRend.transform != transform)
             {
                 Debug.LogError(transform.name + " fracture does not reference the correct object and will be removed (Has the script been copied?)");
-                Gen_removeFracture();
+                Gen_removeFracture(false, false, false);
                 return;
             }
         }
@@ -275,7 +292,11 @@ namespace Zombie1111_uDestruction
         private void OnDrawGizmosSelected()
         {
             //draw selected group id
-            if (visualizedGroupId < 0 || useGroupIds == false || fracRend != null) visualizedGroupId = -1;
+            if (visualizedGroupId < 0 || useGroupIds == false || fracRend != null)
+            {
+                if (visualizedGroupId >= 0 && useGroupIds == true) Debug.LogError("Cannot visualize groupId while object is fractured");
+                visualizedGroupId = -1;
+            }
             else
             {
                 List<MeshData> fracMeshes = Gen_getMeshesToFracture(gameObject, true, worldScale * 0.0001f);
@@ -292,7 +313,7 @@ namespace Zombie1111_uDestruction
                 {
                     verCols = fracMeshes[i].mesh.colors;
                     vers = fracMeshes[i].mesh.vertices;
-                    
+
                     for (int vI = vers.Length - 1; vI >= 0; vI--)
                     {
                         if (FractureHelperFunc.Gd_isIdInColor(gId, verCols[vI]) == true)
@@ -617,7 +638,8 @@ namespace Zombie1111_uDestruction
 
                     for (int ii = 0; ii < allFracParents[i].partIndexes.Count; ii++)
                     {
-                        if (saved_allPartsCol.Length != allFracParents[i].partIndexes.Count && allParts.Length != allFracParents[i].partIndexes.Count)
+                        if ((saved_allPartsCol.Length != allFracParents[i].partIndexes.Count && allParts.Length != allFracParents[i].partIndexes.Count)
+                            || (allParts.Length == 0 && saved_allPartsCol.Length == 0))
                         {
                             Debug.LogError(transform.name + " parts list was for some weird reason cleared before parts was removed (You must delete them manually)");
                             break;
@@ -675,7 +697,7 @@ namespace Zombie1111_uDestruction
             else ogData.hadRend = false;
 
             fracRend = transform.GetOrAddComponent<SkinnedMeshRenderer>();
-            if (rend != null) CopyRendProperties(rend, fracRend, new Material[2] { matInside_defualt, matOutside_defualt }, true);
+            if (rend != null) CopyRendProperties(rend, fracRend, new Material[0], true);
 
             //save og components
             bool newBoolValue;
@@ -807,11 +829,32 @@ namespace Zombie1111_uDestruction
 #endif
 
         /// <summary>
-        /// Call to remove the fracture, returns true if successfully removed the fracture
+        /// Asks the user if we are allowed to save and returns true if we are
         /// </summary>
-        public bool Gen_removeFracture(bool isPrefabAsset = false)
+        public bool Gen_askIfCanSave(bool willRemoveFrac)
         {
 #if UNITY_EDITOR
+            if (Application.isPlaying == false && EditorSceneManager.GetActiveScene().isDirty == true
+    && EditorUtility.DisplayDialog("", willRemoveFrac == true ? "All open scenes must be saved before removing fracture!"
+    : "All open scenes must be saved before fracturing!", willRemoveFrac == true ? "Save and remove" : "Save and fracture", "Cancel") == false)
+            {
+                //Debug.LogError("The scene must be saved before fracturing");
+                return false;
+            }
+#endif
+
+            return !Application.isPlaying;
+        }
+
+        /// <summary>
+        /// Call to remove the fracture, returns true if successfully removed the fracture
+        /// </summary>
+        public bool Gen_removeFracture(bool isPrefabAsset = false, bool askForSavePermission = true, bool allowSave = true)
+        {
+#if UNITY_EDITOR
+            //make sure we can save the scene later, save scene
+            if (askForSavePermission == true && Gen_askIfCanSave(true) == false) return false;
+
             //set if should always count as prefab asset
             eOnly_isPrefabAsset = isPrefabAsset;
 
@@ -823,8 +866,8 @@ namespace Zombie1111_uDestruction
                 {
                     foreach (FractureThis fracT in editingScope.prefabContentsRoot.GetComponentsInChildren<FractureThis>())
                     {
-                        if (okRem == true) okRem = fracT.Gen_removeFracture(true);
-                        else fracT.Gen_removeFracture(true);
+                        if (okRem == true) okRem = fracT.Gen_removeFracture(true, false);
+                        else fracT.Gen_removeFracture(true, false);
                     }
                 }
 
@@ -832,16 +875,23 @@ namespace Zombie1111_uDestruction
             }
 #endif
 
-            //remove the fracture
+            //remove the fracture and save the scene
             Gen_loadAndMaybeSaveOgData(false);
+#if UNITY_EDITOR
+            if (allowSave == true && Application.isPlaying == false) EditorSceneManager.SaveOpenScenes();
+#endif
+
             return true;
         }
 
         /// <summary>
         /// Call to fracture the object the mesh is attatched to, returns true if successfully fractured the object
         /// </summary>
-        public bool Gen_fractureObject(bool isPrefabAsset = false)
+        public bool Gen_fractureObject(bool isPrefabAsset = false, bool askForSavePermission = true)
         {
+            //make sure we can save the scene later, save scene
+            if (askForSavePermission == true && Gen_askIfCanSave(false) == false) return false;
+
             //verify if we can continue with fracturing here or on prefab
             if (Gen_checkIfContinueWithFrac(out bool didFracOther, isPrefabAsset) == false) return didFracOther;
 
@@ -871,12 +921,12 @@ namespace Zombie1111_uDestruction
             }
 
             //setup fracture renderer, setup renderer
-            Gen_setupRenderer(partMeshesW, meshesToFracW, transform, matInside_defualt, matOutside_defualt, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer);
+            Gen_setupRenderer(partMeshesW, meshesToFracW, transform, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer, out int[] rTrisBestOgMeshTris);
             //Gen_loadAndMaybeSaveOgData(false);
             //return false; //debug remove later
 
             //setup fracture renderer materials
-            Gen_setupRendererMaterials(rVersOgMeshI, rVersBestOgMeshVer, meshesToFracW);
+            Gen_setupRendererMaterials(rVersOgMeshI, rVersBestOgMeshVer, rTrisBestOgMeshTris, meshesToFracW);
 
             //setup more advanced part data
             Gen_setupPartStructure(partMeshesW);
@@ -897,6 +947,11 @@ namespace Zombie1111_uDestruction
 
             //save to save asset
             SaveOrLoadAsset(true);
+
+            //save scene (Since the user agreed to saving before fracturing we can just save without asking)
+#if UNITY_EDITOR
+            if (Application.isPlaying == false) EditorSceneManager.SaveOpenScenes();
+#endif
 
             //log result when done, log when done
             if (fracRend.bones.Length > 500) Debug.LogWarning(transform.name + " has " + fracRend.bones.Length + " bones (skinnedMeshRenderers seems to have a limitation of ~500 bones before it breaks)");
@@ -930,8 +985,8 @@ namespace Zombie1111_uDestruction
                     //This script properties must always be synced
                     foreach (FractureThis fracT in editingScope.prefabContentsRoot.GetComponentsInChildren<FractureThis>())
                     {
-                        if (didFracOther == true) didFracOther = fracT.Gen_fractureObject(true);
-                        else fracT.Gen_fractureObject(true);
+                        if (didFracOther == true) didFracOther = fracT.Gen_fractureObject(true, false);
+                        else fracT.Gen_fractureObject(true, false);
 
                         didFindFrac = true;
                     }
@@ -1068,11 +1123,14 @@ namespace Zombie1111_uDestruction
         /// <param name="rendHolder"></param>
         /// <param name="matInside"></param>
         /// <param name="matOutside"></param>
-        private void Gen_setupRenderer(List<MeshData> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, Material matInside, Material matOutside, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer)
+        private void Gen_setupRenderer(List<MeshData> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer, out int[] rTrisBestOgMeshTris)
         {
             //combine meshes and set allparts rendVertexIndexes
             //Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshesW, ref fParts);
             Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshesW.Select(fM => fM.mesh).ToArray(), ref allParts);
+            comMesh.OptimizeIndexBuffers(); //should be safe to call since vertics order does not change
+            comMesh.RecalculateNormals();
+            comMesh.RecalculateTangents();
 
             Vector3[] cVers = comMesh.vertices;
             float worldDis = worldScale * 0.01f;//0.01??
@@ -1141,6 +1199,8 @@ namespace Zombie1111_uDestruction
                           oTrisPoss,
                           cVers[cTris[tI]],
                           worldDis)];
+
+                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]], Color.magenta, 30.0f);
                     }
 
                     if (closeOVer[cTris[tI + 1]] < 0)
@@ -1149,6 +1209,8 @@ namespace Zombie1111_uDestruction
                           oTrisPoss,
                           cVers[cTris[tI + 1]],
                           worldDis)];
+
+                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]], Color.magenta, 30.0f);
                     }
 
                     if (closeOVer[cTris[tI + 2]] < 0)
@@ -1157,91 +1219,16 @@ namespace Zombie1111_uDestruction
                           oTrisPoss,
                           cVers[cTris[tI + 2]],
                           worldDis)];
+
+                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]], Color.magenta, 30.0f);
                     }
                 }
             });
 
             Debug_toggleTimer();
 
-            //note for myself, next task is to get the most similar og vertex for every vertex on the comMesh.
-            //So we can use that for real boneWeights and to get what parts can be neighbours. Also to get submeshes for materials
-            //We already know the most similar tris (Not fully tested tho)
-
-            Debug_toggleTimer();
-
-
-            //Parallel.For(0, cvL, i =>
-            //{
-            //    if (closeOVer[i] == -1)
-            //    {
-            //        //get all tris that uses these vers
-            //        HashSet<int> vPoss = verticsLinkedThreaded[i].intList.ToHashSet();
-            //        lock (closeOVer)
-            //        {
-            //            foreach (int vI in vPoss)
-            //            {
-            //                closeOVer[vI] = -2;
-            //            }
-            //        }
-            //
-            //        Dictionary<int, int> simTriss = new();
-            //        int tI;
-            //
-            //        for (int ii = 0; ii < ctL; ii++)
-            //        {
-            //            tI = ii * 3;
-            //            if (vPoss.Contains(cTris[tI]) == false && vPoss.Contains(cTris[tI + 1]) == false && vPoss.Contains(cTris[tI + 2]) == false) continue;
-            //
-            //            if (simTriss.ContainsKey(closeOTris[ii]) == true) simTriss[closeOTris[ii]] += 1;
-            //            else simTriss[closeOTris[ii]] = 1;
-            //
-            //            //break;//better performance, but worse quality??
-            //        }
-            //
-            //        if (simTriss.Count == 0)
-            //        {
-            //            //if simTriss somehow so 0, reset closeVer
-            //            if (closeOVer[i] == -2)
-            //            {
-            //                lock (closeOVer)
-            //                {
-            //                    foreach (int vI in vPoss)
-            //                    {
-            //                        closeOVer[vI] = -1;
-            //                    }
-            //                }
-            //            }
-            //        }
-            //        else
-            //        {
-            //            //get the best ver for every ver in con
-            //            int oI = cVerOgMeshI[i];
-            //            tI = simTriss.Aggregate((x, y) => x.Value > y.Value ? x : y).Key;
-            //
-            //            int bestVi = FractureHelperFunc.GetClosestPointInArray(
-            //                new Vector3[3] { oVerss[oI][oTriss[oI][tI]], oVerss[oI][oTriss[oI][tI + 1]], oVerss[oI][oTriss[oI][tI + 2]] },
-            //                cVers[i],
-            //                worldDis);
-            //
-            //            bestVi = oTriss[oI][tI + bestVi];
-            //
-            //            ////write the best ver to the array for all vers in con at this pos
-            //            //Debug.DrawLine(cVers[i], oVerss[oI][bestVi], Color.magenta ,10.0f);
-            //
-            //            lock (closeOVer)
-            //            {
-            //                foreach (int vI in vPoss)
-            //                {
-            //                    closeOVer[vI] = bestVi;
-            //                }
-            //            }
-            //        }
-            //    }
-            //});
-
-            Debug_toggleTimer();
-
             rVersBestOgMeshVer = closeOVer;
+            rTrisBestOgMeshTris = closeOTris.ToArray();
             closeOTris.Dispose();
 
             //convert mesh to renderer local space
@@ -1262,15 +1249,12 @@ namespace Zombie1111_uDestruction
             comMesh.bindposes = allParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
 
             //set renderer
-            comMesh.OptimizeIndexBuffers(); //should be safe to call since vertics order does not change
             SkinnedMeshRenderer sRend = rendHolder.GetOrAddComponent<SkinnedMeshRenderer>();
             sRend.enabled = true;
             sRend.rootBone = rendHolder;
             sRend.bones = allParts.Select(part => part.col.transform).ToArray();
-            sRend.sharedMaterials = new Material[2] { matInside, matOutside };
+            //sRend.sharedMaterials = new Material[2] { matInside, matOutside }; //assigned later
             sRend.sharedMesh = comMesh;
-            sRend.sharedMesh.RecalculateNormals();
-            sRend.sharedMesh.RecalculateTangents();
 
             //setup verticsPartThreaded
             verticsPartThreaded = new int[cVers.Length];
@@ -1283,7 +1267,7 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        private void Gen_setupRendererMaterials(int[] rVersOgMeshI, int[] rVersBestOgMeshVer, List<MeshData> sourceMeshesW)
+        private void Gen_setupRendererMaterials(int[] rVersOgMeshI, int[] rVersBestOgMeshVer, int[] rTrisBestOgMeshTris, List<MeshData> sourceMeshesW)
         {
 
             Vector3[][] oVers = new Vector3[sourceMeshesW.Count][];
@@ -1299,72 +1283,220 @@ namespace Zombie1111_uDestruction
             //set vertex colors
             if (doVertexColors == true) fracRend.sharedMesh.colors = Enumerable.Repeat(new Color(1.0f, 1.0f, 1.0f, 0.0f), fracRend.sharedMesh.vertexCount).ToArray();
 
-            //get what materials to use
-            int[][] ogVersSubMeshI = new int[sourceMeshesW.Count][]; //What submesh a given vertex has in sourceMesh[i]
-            Dictionary<int, int>[] ogSubConSub = new Dictionary<int, int>[sourceMeshesW.Count]; //What submesh in fracMesh a given submesh in sourceMesh[i] has
-            Dictionary<Material, int> cSubMeshMat = new(); //The submesh index a given material has in fracMesh
-            Mesh tempOM;
-            int cNextSubMeshI = 0;
+            //Get what submesh each triangel in every source mesh has
+            int[][] ogTrisSubMeshI = new int[sourceMeshesW.Count][]; //what submesh a given triangel has in sourceMesh[i]
 
-            for (int i = 0; i < sourceMeshesW.Count; i++)
+            for (int oI = 0; oI < sourceMeshesW.Count; oI++)
             {
-                ogSubConSub[i] = new();
-                tempOM = sourceMeshesW[i].mesh;
-                ogVersSubMeshI[i] = new int[tempOM.vertexCount];
+                Mesh oMesh = sourceMeshesW[oI].mesh;
+                ogTrisSubMeshI[oI] = new int[oMesh.triangles.Length / 3];
 
-                for (int sI = 0; sI < tempOM.subMeshCount; sI++)
+                for (int sI = 0; sI < oMesh.subMeshCount; sI++)
                 {
-                    foreach (int tI in tempOM.GetTriangles(sI))
-                    {
-                        ogVersSubMeshI[i][tI] = sI;
-                    }
+                    SubMeshDescriptor subMesh = oMesh.GetSubMesh(sI);
+                    int indexEnd = (subMesh.indexStart / 3) + (subMesh.indexCount / 3);
 
-                    if (cSubMeshMat.ContainsKey(sourceMeshesW[i].subMeshMats[sI]) == false)
+                    for (int tI = (subMesh.indexStart / 3); tI < indexEnd; tI++)
                     {
-                        cSubMeshMat.Add(sourceMeshesW[i].subMeshMats[sI], cNextSubMeshI);
-                        cNextSubMeshI++;
+                        ogTrisSubMeshI[oI][tI] = sI;
                     }
-
-                    ogSubConSub[i].Add(sI, cSubMeshMat[sourceMeshesW[i].subMeshMats[sI]]);
                 }
             }
 
-            Debug.Log(cSubMeshMat.Count);
+            //get a new submesh index for every material that exists in all source meshes
+            Dictionary<Material, int> matToConSubMeshI = new();
+            Dictionary<int, int>[] oSubMeshToConSubMesh = new Dictionary<int, int>[sourceMeshesW.Count];
+            int nextConSubI = 0;
 
+            for (int oI = 0; oI < sourceMeshesW.Count; oI++)
+            {
+                oSubMeshToConSubMesh[oI] = new();
 
-            //get submeshes for each material in fracMesh
-            List<int>[] newTrisSub = new List<int>[cSubMeshMat.Count];
+                for (int sI = 0; sI < sourceMeshesW[oI].mesh.subMeshCount; sI++)
+                {
+                    if (matToConSubMeshI.TryAdd(sourceMeshesW[oI].subMeshMats[sI], nextConSubI) == true)
+                    {
+                        nextConSubI++;
+                    }
+
+                    oSubMeshToConSubMesh[oI].Add(sI, matToConSubMeshI[sourceMeshesW[oI].subMeshMats[sI]]);
+                }
+            }
+
+            //get what submesh every triangel in fracMesh should have
+            //List<int>[] newSubMeshes = new List<int>[matToConSubMeshI.Count];
+            List<List<int>> newSubMeshes = new List<List<int>>(matToConSubMeshI.Count * 2);
+            for (int i = 0; i < matToConSubMeshI.Count; i++)
+            {
+                newSubMeshes.Add(new());
+                //newSubMeshes[i] = new();
+            }
+
             int[] cTris = fracRend.sharedMesh.triangles;
-            int ctL = cTris.Length;
+            int ctL = cTris.Length / 3;
 
-
-            for (int i = 0; i < newTrisSub.Length; i++)
+            for (int i = 0; i < ctL; i++)
             {
-                newTrisSub[i] = new();
+                int ctI = i * 3;
+
+                int oI = rVersOgMeshI[cTris[ctI]];
+                int otI = rTrisBestOgMeshTris[i] / 3;
+                int osI = ogTrisSubMeshI[oI][otI];
+                int csI = oSubMeshToConSubMesh[oI][osI];
+
+                newSubMeshes[csI].Add(cTris[ctI]);
+                newSubMeshes[csI].Add(cTris[ctI + 1]);
+                newSubMeshes[csI].Add(cTris[ctI + 2]);
             }
 
-            for (int i = 0; i < ctL; i += 3)
+            //get all inside vertics
+            HashSet<int> allInsideVers = new();
             {
-                int oMeshI = rVersOgMeshI[cTris[i]];
-                int oVerI = rVersBestOgMeshVer[cTris[i]];
-                int oSubI = ogVersSubMeshI[oMeshI][oVerI];
-                int cSubI = ogSubConSub[oMeshI][oSubI];
+                foreach (int vI in fracRend.sharedMesh.GetTriangles(1))
+                {
+                    allInsideVers.Add(vI);
+                }
 
-                //if (oMeshI == 0) Debug.DrawLine(oVers[oVerI], cVers[cTris[i]], Color.blue, 20.0f);
-
-                newTrisSub[cSubI].Add(cTris[i]);
-                newTrisSub[cSubI].Add(cTris[i + 1]);
-                newTrisSub[cSubI].Add(cTris[i + 2]);
+                //SubMeshDescriptor subMesh = fracRend.sharedMesh.GetSubMesh(1);
+                //int indexEnd = (subMesh.indexStart / 3) + (subMesh.indexCount / 3);
+                //
+                //for (int tI = (subMesh.indexStart / 3); tI < indexEnd; tI++)
+                //{
+                //    allInsideTris.Add(tI);
+                //}
             }
 
-            //assign materials and submeshes to fracMesh and fracRend
-            fracRend.sharedMaterials = cSubMeshMat.Keys.ToArray();
-            fracRend.sharedMesh.subMeshCount = newTrisSub.Length;
+            //get what materials that also has a inside version, get inside mat
+            Material[] newMats = matToConSubMeshI.Keys.ToArray();
 
-            for (int i = 0; i < newTrisSub.Length; i++)
+            foreach (Material mat in newMats)
             {
-                fracRend.sharedMesh.SetTriangles(newTrisSub[i], i);
+                //get if inside material exists
+                if (mat == null) continue;
+                Material insideMat = null;
+
+#if UNITY_EDITOR
+                if (Application.isPlaying == false) //Just to make runtime edit behave more like build
+                {
+                    string path = AssetDatabase.GetAssetPath(mat);
+                    if (path == null || path.Length < 3) continue;
+
+                    int lastIndex = path.LastIndexOf('/') + 1;
+                    path = (lastIndex > 0 ? path[..lastIndex] : path) + mat.name + insideMat_nameAddition + ".mat";
+
+                    insideMat = (Material)AssetDatabase.LoadAssetAtPath(path, typeof(Material));
+                }
+#endif
+                if (insideMat == null) insideMat = insideMat_fallback;
+                if (insideMat == null) continue;
+
+                //inside material exists add it to all inside triangels
+                int sI = matToConSubMeshI[mat];
+                int insideMatI = newSubMeshes.Count;
+                if (matToConSubMeshI.TryAdd(insideMat, insideMatI) == true)
+                {
+                    newSubMeshes.Add(new());
+                }
+                else
+                {
+                    insideMatI = matToConSubMeshI[insideMat];
+                    if (insideMatI == sI) continue;
+                }
+
+                for (int stI = newSubMeshes[sI].Count - 3; stI >= 0; stI -= 3)
+                {
+                    if (allInsideVers.Contains(newSubMeshes[sI][stI]) == true)
+                    {
+                        newSubMeshes[insideMatI].Add(newSubMeshes[sI][stI]);
+                        newSubMeshes[insideMatI].Add(newSubMeshes[sI][stI + 1]);
+                        newSubMeshes[insideMatI].Add(newSubMeshes[sI][stI + 2]);
+
+                        newSubMeshes[sI].RemoveAt(stI);
+                        newSubMeshes[sI].RemoveAt(stI);
+                        newSubMeshes[sI].RemoveAt(stI);
+                    }
+                }
             }
+
+            //assign submeshes and materials to fracRend
+            newMats = new Material[newSubMeshes.Count];
+            fracRend.sharedMesh.subMeshCount = newSubMeshes.Count;
+
+            foreach (Material mat in matToConSubMeshI.Keys)
+            {
+                int sI = matToConSubMeshI[mat];
+                fracRend.sharedMesh.SetTriangles(newSubMeshes[sI], sI);
+                newMats[sI] = mat;
+            }
+
+            fracRend.sharedMaterials = newMats;
+
+             ////get what materials to use
+             //int[][] ogVersSubMeshI = new int[sourceMeshesW.Count][]; //What submesh a given vertex has in sourceMesh[i]
+             //Dictionary<int, int>[] ogSubConSub = new Dictionary<int, int>[sourceMeshesW.Count]; //What submesh in fracMesh a given submesh in sourceMesh[i] has
+             //Dictionary<Material, int> cSubMeshMat = new(); //The submesh index a given material has in fracMesh
+             //Mesh tempOM;
+             //int cNextSubMeshI = 0;
+             //
+             //for (int i = 0; i < sourceMeshesW.Count; i++)
+             //{
+             //    ogSubConSub[i] = new();
+             //    tempOM = sourceMeshesW[i].mesh;
+             //    ogVersSubMeshI[i] = new int[tempOM.vertexCount];
+             //
+             //    for (int sI = 0; sI < tempOM.subMeshCount; sI++)
+             //    {
+             //        foreach (int tI in tempOM.GetTriangles(sI))
+             //        {
+             //            ogVersSubMeshI[i][tI] = sI;
+             //        }
+             //
+             //        if (cSubMeshMat.ContainsKey(sourceMeshesW[i].subMeshMats[sI]) == false)
+             //        {
+             //            cSubMeshMat.Add(sourceMeshesW[i].subMeshMats[sI], cNextSubMeshI);
+             //            cNextSubMeshI++;
+             //        }
+             //
+             //        ogSubConSub[i].Add(sI, cSubMeshMat[sourceMeshesW[i].subMeshMats[sI]]);
+             //    }
+             //}
+             //
+             //Debug.Log(cSubMeshMat.Count);
+             //
+             //
+             ////get submeshes for each material in fracMesh
+             //List<int>[] newTrisSub = new List<int>[cSubMeshMat.Count];
+             //int[] cTris = fracRend.sharedMesh.triangles;
+             //int ctL = cTris.Length;
+             //
+             //
+             //for (int i = 0; i < newTrisSub.Length; i++)
+             //{
+             //    newTrisSub[i] = new();
+             //}
+             //
+             //for (int i = 0; i < ctL; i += 3)
+             //{
+             //    int oMeshI = rVersOgMeshI[cTris[i]];
+             //    int oVerI = rVersBestOgMeshVer[cTris[i]];
+             //    int oSubI = ogVersSubMeshI[oMeshI][oVerI];
+             //    int cSubI = ogSubConSub[oMeshI][oSubI];
+             //
+             //    //if (oMeshI == 0) Debug.DrawLine(oVers[oVerI], cVers[cTris[i]], Color.blue, 20.0f);
+             //
+             //    newTrisSub[cSubI].Add(cTris[i]);
+             //    newTrisSub[cSubI].Add(cTris[i + 1]);
+             //    newTrisSub[cSubI].Add(cTris[i + 2]);
+             //}
+             //
+             ////assign materials and submeshes to fracMesh and fracRend
+             //fracRend.sharedMaterials = cSubMeshMat.Keys.ToArray();
+             //fracRend.sharedMesh.subMeshCount = newTrisSub.Length;
+             //
+             //for (int i = 0; i < newTrisSub.Length; i++)
+             //{
+             //    fracRend.sharedMesh.SetTriangles(newTrisSub[i], i);
+             //}
         }
 
         /// <summary>

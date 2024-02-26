@@ -94,6 +94,8 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         public static IEnumerator FractureArray(FractureThis[] toFracture, byte fractureQuality = 69, bool logProgress = true)
         {
+            if (toFracture.Length == 0 || toFracture[0].Gen_askIfCanSave(false) == false) yield break;
+
             int fracturedCount = 0;
             HashSet<FractureSaveAsset> usedAssets = new();
 
@@ -108,7 +110,7 @@ namespace Zombie1111_uDestruction
                 FractureThis.GenerationQuality ogQuality = frac.generationQuality;
 
                 if (fractureQuality <= 2) frac.generationQuality = (FractureThis.GenerationQuality)fractureQuality;
-                frac.Gen_fractureObject();
+                frac.Gen_fractureObject(false, false);
 
                 frac.generationQuality = ogQuality;
 
@@ -129,6 +131,8 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public static void RemoveFracturesArray(FractureThis[] toRemove, bool logProgress = true)
         {
+            if (toRemove.Length == 0 || toRemove[0].Gen_askIfCanSave(true) == false) return;
+
             HashSet<FractureSaveAsset> usedAssets = new();
 
             foreach (FractureThis frac in toRemove)
@@ -138,7 +142,7 @@ namespace Zombie1111_uDestruction
                     continue;
                 }
 
-                frac.Gen_removeFracture();
+                frac.Gen_removeFracture(false, false);
             }
 
             if (logProgress == true) Debug.Log("Removed " + toRemove.Length + " fractures");
