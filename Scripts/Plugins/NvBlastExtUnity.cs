@@ -110,7 +110,7 @@ public class NvMesh : DisposablePtr
     {
         NvLogger.Log("_Mesh_Release");
 
-        _Mesh_Release(this.ptr); //Throws Exceptions even tho everything is working
+        //_Mesh_Release(this.ptr); //Throws Exceptions even tho everything is working
     }
 
     //Unity Helper Functions
@@ -291,7 +291,7 @@ public class NvVoronoiSitesGenerator : DisposablePtr
     protected override void Release()
     {
         NvLogger.Log("_VoronoiSitesGenerator_Release");
-        _VoronoiSitesGenerator_Release(this.ptr);//Throws exceptions even tho it is working
+        //_VoronoiSitesGenerator_Release(this.ptr);//Throws exceptions even tho it is working
     }
 
     //Unity Specific

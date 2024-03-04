@@ -6,6 +6,8 @@ using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using Unity.VisualScripting.FullSerializer;
 using UnityEngine.Rendering;
+using g3;
+
 
 
 
@@ -306,36 +308,6 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="meshWorldVers">The mesh vertics in world space</param>
         /// <param name="meshTris">The mesh triangels</param>
-        /// <param name="pos">Closest point to this</param>
-        /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
-        /// <returns></returns>
-        public static int GetClosestPointOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3 pos, float preExitTolerance = 0.01f)
-        {
-            int bestI = 0;
-            float bestD = float.MaxValue;
-            float currentD;
-
-            for (int i = 0; i < meshTris.Length; i += 3)
-            {
-                currentD = (pos - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], pos)).sqrMagnitude;
-
-                if (currentD < bestD)
-                {
-                    bestD = currentD;
-                    bestI = i;
-
-                    if (currentD < preExitTolerance) break;
-                }
-            }
-
-            return bestI;
-        }
-
-        /// <summary>
-        /// Returns the closest triangel index on the mesh
-        /// </summary>
-        /// <param name="meshWorldVers">The mesh vertics in world space</param>
-        /// <param name="meshTris">The mesh triangels</param>
         /// <param name="pos">Closest triangel to these</param>
         /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
         /// <returns></returns>
@@ -422,6 +394,9 @@ namespace Zombie1111_uDestruction
             return originalMesh;
         }
 
+        /// <summary>
+        /// Removes all vectors from the vectors list that is similar enough to vectors[X]
+        /// </summary>
         public static void MergeSimilarVectors(ref List<Vector3> vectors, float tolerance = 0.001f)
         {
             for (int i = 0; i < vectors.Count; i += 1)
@@ -440,7 +415,6 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="dir1">Should be normalized</param>
         /// <param name="dir2">Should be normalized</param>
-        /// <returns></returns>
         public static float GetDirectionSimularity(Vector3 dir1, Vector3 dir2)
         {
             return Vector3.Dot(dir1, dir2);
@@ -449,25 +423,23 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns true if the mesh is valid for fracturing
         /// </summary>
-        /// <param name="mesh"></param>
-        /// <returns></returns>
-        public static bool IsMeshValid(Mesh mesh, float EPSILON = 0.0001f)
+        public static bool IsMeshValid(Mesh mesh, bool checkIfValidHull = false, float EPSILON = 0.0001f)
         {
             if (mesh == null)
             {
                 return false;
             }
 
-            Vector3[] vertices = mesh.vertices;
             int trisCount = mesh.triangles.Length;
-            if (vertices == null || vertices.Length < 4 || trisCount < 7 || trisCount % 3 != 0)
+            if (mesh.vertexCount < 4 || trisCount < 7 || trisCount % 3 != 0)
             {
                 return false;
             }
 
-            return FindInitialHullIndices(mesh.vertices.ToList());
+            if (checkIfValidHull == false) return true;
+            return HasValidHull(mesh.vertices.ToList());
 
-            bool FindInitialHullIndices(List<Vector3> points)
+            bool HasValidHull(List<Vector3> points)
             {
                 var count = points.Count;
 
@@ -533,16 +505,11 @@ namespace Zombie1111_uDestruction
             {
                 return (a - b).magnitude <= EPSILON;
             }
-
-            //return true;
         }
 
         /// <summary>
         /// Returns 2 meshes, [0] is the one containing vertexIndexesToSplit. May remove tris at split edges if some tris vertics are in vertexIndexesToSplit and some not
         /// </summary>
-        /// <param name="vertexIndexesToSplit"></param>
-        /// <param name="originalMesh"></param>
-        /// <returns></returns>
         public static List<FractureThis.MeshData> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, FractureThis.MeshData orginalMeshD, bool doBones, FractureThis fT, Material dMat)
         {
             //get ogMesh tris, vers....
@@ -554,7 +521,7 @@ namespace Zombie1111_uDestruction
             BoneWeight[] oBones = doBones ? oMesh.boneWeights : new BoneWeight[oVerts.Length];
             Color[] oCols = oMesh.colors;
 
-            //get what submesh each vertex has
+            //get what submesh each og triangel has
             int otL = oTris.Length;
             int[] ogTrisSubMeshI = new int[oTris.Length];//What submesh index a given vertex has in the ogMesh
 
@@ -567,15 +534,7 @@ namespace Zombie1111_uDestruction
                 {
                     ogTrisSubMeshI[tI] = sI;
                 }
-
-                //Debug.Log(oMesh.GetSubMesh(i).indexStart + " " + oMesh.GetSubMesh(i).indexCount + " " + i);
-                //foreach (int vI in oMesh.GetTriangles(i))
-                //{
-                //    ttc++;
-                //    ogVersSubMeshI[vI] = i;
-                //}
             }
-
 
             // Verify mesh properties and handle mismatches if necessary
             if (oUvs.Length != oVerts.Length)
@@ -715,18 +674,6 @@ namespace Zombie1111_uDestruction
                     usedOgSubI.TryAdd(ogSubI, newSubTrisI.Count);
                     subI = usedOgSubI[ogSubI];
 
-                    //if (msubI == ogSubI)
-                    //{
-                    //    Debug_drawBox(oVerts[oTris[splitTrisOgTris[otI]]], 0.001f, Color.yellow, 10.0f);
-                    //    Debug_drawBox(oVerts[oTris[splitTrisOgTris[otI] + 1]], 0.001f, Color.yellow, 10.0f);
-                    //    Debug_drawBox(oVerts[oTris[splitTrisOgTris[otI] + 2]], 0.001f, Color.yellow, 10.0f);
-                    //}
-
-                    //if (ogSubI == 8) Debug_drawBox(vertices[triangles[tI]], 0.1f, Color.yellow, 10.0f);
-                    //Debug.DrawLine(oVerts[oTris[splitTrisOgTris[i]]], vertices[triangles[tI]] + (Vector3.up * 0.002f), Color.red, 10.0f);
-                    //Debug.DrawLine(oVerts[oTris[splitTrisOgTris[i] + 1]], vertices[triangles[tI + 1]] + (Vector3.up * 0.002f), Color.red, 10.0f);
-                    //Debug.DrawLine(oVerts[oTris[splitTrisOgTris[i] + 2]], vertices[triangles[tI + 2]] + (Vector3.up * 0.002f), Color.red, 10.0f);
-
                     if (subI == newSubTrisI.Count)
                     {
                         newSubMats.Add(orginalMeshD.subMeshMats[ogSubI]);
@@ -757,8 +704,6 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns a new instance of the given mesh but all submeshes are merged into one
         /// </summary>
-        /// <param name="mesh"></param>
-        /// <returns></returns>
         public static Mesh MergeSubMeshes(Mesh mesh)
         {
             return new() {
@@ -777,10 +722,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns all vertics connected to the given vertexIndex
         /// </summary>
-        /// <param name="mesh"></param>
-        /// <param name="vertexIndex"></param>
         /// <param name="verDisTol">All vertics within this radius will count as the same vertex</param>
-        /// <returns></returns>
         public static HashSet<int> GetConnectedVertics(Mesh mesh, int vertexIndex, float verDisTol = 0.0001f)
         {
             //setup
@@ -829,10 +771,6 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns all vertics that is close to the given position. (Always excluding vertex index vIndexToIgnore)
         /// </summary>
-        /// <param name="pos"></param>
-        /// <param name="verDisTol"></param>
-        /// <param name="vIndexToIgnore"></param>
-        /// <returns></returns>
         public static List<int> GetAllVertexIndexesAtPos(Vector3[] vertics, Vector3 pos, float verDisTol = 0.0001f, int vIndexToIgnore = -1)
         {
             List<int> vAtPos = new();
@@ -851,11 +789,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns all vertics that is close to the given position and has the same id. (Always excluding vertex index vIndexToIgnore)
         /// </summary>
-        /// <param name="pos"></param>
-        /// <param name="verDisTol"></param>
-        /// <param name="vIndexToIgnore"></param>
         /// <param name="verticsIds">Must have the same lenght as vertics</param>
-        /// <returns></returns>
         public static List<int> GetAllVertexIndexesAtPos_id(Vector3[] vertics, int[] verticsIds, Vector3 pos, int id, float verDisTol = 0.0001f)
         {
             List<int> vAtPos = new();
@@ -872,7 +806,7 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Adds all group ids that exists in the given color array to the groupIds hashset, does not include links
+        /// Adds all group ids that exists in the given color array to the groupIds hashset
         /// </summary>
         public static void Gd_getIdsFromColors(Color[] colors, ref HashSet<List<float>> groupIds)
         {
@@ -896,7 +830,7 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns the id from the color, does not include links, returns null if base id
+        /// Returns the id from the color, returns null if base id
         /// </summary>
         public static List<float> Gd_getIdFromColor(Color color)
         {
@@ -919,7 +853,7 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns true if the given group id matches the id in the color, does not include links
+        /// Returns true if the given group id matches the id in the color
         /// </summary>
         public static bool Gd_isIdInColor(List<float> id, Color color)
         {
@@ -938,6 +872,38 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns true if colorA is linked with colorB
+        /// </summary>
+        public static bool Gd_isColorLinkedWithColor(Color colorA, Color colorB)
+        {
+            //get if connected with id
+            List<float> colAId = Gd_getIdFromColor(colorA);
+            List<float> colBId = Gd_getIdFromColor(colorB);
+            bool aIsPrim = colAId == null || (colBId != null && colAId.Count < colBId.Count);
+            if (CheckPrimIdWithSecId(aIsPrim == true ? colAId : colBId, aIsPrim == false ? colAId : colBId) == true) return true;
+
+            //get if connected with links
+            HashSet<float> colBs = new() { colorB.r, colorB.g, colorB.b, colorB.a};
+            if (colorA.r <= 0.5f && colorA.r > 0.0f && colBs.Contains(colorA.r) == true) return true;
+            if (colorA.g <= 0.5f && colorA.g > 0.0f && colBs.Contains(colorA.g) == true) return true;
+            if (colorA.b <= 0.5f && colorA.b > 0.0f && colBs.Contains(colorA.b) == true) return true;
+            if (colorA.a <= 0.5f && colorA.a > 0.0f && colBs.Contains(colorA.a) == true) return true;
+            return false;
+
+            static bool CheckPrimIdWithSecId(List<float> primIds, List<float> secIds)
+            {
+                if (primIds == null) return secIds == null;
+
+                foreach (float primId in primIds)
+                {
+                    if (secIds.Contains(primId) == false) return false;
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>
         /// Returns the index of all vertices that has the given id
         /// </summary>
         public static HashSet<int> Gd_getAllVerticesInId(Color[] verColors, List<float> id)
@@ -945,9 +911,24 @@ namespace Zombie1111_uDestruction
             HashSet<int> verInId = new();
             int verL = verColors.Length;
 
-            for (int i = 0; i < verL; i++)
+            for (int vI = 0; vI < verL; vI++)
             {
-                if (Gd_isIdInColor(id, verColors[i]) == true) verInId.Add(i);
+                if (Gd_isIdInColor(id, verColors[vI]) == true) verInId.Add(vI);
+            }
+
+            return verInId;
+        }
+
+        /// <summary>
+        /// Returns the index of all vertices that has the given id and exists inside the potentialVertices hashset
+        /// </summary>
+        public static HashSet<int> Gd_getSomeVerticesInId(Color[] verColors, List<float> id, HashSet<int> potentialVertices)
+        {
+            HashSet<int> verInId = new();
+
+            foreach (int vI in potentialVertices)
+            {
+                if (Gd_isIdInColor(id, verColors[vI]) == true) verInId.Add(vI);
             }
 
             return verInId;
@@ -964,9 +945,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns a float for each mesh that is each mesh size compared to each other. All floats added = 1.0f
         /// </summary>
-        /// <param name="meshes"></param>
         /// <param name="useMeshBounds">If true, Mesh.bounds is used to get scales (Faster but less accurate)</param>
-        /// <returns></returns>
         public static List<float> GetPerMeshScale(List<Mesh> meshes, bool useMeshBounds = false)
         {
             List<float> meshVolumes = new List<float>();
@@ -987,6 +966,9 @@ namespace Zombie1111_uDestruction
             return meshVolumes;
         }
 
+        /// <summary>
+        /// Returns the volume of the bounds (How much water it can contain)
+        /// </summary>
         public static float GetBoundingBoxVolume(Bounds bounds)
         {
             // Calculate the volume using the size of the bounds
@@ -996,71 +978,223 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns a mesh that is as similar to sourceMesh as possible while being convex
+        /// </summary>
+        public static Mesh MakeMeshConvex(Mesh sourceMesh, bool verticsOnly = false, float worldScaleDis = 0.001f)
+        {   
+            var calc = new QuickHull_convex();
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
+            var normals = new List<Vector3>();
+            
+            if (calc.GenerateHull(sourceMesh.vertices.ToList(), !verticsOnly, ref verts, ref tris, ref normals) == false)
+            {
+                verts = sourceMesh.vertices.ToList();
+
+                if (verticsOnly == true) MergeSimilarVectors(ref verts, worldScaleDis);
+                else
+                {
+                    tris = sourceMesh.triangles.ToList();
+                    normals = sourceMesh.normals.ToList();
+                }
+            }
+
+            Mesh convexMesh = new();
+            convexMesh.SetVertices(verts);
+            if (verticsOnly == true) return convexMesh;
+
+            convexMesh.SetTriangles(tris, 0);
+            convexMesh.SetNormals(normals);
+
+            SetMeshFromOther(ref convexMesh, sourceMesh);
+
+            return convexMesh;
+        }
+
+        /// <summary>
+        /// Sets newMesh uvs and submeshes from the best sourceMesh uvs+submeshes
+        /// </summary>
+        public static void SetMeshFromOther(ref Mesh newMesh, Mesh sourceMesh)
+        {
+            //set uvs
+            Vector3[] sVers = sourceMesh.vertices;
+            Vector3[] nVers = newMesh.vertices;
+            Vector2[] sUvs = sourceMesh.uv;
+            Vector2[] nUvs = new Vector2[nVers.Length];
+
+            for (int i = 0; i < nUvs.Length; i++)
+            {
+                nUvs[i] = sUvs[GetClosestPointInArray(sVers, nVers[i], 0.0f)];
+            }
+
+            newMesh.uv = nUvs;
+
+            //get what submesh each source triangel has
+            int[] sTris = sourceMesh.triangles;
+            int[] sTrisSubMeshI = new int[sTris.Length];
+            List<List<int>> nSubTris = new();
+            
+            for (int sI = 0; sI < sourceMesh.subMeshCount; sI++)
+            {
+                nSubTris.Add(new());
+            
+                SubMeshDescriptor subMesh = sourceMesh.GetSubMesh(sI);
+                int indexEnd = (subMesh.indexStart / 3) + (subMesh.indexCount / 3);
+            
+                for (int tI = (subMesh.indexStart / 3); tI < indexEnd; tI++)
+                {
+                    sTrisSubMeshI[tI] = sI;
+                }
+            
+            }
+            
+            //set submeshes
+            int[] nTris = newMesh.triangles;
+            
+            for (int i = 0; i < nTris.Length; i += 3)
+            {
+                int stI = GetClosestTriOnMesh(sVers, sTris, new Vector3[3] { nVers[nTris[i]], nVers[nTris[i + 1]], nVers[nTris[i + 2]] }, 0.0f);
+                int ssI = sTrisSubMeshI[stI];
+            
+                nSubTris[ssI].Add(nTris[i]);
+                nSubTris[ssI].Add(nTris[i + 1]);
+                nSubTris[ssI].Add(nTris[i + 2]);
+            }
+            
+            for (int i = nSubTris.Count - 1; i >= 0; i--)
+            {
+                if (nSubTris[i].Count == 0) nSubTris.RemoveAt(i);
+            }
+
+            newMesh.subMeshCount = nSubTris.Count;
+
+            for (int i = 0; i < nSubTris.Count; i++)
+            {
+                newMesh.SetTriangles(nSubTris[i], i);
+            }
+        }
+
+        /// <summary>
         /// Combines the meshes and updates fracParts rendVertexIndexes list
         /// </summary>
         /// <param name="fracMeshes">Must have same lenght as fracParts</param>
-        /// <param name="fracParts"></param>
-        /// <returns></returns>
         public static Mesh CombineMeshes(Mesh[] fracMeshes, ref FractureThis.FracPart[] fracParts)
         {
-            List<Vector3> combinedVertices = new List<Vector3>();
-            List<Vector3> combinedNormals = new List<Vector3>();
-            List<Vector2> combinedUVs = new List<Vector2>();
-            List<int> combinedTrianglesA = new List<int>();
-            List<int> combinedTrianglesB = new List<int>();
-            //List<BoneWeight> combinedBones = new List<BoneWeight>();
-            int vertexOffset = 0;
+            int partCount = fracParts.Length;
+            Mesh comMesh = new();
+            comMesh.indexFormat = IndexFormat.UInt32;
+            List<CombineInstance> comMeshes = new();
+            List<bool> comHadSub = new();
+            int subMeshCount = 0;
 
-            for (int i = 0; i < fracMeshes.Length; i += 1)
+            for (int i = 0; i < partCount; i++)
             {
-                Mesh mesh = fracMeshes[i];
-
-                // Get the vertices, normals, and UVs from the small mesh
-                Vector3[] vertices = mesh.vertices;
-                Vector3[] normals = mesh.normals;
-                Vector2[] uvs = mesh.uv;
-                //BoneWeight[] bones = mesh.boneWeights;
-
-                //link combined vertices to fracture part
-                for (int ii = 0; ii < vertices.Length; ii += 1)
+                comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 0 });
+                subMeshCount++;
+                if (fracMeshes[i].subMeshCount > 1)
                 {
-                    fracParts[i].rendLinkVerIndexes.Add(combinedVertices.Count + ii);
+                    comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 1 });
+                    comHadSub.Add(true);
                 }
-
-                // Append the vertex data to the combined lists
-                combinedVertices.AddRange(vertices);
-                combinedNormals.AddRange(normals);
-                combinedUVs.AddRange(uvs);
-                //combinedBones.AddRange(bones);
-
-                int[] trianglesA = mesh.GetTriangles(0);
-                int[] trianglesB = new int[0];
-                if (mesh.subMeshCount > 1) trianglesB = mesh.GetTriangles(1);
-
-                // Append the triangle data to the combined list, adjusting the indices with the vertex offset
-                for (int j = 0; j < trianglesA.Length; j++)
-                {
-                    combinedTrianglesA.Add(trianglesA[j] + vertexOffset);
-                }
-
-                for (int j = 0; j < trianglesB.Length; j++)
-                {
-                    combinedTrianglesB.Add(trianglesB[j] + vertexOffset);
-                }
-
-                // Update the vertex offset for the next small mesh
-                vertexOffset += vertices.Length;
+                else comHadSub.Add(false);
             }
 
-            Mesh combinedMesh = new Mesh();
-            combinedMesh.vertices = combinedVertices.ToArray();
-            combinedMesh.normals = combinedNormals.ToArray();
-            combinedMesh.uv = combinedUVs.ToArray();
-            combinedMesh.subMeshCount = 2;
-            combinedMesh.SetTriangles(combinedTrianglesA.ToArray(), 0);
-            combinedMesh.SetTriangles(combinedTrianglesB.ToArray(), 1);
-            //combinedMesh.boneWeights = combinedBones.ToArray(); //if no 0 we get error, (Must implement og bones to fractured mesh bones)
-            return combinedMesh;
+            comMesh.CombineMeshes(comMeshes.ToArray(), false, false, false);//if we lucky, combinedMesh submesh[0] == comMesh[0], if thats the case we can just use unity combine
+            comMesh.Optimize();//Should be safe to call since submeshes order does not change?
+            Debug_doesMeshContainUnusedVers(comMesh);
+            int partI = 0;
+            List<int> newSubTrisA = new();
+            List<int> newSubTrisB = new();
+
+            for (int comI = 0; comI < comMeshes.Count; comI++)
+            {
+                foreach (int vI in comMesh.GetTriangles(comI))
+                {
+                    newSubTrisA.Add(vI);
+                    if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
+                }
+
+                if (comHadSub[partI] == false)
+                {
+                    partI++;
+                    continue;
+                }
+
+                comI++;
+                foreach (int vI in comMesh.GetTriangles(comI))
+                {
+                    newSubTrisB.Add(vI);
+                    if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
+                }
+
+                partI++;
+            }
+            
+            comMesh.subMeshCount = newSubTrisB.Count > 0 ? 2 : 1;
+            comMesh.SetTriangles(newSubTrisA, 0);
+            if (newSubTrisB.Count > 0) comMesh.SetTriangles(newSubTrisB, 1);
+
+            Debug_doesMeshContainUnusedVers(comMesh);
+            return comMesh;
+
+            //List<Vector3> combinedVertices = new List<Vector3>();
+            //List<Vector3> combinedNormals = new List<Vector3>();
+            //List<Vector2> combinedUVs = new List<Vector2>();
+            //List<int> combinedTrianglesA = new List<int>();
+            //List<int> combinedTrianglesB = new List<int>();
+            ////List<BoneWeight> combinedBones = new List<BoneWeight>();
+            //int vertexOffset = 0;
+            //
+            //for (int i = 0; i < fracMeshes.Length; i += 1)
+            //{
+            //    Mesh mesh = fracMeshes[i];
+            //
+            //    // Get the vertices, normals, and UVs from the small mesh
+            //    Vector3[] vertices = mesh.vertices;
+            //    Vector3[] normals = mesh.normals;
+            //    Vector2[] uvs = mesh.uv;
+            //    //BoneWeight[] bones = mesh.boneWeights;
+            //
+            //    //link combined vertices to fracture part
+            //    for (int ii = 0; ii < vertices.Length; ii += 1)
+            //    {
+            //        fracParts[i].rendLinkVerIndexes.Add(combinedVertices.Count + ii);
+            //    }
+            //
+            //    // Append the vertex data to the combined lists
+            //    combinedVertices.AddRange(vertices);
+            //    combinedNormals.AddRange(normals);
+            //    combinedUVs.AddRange(uvs);
+            //    //combinedBones.AddRange(bones);
+            //
+            //    int[] trianglesA = mesh.GetTriangles(0);
+            //    int[] trianglesB = new int[0];
+            //    if (mesh.subMeshCount > 1) trianglesB = mesh.GetTriangles(1);
+            //
+            //    // Append the triangle data to the combined list, adjusting the indices with the vertex offset
+            //    for (int j = 0; j < trianglesA.Length; j++)
+            //    {
+            //        combinedTrianglesA.Add(trianglesA[j] + vertexOffset);
+            //    }
+            //
+            //    for (int j = 0; j < trianglesB.Length; j++)
+            //    {
+            //        combinedTrianglesB.Add(trianglesB[j] + vertexOffset);
+            //    }
+            //
+            //    // Update the vertex offset for the next small mesh
+            //    vertexOffset += vertices.Length;
+            //}
+            //
+            //Mesh combinedMesh = new Mesh();
+            //combinedMesh.vertices = combinedVertices.ToArray();
+            //combinedMesh.normals = combinedNormals.ToArray();
+            //combinedMesh.uv = combinedUVs.ToArray();
+            //combinedMesh.subMeshCount = 2;
+            //combinedMesh.SetTriangles(combinedTrianglesA.ToArray(), 0);
+            //combinedMesh.SetTriangles(combinedTrianglesB.ToArray(), 1);
+            ////combinedMesh.boneWeights = combinedBones.ToArray(); //if no 0 we get error, (Must implement og bones to fractured mesh bones)
+            //return combinedMesh;
         }
 
         public static Vector3 GetMedianPosition(Vector3[] positions)
@@ -1165,61 +1299,6 @@ namespace Zombie1111_uDestruction
             }
 
             return cHits;
-        }
-
-        // Function to find the most similar triangle in the mesh
-        public static int FindMostSimilarTriangle(Mesh mesh, Vector3[] worldTriangle)
-        {
-            int triangleCount = mesh.triangles.Length / 3;
-            int mostSimilarTriangleIndex = -1;
-            float minDifference = float.MaxValue;
-
-            for (int i = 0; i < triangleCount; i++)
-            {
-                Vector3[] meshTriangle = GetTriangleVertices(mesh, i);
-
-                // Calculate some similarity metric (e.g., distance, orientation, shape)
-                float difference = CalculateTriangleDifference(worldTriangle, meshTriangle);
-
-                // Update the most similar triangle if the current one is more similar
-                if (difference < minDifference)
-                {
-                    minDifference = difference;
-                    mostSimilarTriangleIndex = i;
-                }
-            }
-
-            return mostSimilarTriangleIndex;
-        }
-
-        // Function to get the vertices of a triangle in the mesh
-        public static Vector3[] GetTriangleVertices(Mesh mesh, int triangleIndex)
-        {
-            int startIndex = triangleIndex * 3;
-            Vector3[] vertices = new Vector3[3];
-
-            for (int i = 0; i < 3; i++)
-            {
-                int vertexIndex = mesh.triangles[startIndex + i];
-                vertices[i] = mesh.vertices[vertexIndex];
-            }
-
-            return vertices;
-        }
-
-        // Function to calculate the difference between two triangles
-        public static float CalculateTriangleDifference(Vector3[] triangle1, Vector3[] triangle2)
-        {
-            // Implement your similarity metric here
-            // Example: calculate the distance between corresponding vertices
-            float difference = 0;
-
-            for (int i = 0; i < 3; i++)
-            {
-                difference += Vector3.Distance(triangle1[i], triangle2[i]);
-            }
-
-            return difference;
         }
 
         public  static int FindTriangleIndexWithVertex(int[] triangles, int vertexIndex)
@@ -1498,6 +1577,34 @@ namespace Zombie1111_uDestruction
         }
 
 #if UNITY_EDITOR
+        public static void Debug_doesMeshContainUnusedVers(Mesh mesh)
+        {
+            HashSet<int> usedV = new();
+
+            foreach (int vI in mesh.triangles)
+            {
+                usedV.Add(vI);
+            }
+
+            if (usedV.Count != mesh.vertexCount) Debug.LogError("Unused faces");
+        }
+
+        public static void Debug_createMeshRend(Mesh meshW, Material mat = null)
+        {
+            GameObject newO = new GameObject();
+            MeshFilter meshF = newO.AddComponent<MeshFilter>();
+            MeshRenderer meshR = newO.AddComponent<MeshRenderer>();
+            
+            meshF.mesh = meshW;
+            Material[] mats = new Material[meshW.subMeshCount];
+            for (int i = 0; i < mats.Length; i++)
+            {
+                mats[i] = mat;
+            }
+
+            meshR.sharedMaterials = mats;
+        }
+
         /// <summary>
         /// Draw line between all vertics in the worldspace mesh. 
         /// </summary>

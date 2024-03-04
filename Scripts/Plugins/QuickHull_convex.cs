@@ -99,7 +99,7 @@ namespace Zombie1111_uDestruction
         ///   exceptionally close to each other, this value might need to be
         ///   adjusted.
         /// </summary>
-        const float EPSILON = 0.0001f;
+        const float EPSILON = 0.00001f;
 
         /// <summary>
         ///   Struct representing a single face.
@@ -404,7 +404,8 @@ namespace Zombie1111_uDestruction
         ///   true, the the verts will be split, if false, the same vert will be
         ///   used for more than one triangle.
         /// </summary>
-        public void GenerateHull(
+        /// <returns>True if generated a valid convex hull</returns>
+        public bool GenerateHull(
             List<Vector3> points,
             bool splitVerts,
             ref List<Vector3> verts,
@@ -413,12 +414,13 @@ namespace Zombie1111_uDestruction
         {
             if (points.Count < 4)
             {
-                throw new System.ArgumentException("Need at least 4 points to generate a convex hull");
+                //throw new System.ArgumentException("Need at least 4 points to generate a convex hull");
+                return false;
             }
 
             Initialize(points, splitVerts);
 
-            GenerateInitialHull(points);
+            if (GenerateInitialHull(points) == false) return false;
 
             while (openSetTail >= 0)
             {
@@ -427,6 +429,8 @@ namespace Zombie1111_uDestruction
 
             ExportMesh(points, splitVerts, ref verts, ref tris, ref normals);
             VerifyMesh(points, ref verts, ref tris);
+
+            return true;
         }
 
         /// <summary>
@@ -485,14 +489,14 @@ namespace Zombie1111_uDestruction
         /// <summary>
         ///   Create initial seed hull.
         /// </summary>
-        void GenerateInitialHull(List<Vector3> points)
+        bool GenerateInitialHull(List<Vector3> points)
         {
             // Find points suitable for use as the seed hull. Some varieties of
             // this algorithm pick extreme points here, but I'm not convinced
             // you gain all that much from that. Currently what it does is just
             // find the first four points that are not coplanar.
             int b0, b1, b2, b3;
-            FindInitialHullIndices(points, out b0, out b1, out b2, out b3);
+            if (FindInitialHullIndices(points, out b0, out b1, out b2, out b3) == false) return false;
 
             var v0 = points[b0];
             var v1 = points[b1];
@@ -610,13 +614,15 @@ namespace Zombie1111_uDestruction
             }
 
             VerifyOpenSet(points);
+
+            return true;
         }
 
         /// <summary>
         ///   Find four points in the point cloud that are not coplanar for the
         ///   seed hull
         /// </summary>
-        void FindInitialHullIndices(List<Vector3> points, out int b0, out int b1, out int b2, out int b3)
+        bool FindInitialHullIndices(List<Vector3> points, out int b0, out int b1, out int b2, out int b3)
         {
             var count = points.Count;
 
@@ -645,13 +651,18 @@ namespace Zombie1111_uDestruction
                             b1 = i1;
                             b2 = i2;
                             b3 = i3;
-                            return;
+                            return true;
                         }
                     }
                 }
             }
 
-            throw new System.ArgumentException("Can't generate hull, points are coplanar");
+            b0 = -1;
+            b1 = -1;
+            b2 = -1;
+            b3 = -1;
+            return false;
+            //throw new System.ArgumentException("Can't generate hull, points are coplanar");
         }
 
         /// <summary>
