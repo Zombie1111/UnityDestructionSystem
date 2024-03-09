@@ -142,6 +142,7 @@ namespace Zombie1111_uDestruction
         //fracture settings
         [Header("Fracture")]
         public FractureSaveAsset saveAsset = null;
+        [SerializeField] private FractureSavedState saveState = null;
         [Tooltip("Time until the fracture can be destroyed after awake, can also be set to <0.0f to disable destruction")]
         public float immortalTime = 1.0f;
         [SerializeField] private bool halfUpdateRate = true;
@@ -298,7 +299,7 @@ namespace Zombie1111_uDestruction
             }
             else
             {
-                List<MeshData> fracMeshes = Gen_getMeshesToFracture(gameObject, true, worldScale * 0.0001f);
+                List<MeshData> fracMeshes = Gen_getMeshesToFracture(gameObject, out _, true, worldScale * 0.0001f);
                 visualizedGroupId = Mathf.Min(visualizedGroupId, md_verGroupIds.Length - 1);
                 if (fracMeshes == null || visualizedGroupId < 0) goto skipDrawGroups;
 
@@ -423,7 +424,7 @@ namespace Zombie1111_uDestruction
             normal = 1,
         }
 
-        private enum FractureRemesh
+        public enum FractureRemesh
         {
             defualt,
             convex
@@ -914,17 +915,18 @@ namespace Zombie1111_uDestruction
             {
                 return Execute();
             }
-            catch (Exception ex)
-            {
-                // Handle the error
-                Debug.LogError(ex.Message);
-
-                //Display an error message to the user
-                EditorUtility.DisplayDialog("Error", "An unexpected error occured while fracturing, look in console for more info", "OK");
-
-                //remove the fracture
-                return CancelFracturing();
-            }
+            //catch (Exception ex)
+            //{
+            //    // Handle the error
+            //    Debug.LogError("Exception: " + ex.Message);
+            //    Debug.LogError("StackTrace: " + ex.StackTrace);
+            //
+            //    //Display an error message to the user
+            //    EditorUtility.DisplayDialog("Error", "An unexpected error occured while fracturing, look in console for more info", "OK");
+            //
+            //    //remove the fracture
+            //    return CancelFracturing();
+            //}
             finally
             {
                 //Always clear the progressbar
@@ -936,7 +938,6 @@ namespace Zombie1111_uDestruction
                 //make sure we can save the scene later, save scene
                 if (askForSavePermission == true && Gen_askIfCanSave(false) == false) return false;
 
-                Debug_toggleTimer();
                 //verify if we can continue with fracturing here or on prefab
                 if (UpdateProgressBar("Verifying objects") == false) return CancelFracturing();
                 if (Gen_checkIfContinueWithFrac(out bool didFracOther, isPrefabAsset) == false) return didFracOther;
@@ -949,26 +950,20 @@ namespace Zombie1111_uDestruction
                 float worldScaleDis = worldScale * 0.0001f;
                 tempOgRealSkin = new();
 
-                List<MeshData> meshesToFracW = Gen_getMeshesToFracture(gameObject, false, worldScaleDis);
+                List<MeshData> meshesToFracW = Gen_getMeshesToFracture(gameObject, out bool usePrefracture, false, worldScaleDis);
                 if (meshesToFracW == null) return CancelFracturing();
 
-                Debug_toggleTimer("Get what to frac");
-
-                Debug_toggleTimer();
                 //Fracture the meshes into pieces
                 if (UpdateProgressBar("Fracturing meshes") == false) return CancelFracturing();
                 List<MeshData> partMeshesW = Gen_fractureMeshes(meshesToFracW, fractureCount, dynamicFractureCount, worldScaleDis, seed, true);
                 if (partMeshesW == null) return CancelFracturing();
 
-
-                Debug_toggleTimer("actual fracturing");
                 //debug, shows partMeshes mesh. Can confirm that fracturing+get fractures is working. Issue is in my code
                 //foreach (var mf in partMeshesW)
                 //{
                 //    FractureHelperFunc.Debug_createMeshRend(mf.mesh, insideMat_fallback);
                 //}
 
-                Debug_toggleTimer();
                 //Save current orginal data (Save as late as possible)
                 if (UpdateProgressBar("Saving orginal objects") == false) return CancelFracturing();
                 Gen_loadAndMaybeSaveOgData(true);
@@ -978,54 +973,39 @@ namespace Zombie1111_uDestruction
                 Mesh[] partMeshesL = Gen_setupPartBase(partMeshesW, physicsMat);
                 if (partMeshesL == null) return CancelFracturing();
 
-                Debug_toggleTimer("Setup part basics");
-                Debug_toggleTimer();
                 //setup fracture renderer, setup renderer
                 if (UpdateProgressBar("Setting up renderer") == false) return CancelFracturing();
                 Gen_setupRenderer(partMeshesW, meshesToFracW, transform, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer, out int[] rTrisBestOgMeshTris);
                 //Gen_loadAndMaybeSaveOgData(false);
 
-                Debug_toggleTimer("Setup renderer");
-                Debug_toggleTimer();
                 //setup fracture renderer materials
                 if (UpdateProgressBar("Setting up materials") == false) return CancelFracturing();
                 Gen_setupRendererMaterials(rVersOgMeshI, rVersBestOgMeshVer, rTrisBestOgMeshTris, meshesToFracW);
 
-                Debug_toggleTimer("Setup materials");
-                Debug_toggleTimer();
                 //setup more advanced part data
                 if (UpdateProgressBar("Creating structure") == false) return CancelFracturing();
                 Gen_setupPartStructure(partMeshesW, rVersOgMeshI, rVersBestOgMeshVer, meshesToFracW);
-                Debug_toggleTimer("Setup part advanced");
 
-                Debug_toggleTimer();
                 //setup real skinned mesh
                 if (isRealSkinnedM == true)
                 {
                     if (UpdateProgressBar("Setting up skinnedmesh") == false) return CancelFracturing();
                     Gen_setupSkinnedMesh(tempOgRealSkin.ogMesh, tempOgRealSkin.ogBones, tempOgRealSkin.ogRootBone.localToWorldMatrix, rVersOgMeshI, rVersBestOgMeshVer, meshesToFracW);
                 }
-                Debug_toggleTimer("Setup skinned");
 
                 tempOgRealSkin = null;
 
-                Debug_toggleTimer();
                 //apply resistance multipliers to parts
                 if (UpdateProgressBar("Setting up groups") == false) return CancelFracturing();
                 Gen_setupResistanceMultiply();
-                Debug_toggleTimer("Setup resistance");
 
-                Debug_toggleTimer();
                 //Optimize data for use in destruction solver at runtime
                 if (UpdateProgressBar("Optimizing structure for runtime") == false) return CancelFracturing();
                 Gen_optimizeDataForRuntime();
-                Debug_toggleTimer("Optimize for runtime");
 
-                Debug_toggleTimer();
                 //save to save asset
-                if (UpdateProgressBar("Saving") == false) return CancelFracturing();
+                   if (UpdateProgressBar("Saving") == false) return CancelFracturing();
                 SaveOrLoadAsset(true);
-
 
                 //save scene (Since the user agreed to saving before fracturing we can just save without asking)
 #if UNITY_EDITOR
@@ -1037,7 +1017,7 @@ namespace Zombie1111_uDestruction
                 if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.LogWarning(transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
                 if (transform.TryGetComponent<Rigidbody>(out _) == true) Debug.LogWarning(transform.name + " has a rigidbody and it may cause issues. Its recommended to remove it and use the fracture physics options instead");
                 Debug.Log("Fractured " + transform.name + " into " + partMeshesL.Length + " parts, total vertex count = " + partMeshesW.Sum(meshWG => meshWG.mesh.vertexCount));
-                Debug_toggleTimer("Finalazing");
+
                 return true;
             }
 
@@ -1057,6 +1037,7 @@ namespace Zombie1111_uDestruction
 
                     if (EditorUtility.DisplayCancelableProgressBar("Fracturing " + transform.name, message, fracProgress) == true)
                     {
+                        Debug.Log("Canceled fracturing " + transform.name);
                         return false;
                     }
                 }
@@ -1229,14 +1210,34 @@ namespace Zombie1111_uDestruction
         /// <param name="matOutside"></param>
         private void Gen_setupRenderer(List<MeshData> partMeshesW, List<MeshData> sourceMeshesW, Transform rendHolder, out int[] rVersOgMeshI, out int[] rVersBestOgMeshVer, out int[] rTrisBestOgMeshTris)
         {
+            Debug_toggleTimer();
+
             //combine meshes and set allparts rendVertexIndexes
-            Mesh comMesh = FractureHelperFunc.CombineMeshes(partMeshesW.Select(fM => fM.mesh).ToArray(), ref allParts); 
-            comMesh.OptimizeIndexBuffers(); //should be safe to call since vertics order does not change
-            comMesh.RecalculateNormals();
-            comMesh.RecalculateTangents();
+            bool usePreFrac = saveState != null && saveState.preS_setupRendResult != null;
+            Mesh comMesh;
+
+            if (usePreFrac == false)
+            {
+                comMesh = FractureHelperFunc.CombineMeshes(partMeshesW.Select(fM => fM.mesh).ToArray(), ref allParts);
+                comMesh.OptimizeIndexBuffers(); //should be safe to call since vertics order does not change
+                comMesh.RecalculateNormals();
+                comMesh.RecalculateTangents();
+            }
+            else
+            {
+                comMesh = saveState.preS_setupRendResult.comMesh.ToMesh();
+
+                for (int i = 0; i < allParts.Length; i++)
+                {
+                    allParts[i].rendLinkVerIndexes = new(saveState.preS_setupRendResult.parts_rendLinkVerIndexes[i].intList);
+                }
+            }
 
             Vector3[] cVers = comMesh.vertices;
             float worldDis = worldScale * 0.01f;//0.01??
+
+            Debug_toggleTimer();
+            Debug_toggleTimer();
 
             //get all vertics ogMesh id
             int[] cVerOgMeshI = new int[cVers.Length];
@@ -1250,103 +1251,118 @@ namespace Zombie1111_uDestruction
 
             rVersOgMeshI = cVerOgMeshI;
 
-            //get all vertics that share the ~same position and has the same ogMesh
-            verticsLinkedThreaded = new IntList[cVers.Length];
-            
-            Parallel.For(0, verticsLinkedThreaded.Length, i =>
-            {
-                List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(cVers, cVerOgMeshI, cVers[i], cVerOgMeshI[i], worldDis);
-            
-                lock (verticsLinkedThreaded)
-                {
-                    verticsLinkedThreaded[i] = new() { intList = intList };
-                }
-            });
+            Debug_toggleTimer();
+            Debug_toggleTimer();
 
-            //get all tris and vers from the sourceMeshes
-            int[][] oTriss = new int[sourceMeshesW.Count][];
-            Vector3[][] oVerss = new Vector3[sourceMeshesW.Count][];
-            for (int i = 0; i < sourceMeshesW.Count; i++)
+            if (usePreFrac == false)
             {
-                oTriss[i] = sourceMeshesW[i].mesh.triangles;
-                oVerss[i] = sourceMeshesW[i].mesh.vertices;
+                //get all vertics that share the ~same position and has the same ogMesh
+                verticsLinkedThreaded = new IntList[cVers.Length];
+
+                Parallel.For(0, verticsLinkedThreaded.Length, i =>
+                {
+                    List<int> intList = FractureHelperFunc.GetAllVertexIndexesAtPos_id(cVers, cVerOgMeshI, cVers[i], cVerOgMeshI[i], worldDis);
+
+                    lock (verticsLinkedThreaded)
+                    {
+                        verticsLinkedThreaded[i] = new() { intList = intList };
+                    }
+                });
+
+                //get all tris and vers from the sourceMeshes
+                int[][] oTriss = new int[sourceMeshesW.Count][];
+                Vector3[][] oVerss = new Vector3[sourceMeshesW.Count][];
+                for (int i = 0; i < sourceMeshesW.Count; i++)
+                {
+                    oTriss[i] = sourceMeshesW[i].mesh.triangles;
+                    oVerss[i] = sourceMeshesW[i].mesh.vertices;
+                }
+
+                //get the most similar og triangel for every triangel on the comMesh
+                int[] cTris = comMesh.triangles;
+                int ctL = cTris.Length / 3;
+                NativeArray<int> closeOTris = new(ctL, Allocator.Temp);
+                int cvL = cVers.Length;
+                int[] closeOVer = Enumerable.Repeat(-1, cvL).ToArray();
+
+                Parallel.For(0, ctL, i =>
+                {
+                    int tI = i * 3;
+                    int oI = cVerOgMeshI[cTris[tI]];
+
+                    closeOTris[i] = FractureHelperFunc.GetClosestTriOnMesh(
+                        oVerss[oI],
+                        oTriss[oI],
+                        new Vector3[3] { cVers[cTris[tI]], cVers[cTris[tI + 1]], cVers[cTris[tI + 2]] },
+                        0.0f);
+
+                    Vector3[] oTrisPoss = new Vector3[3] { oVerss[oI][oTriss[oI][closeOTris[i]]], oVerss[oI][oTriss[oI][closeOTris[i] + 1]], oVerss[oI][oTriss[oI][closeOTris[i] + 2]] };
+
+                    lock (closeOVer)
+                    {
+                        if (closeOVer[cTris[tI]] < 0)
+                        {
+                            closeOVer[cTris[tI]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                              oTrisPoss,
+                              cVers[cTris[tI]],
+                              worldDis)];
+
+                            //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]], Color.magenta, 30.0f);
+                        }
+
+                        if (closeOVer[cTris[tI + 1]] < 0)
+                        {
+                            closeOVer[cTris[tI + 1]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                              oTrisPoss,
+                              cVers[cTris[tI + 1]],
+                              worldDis)];
+
+                            //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]], Color.magenta, 30.0f);
+                        }
+
+                        if (closeOVer[cTris[tI + 2]] < 0)
+                        {
+                            closeOVer[cTris[tI + 2]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                              oTrisPoss,
+                              cVers[cTris[tI + 2]],
+                              worldDis)];
+
+                            //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]], Color.magenta, 30.0f);
+                        }
+                    }
+                });
+
+                rVersBestOgMeshVer = closeOVer;
+                rTrisBestOgMeshTris = closeOTris.ToArray();
+                closeOTris.Dispose();
+
+                //convert mesh to renderer local space
+                //FractureHelperFunc.Debug_createMeshRend(comMesh);//debug mesh is broken here, issue is above
+                comMesh = FractureHelperFunc.ConvertMeshWithMatrix(comMesh, rendHolder.worldToLocalMatrix);
+
+                //setup combined mesh bones
+                BoneWeight[] boneW = new BoneWeight[comMesh.vertexCount];
+                for (int i = 0; i < allParts.Length; i++)
+                {
+                    foreach (int vI in allParts[i].rendLinkVerIndexes)
+                    {
+                        boneW[vI].weight0 = 1.0f;
+                        boneW[vI].boneIndex0 = i;
+                    }
+                }
+
+                comMesh.boneWeights = boneW;
+                comMesh.bindposes = allParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
+            }
+            else
+            {
+                verticsLinkedThreaded = saveState.preS_setupRendResult.verticsLinkedThreaded.ToArray();
+                rVersBestOgMeshVer = saveState.preS_setupRendResult.rVersBestOgMeshVer.ToArray();
+                rTrisBestOgMeshTris = saveState.preS_setupRendResult.rTrisBestOgMeshTris.ToArray();
             }
 
-            //get the most similar og triangel for every triangel on the comMesh
-            int[] cTris = comMesh.triangles;
-            int ctL = cTris.Length / 3;
-            NativeArray<int> closeOTris = new(ctL, Allocator.Temp);
-            int cvL = cVers.Length;
-            int[] closeOVer = Enumerable.Repeat(-1, cvL).ToArray();
-
-            Parallel.For(0, ctL, i =>
-            {
-                int tI = i * 3;
-                int oI = cVerOgMeshI[cTris[tI]];
-
-                closeOTris[i] = FractureHelperFunc.GetClosestTriOnMesh(
-                    oVerss[oI],
-                    oTriss[oI],
-                    new Vector3[3] { cVers[cTris[tI]], cVers[cTris[tI + 1]], cVers[cTris[tI + 2]] },
-                    0.0f);
-
-                Vector3[] oTrisPoss = new Vector3[3] { oVerss[oI][oTriss[oI][closeOTris[i]]], oVerss[oI][oTriss[oI][closeOTris[i] + 1]], oVerss[oI][oTriss[oI][closeOTris[i] + 2]] };
-
-                lock (closeOVer)
-                {
-                    if (closeOVer[cTris[tI]] < 0)
-                    {
-                        closeOVer[cTris[tI]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
-                          oTrisPoss,
-                          cVers[cTris[tI]],
-                          worldDis)];
-
-                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]], Color.magenta, 30.0f);
-                    }
-
-                    if (closeOVer[cTris[tI + 1]] < 0)
-                    {
-                        closeOVer[cTris[tI + 1]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
-                          oTrisPoss,
-                          cVers[cTris[tI + 1]],
-                          worldDis)];
-
-                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]], Color.magenta, 30.0f);
-                    }
-
-                    if (closeOVer[cTris[tI + 2]] < 0)
-                    {
-                        closeOVer[cTris[tI + 2]] = oTriss[oI][closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
-                          oTrisPoss,
-                          cVers[cTris[tI + 2]],
-                          worldDis)];
-
-                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]], Color.magenta, 30.0f);
-                    }
-                }
-            });
-
-            rVersBestOgMeshVer = closeOVer;
-            rTrisBestOgMeshTris = closeOTris.ToArray();
-            closeOTris.Dispose();
-
-            //convert mesh to renderer local space
-            //FractureHelperFunc.Debug_createMeshRend(comMesh);//debug mesh is broken here, issue is above
-            comMesh = FractureHelperFunc.ConvertMeshWithMatrix(comMesh, rendHolder.worldToLocalMatrix);
-
-            //setup combined mesh bones
-            BoneWeight[] boneW = new BoneWeight[comMesh.vertexCount];
-            for (int i = 0; i < allParts.Length; i++)
-            {
-                foreach (int vI in allParts[i].rendLinkVerIndexes)
-                {
-                    boneW[vI].weight0 = 1.0f;
-                    boneW[vI].boneIndex0 = i;
-                }
-            }
-
-            comMesh.boneWeights = boneW;
-            comMesh.bindposes = allParts.Select(part => part.col.transform.worldToLocalMatrix * rendHolder.localToWorldMatrix).ToArray();
+            Debug_toggleTimer();
+            Debug_toggleTimer();
 
             //set renderer
             SkinnedMeshRenderer sRend = rendHolder.GetOrAddComponent<SkinnedMeshRenderer>();
@@ -1365,6 +1381,27 @@ namespace Zombie1111_uDestruction
                     verticsPartThreaded[vI] = i;
                 }
             }
+
+            Debug_toggleTimer();
+            Debug_toggleTimer();
+
+            //save prefracture
+            if (usePreFrac == false && saveState != null)
+            {
+                FractureSaveAsset.SavableMesh savMesh = new();
+                savMesh.FromMesh(comMesh);
+
+                saveState.SavePrefracture(null, null, new()
+                {
+                    comMesh = savMesh,
+                    parts_rendLinkVerIndexes = IntList.FromIntArray(allParts.Select(part => part.rendLinkVerIndexes).ToArray()),
+                    rTrisBestOgMeshTris = rTrisBestOgMeshTris,
+                    rVersBestOgMeshVer = rVersBestOgMeshVer,
+                    verticsLinkedThreaded = verticsLinkedThreaded
+                });
+            }
+
+            Debug_toggleTimer();
         }
 
         private void Gen_setupRendererMaterials(int[] rVersOgMeshI, int[] rVersBestOgMeshVer, int[] rTrisBestOgMeshTris, List<MeshData> sourceMeshesW)
@@ -1588,12 +1625,13 @@ namespace Zombie1111_uDestruction
 
                 Vector3[] partWVers = FractureHelperFunc.ConvertPositionsWithMatrix(partColMesh.vertices, partTrans.localToWorldMatrix);
 
-                partTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(
-    FractureHelperFunc.ConvertPositionsWithMatrix(partColMesh.vertices, partTrans.localToWorldMatrix));
+                //partTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(FractureHelperFunc.ConvertPositionsWithMatrix(partColMesh.vertices, partTrans.localToWorldMatrix));
+                partTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(partWVers);
 
                 FractureHelperFunc.SetColliderFromFromPoints(
                     newCol,
                     FractureHelperFunc.ConvertPositionsWithMatrix(partWVers, partTrans.worldToLocalMatrix));
+                    //partColMesh.vertices);
 
                 newCol.sharedMaterial = phyMat;
                 newCol.hasModifiableContacts = true; //This must always be true for all fracture colliders
@@ -1606,6 +1644,7 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private void Gen_setupPartStructure(List<MeshData> partMeshesW, int[] rVersOgMeshI, int[] rVersBestOgMeshVer, List<MeshData> sourceMeshesW)
         {
+            Debug_toggleTimer();
             //setup part neighbours and isKinematic
             //get physics scene
             PhysicsScene phyScene = gameObject.scene.GetPhysicsScene();
@@ -1617,6 +1656,9 @@ namespace Zombie1111_uDestruction
                 ogMeshColors[sI] = sourceMeshesW[sI].mesh.colors;
                 if (ogMeshColors[sI].Length != sourceMeshesW[sI].mesh.vertexCount) ogMeshColors[sI] = new Color[sourceMeshesW[sI].mesh.vertexCount];
             }
+
+            Debug_toggleTimer();
+            Debug_toggleTimer();
 
             //perform the overlap checks to get neighbours and isKinematic
             List<Vector3> wVerts = new();
@@ -1660,6 +1702,9 @@ namespace Zombie1111_uDestruction
                 Gen_getKinematicAndNeighboursFromTrans(lapCols, lapCols.Length, i, false);
             }
 
+            Debug_toggleTimer();
+            Debug_toggleTimer();
+
             //verify that all parts are connected in its defualt state
             List<int> conParts = new() { 0 };
             for (int i = 0; i < conParts.Count; i += 1)
@@ -1676,6 +1721,7 @@ namespace Zombie1111_uDestruction
 
             //update parent info
             Run_updateParentInfo(0);
+            Debug_toggleTimer();
 
             void Gen_getKinematicAndNeighboursFromTrans(Collider[] overlapCols, int colCount, int sourcePartI, bool kinematicOnly = false)
             {
@@ -1707,38 +1753,6 @@ namespace Zombie1111_uDestruction
                         {
                             foreach (int nvI in allParts[nearI].rendLinkVerIndexes)
                             {
-                                if (rVersOgMeshI.Length <= vI
-                                    || rVersBestOgMeshVer.Length <= vI)
-                                {
-                                    Debug.Log(vI + " " + rVersOgMeshI.Length + " " + rVersBestOgMeshVer.Length);
-                                }
-
-                                if (ogMeshColors.Length <= rVersOgMeshI[vI])
-                                {
-                                    Debug.Log(ogMeshColors.Length + " " + rVersOgMeshI[vI]);
-                                }
-
-                                if (ogMeshColors[rVersOgMeshI[vI]].Length <= rVersBestOgMeshVer[vI])
-                                {
-                                    Debug.Log(ogMeshColors[rVersOgMeshI[vI]].Length + " " + rVersBestOgMeshVer[vI]);
-                                }
-
-                                if (rVersOgMeshI.Length <= nvI
-                                    || rVersBestOgMeshVer.Length <= nvI)
-                                {
-                                    Debug.Log(nvI + " " + rVersOgMeshI.Length + " " + rVersBestOgMeshVer.Length);
-                                }
-
-                                if (ogMeshColors.Length <= rVersOgMeshI[nvI])
-                                {
-                                    Debug.Log(ogMeshColors.Length + " " + rVersOgMeshI[nvI]);
-                                }
-
-                                if (ogMeshColors[rVersOgMeshI[nvI]].Length <= rVersBestOgMeshVer[nvI])
-                                {
-                                    Debug.Log(ogMeshColors[rVersOgMeshI[nvI]].Length + " " + rVersBestOgMeshVer[nvI]);
-                                }
-
                                 if (FractureHelperFunc.Gd_isColorLinkedWithColor(
                                     ogMeshColors[rVersOgMeshI[vI]][rVersBestOgMeshVer[vI]],
                                     ogMeshColors[rVersOgMeshI[nvI]][rVersBestOgMeshVer[nvI]]) == true)
@@ -1765,6 +1779,9 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private List<MeshData> Gen_fractureMeshes(List<MeshData> meshesToFrac, int totalChunkCount, bool dynamicChunkCount, float worldScaleDis = 0.0001f, int seed = -1, bool useMeshBounds = false)
         {
+            //prefracture
+            if (saveState != null && saveState.preS_fracedMeshes != null) return new(saveState.preS_fracedMeshes.ToMeshData());
+
             //get random seed
             int nextOgMeshId = 0;
 
@@ -1797,6 +1814,14 @@ namespace Zombie1111_uDestruction
             }
 
             //return the result
+            if (saveState != null)
+            {
+                FractureSavedState.PreS_fracedMeshesData savedMeshData = new();
+                savedMeshData.FromMeshData(fracedMeshes);
+
+                saveState.SavePrefracture(null, savedMeshData);
+            }
+
             return fracedMeshes;
 
             void Gen_fractureMesh(MeshData meshToFrac, ref List<MeshData> newMeshes, int chunkCount)
@@ -1872,7 +1897,8 @@ namespace Zombie1111_uDestruction
                     {
                         //extract the mesh and verify it
                         newMeshesTemp.Add(ExtractChunkMesh(fractureTool, i));
-                        if (FractureHelperFunc.IsMeshValid(newMeshesTemp[^1], false, worldScaleDis) == false)
+                        //if (FractureHelperFunc.IsMeshValid(newMeshesTemp[^1], false, worldScaleDis) == false)
+                        if (FractureHelperFunc.IsMeshValid(newMeshesTemp[^1], true, worldScaleDis) == false) //is true better?
                         {
                             if (loopMaxAttempts > 0)
                             {
@@ -1913,7 +1939,8 @@ namespace Zombie1111_uDestruction
                 //warn if unable to frac a chunk
                 if (meshIsValid == false || hadInvalidChunkPart == true)
                 {
-                    Debug.LogError("Unable to properly fracture chunk " + nextOgMeshId + " of " + transform.name + " (Some parts of the mesh may be missing)");
+                    //Debug.LogError("Unable to properly fracture chunk " + nextOgMeshId + " of " + transform.name + " (Some parts of the mesh may be missing)");
+                    Debug.LogError("Chunk " + nextOgMeshId + " of " + transform.name + " was difficult to fracture (Some parts of the mesh may be missing)");
                 }
             }
 
@@ -1933,10 +1960,11 @@ namespace Zombie1111_uDestruction
         /// Returns the meshes to be used in fracturing. All meshes are in world space
         /// </summary>
         /// <param name="obj">The object to the get meshes from</param>
-        private List<MeshData> Gen_getMeshesToFracture(GameObject obj, bool getRawOnly = false, float worldScaleDis = 0.0001f)
+        private List<MeshData> Gen_getMeshesToFracture(GameObject obj, out bool usePrefracture, bool getRawOnly = false, float worldScaleDis = 0.0001f)
         {
             //Get all the meshes to fracture
             bool hasSkinned = false;
+            usePrefracture = false;
 
             List<MeshData> mDatas = new();
             foreach (Renderer rend in obj.GetComponentsInChildren<Renderer>())
@@ -2007,7 +2035,7 @@ namespace Zombie1111_uDestruction
                 }
                 else continue; //ignore if no MeshRenderer with meshfilter or skinnedMeshRenderer
 
-                if (FractureHelperFunc.IsMeshValid(newMData.mesh, false, worldScaleDis) == false) continue; //continue if mesh is invalid
+                if (FractureHelperFunc.IsMeshValid(newMData.mesh, true, worldScaleDis) == false) continue; //continue if mesh is invalid
 
                 newMData.lTwMatrix = rend.transform.localToWorldMatrix;
                 newMData.rend = rend;
@@ -2032,7 +2060,11 @@ namespace Zombie1111_uDestruction
             //Array.Sort(md_verGroupIds);
             Array.Sort(md_verGroupIds, new FractureHelperFunc.HashSetComparer());
 
-            if (getRawOnly == true) return mDatas;
+            if (getRawOnly == true)
+            {
+                usePrefracture = GetIfValidPrefracture();
+                return mDatas;
+            }
 
             //split meshes into chunks
             List<MeshData> splittedMeshes;
@@ -2063,12 +2095,64 @@ namespace Zombie1111_uDestruction
 
             //return result
             isRealSkinnedM = hasSkinned;
+            usePrefracture = GetIfValidPrefracture();
             return mDatas;
+
+            bool GetIfValidPrefracture()
+            {
+                //return true if has valid prefracture, other wise false
+                if (saveState == null) return false;
+
+                Bounds[] fRendBounds = new Bounds[mDatas.Count];
+                int totalVerCount = 0;
+
+                for (int i = 0; i < mDatas.Count; i++)
+                {
+                    fRendBounds[i] = mDatas[i].rend.bounds;
+                    totalVerCount += mDatas[i].mesh.vertexCount;
+                }
+
+                FractureSavedState.FloatList[] mdVersList = FractureSavedState.FloatList.FromFloatArray(md_verGroupIds);
+
+                if (saveState.preS_toFracData == null
+                    || saveState.preS_toFracData.fractureCount != fractureCount
+                    || saveState.preS_toFracData.dynamicFractureCount != dynamicFractureCount
+                    || saveState.preS_toFracData.generationQuality != generationQuality
+                    || FractureSavedState.FloatList.IsTwoArraySame(saveState.preS_toFracData.md_verGroupIds, mdVersList) == false
+                    || saveState.preS_toFracData.randomness != randomness
+                    || saveState.preS_toFracData.remeshing != remeshing
+                    || saveState.preS_toFracData.seed != seed
+                    || saveState.preS_toFracData.worldScale != worldScale
+                    || saveState.preS_toFracData.totalVerCount != totalVerCount
+                    //|| saveState.preS_toFracData.toFracRendBounds != fRendBounds)
+                    || FractureHelperFunc.AreBoundsArrayEqual(saveState.preS_toFracData.toFracRendBounds, fRendBounds) == false)
+                {
+                    //if has saveState but mayor stuff has changed, return false and clear savedPrefracture
+                    saveState.ClearSavedPrefracture();
+
+                    saveState.SavePrefracture(new() {
+                        dynamicFractureCount = dynamicFractureCount,
+                        worldScale = worldScale,
+                        seed = seed,
+                        fractureCount = fractureCount,
+                        generationQuality = generationQuality,
+                        md_verGroupIds = mdVersList,
+                        randomness = randomness,
+                        remeshing = remeshing,
+                        toFracRendBounds = fRendBounds,
+                        totalVerCount = totalVerCount });
+
+                    return false;
+                }
+
+                return true;
+            }
         }
 
         /// <summary>
         /// Contains a mesh and data about it, only used durring fracture process
         /// </summary>
+        [System.Serializable]
         public class MeshData
         {
             public Mesh mesh;
@@ -2288,23 +2372,31 @@ namespace Zombie1111_uDestruction
             List<Vector3> usedNors = new();
             bool alreadyTested;
 
-            for (int i = 0; i < allParts.Length; i += 1)
+            for (int partI = 0; partI < allParts.Length; partI += 1)
             {
                 partWver.Clear();
                 usedNors.Clear();
 
-                foreach (int vI in allParts[i].rendLinkVerIndexes)
+                foreach (int vI in allParts[partI].rendLinkVerIndexes)
                 {
                     partWver.Add(fracWVer[vI]);
                 }
 
                 FractureHelperFunc.MergeSimilarVectors(ref partWver, worldDis);
                 FractureHelperFunc.SetColliderFromFromPoints(
-                    allSkinPartCols[i],
-                    FractureHelperFunc.ConvertPositionsWithMatrix(partWver.ToArray(), allSkinPartCols[i].transform.worldToLocalMatrix));
+                    allSkinPartCols[partI],
+                    FractureHelperFunc.ConvertPositionsWithMatrix(partWver.ToArray(), allSkinPartCols[partI].transform.worldToLocalMatrix));
+
+                if (saveState != null && saveState.preS_setupRealSkinResult != null)
+                {
+                    //use saved prefracture
+                    allParts[partI].trans.rotation = saveState.preS_setupRealSkinResult.parts_rotations[partI];
+                    allParts[partI].trans.position = saveState.preS_setupRealSkinResult.parts_positions[partI];
+                    continue;
+                }
 
                 //move allPart cols to match defualt skinned pose
-                foreach (int rvI in allParts[i].rendLinkVerIndexes)
+                foreach (int rvI in allParts[partI].rendLinkVerIndexes)
                 {
                     alreadyTested = false;
 
@@ -2323,14 +2415,20 @@ namespace Zombie1111_uDestruction
 
                     Vector3 rotationAxis = Vector3.Cross(fracWNorOg[rvI], fracWNor[rvI]);
                     float rotationAngle = Vector3.SignedAngle(fracWNorOg[rvI], fracWNor[rvI], rotationAxis);
-                    allParts[i].trans.RotateAround(fracWVerOg[rvI], rotationAxis, rotationAngle);
-                    allParts[i].trans.position += fracWVer[rvI] - fracWVerOg[rvI];
-
-                    fracRend.BakeMesh(sMesh, true);
+                    allParts[partI].trans.RotateAround(fracWVerOg[rvI], rotationAxis, rotationAngle);
+                    allParts[partI].trans.position += fracWVer[rvI] - fracWVerOg[rvI];
+                    
+                    fracRend.BakeMesh(sMesh, true);//Getting skin mesh once for every vertics is really slow. But we need to know the updated vertics positions
+                                                   //after the bone has been moved+rotated. Try only recalculating the vertics for the bone that has moved?
                     sMesh = FractureHelperFunc.ConvertMeshWithMatrix(sMesh, fracRend.localToWorldMatrix);
                     fracWVerOg = sMesh.vertices;
                     fracWNorOg = sMesh.normals;
                 }
+
+                //save prefracture
+                if (saveState != null) saveState.SavePrefracture(null, null, null, new() {
+                    parts_positions = allParts.Select(part => part.trans.position).ToArray(),
+                    parts_rotations = allParts.Select(part => part.trans.rotation).ToArray() });
             }
 
             fracRend.sharedMesh.boneWeights = newBoneWe;
@@ -3103,7 +3201,20 @@ namespace Zombie1111_uDestruction
         [System.Serializable]
         public class IntList
         {
-            public List<int> intList;
+            public List<int> intList = new();
+
+            public static IntList[] FromIntArray(List<int>[] intArray)
+            {
+                IntList[] resultList = new IntList[intArray.Length];
+
+                for (int i = 0; i < intArray.Length; i++)
+                {
+                    resultList[i] = new IntList();
+                    resultList[i].intList.AddRange(intArray[i]);
+                }
+
+                return resultList;
+            }
         }
 
         #endregion InternalFractureData

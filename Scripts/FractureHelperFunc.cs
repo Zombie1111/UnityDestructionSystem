@@ -254,6 +254,22 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns true if boundsA = boundsB (Size and position wize)
+        /// </summary>
+        public static bool AreBoundsArrayEqual(Bounds[] boundsA, Bounds[] boundsB)
+        {
+            if (boundsA.Length != boundsB.Length) return false;
+
+            for (int i = 0; i < boundsA.Length; i++)
+            {
+                // Check if both bounds have the same center and size
+                 if (boundsA[i].center != boundsB[i].center || boundsA[i].size != boundsB[i].size) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// Returns the closest position index
         /// </summary>
         /// <param name="positions">The positions to check against</param>
@@ -282,6 +298,9 @@ namespace Zombie1111_uDestruction
             return bestI;
         }
 
+        /// <summary>
+        /// Returns the closest position on the given disc (Flat circle)
+        /// </summary>
         public static Vector3 ClosestPointOnDisc(Vector3 point, Vector3 discCenter, Vector3 discNormal, float discRadius, float discRadiusSquared)
         {
             //Project the point onto the disc normal plane, discNormal wont be used after this so we can reuse it
@@ -293,11 +312,17 @@ namespace Zombie1111_uDestruction
             return discNormal;
         }
 
+        /// <summary>
+        /// Returns the closest position on the given line (Returned position is always infront of the given position in lineDirection)
+        /// </summary>
         public static Vector3 ClosestPointOnLine(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
         {
             return linePosition + Mathf.Clamp01(Vector3.Dot(position - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
         }
 
+        /// <summary>
+        /// Returns the closest position on the given line (Returned position can be behind lineDirection)
+        /// </summary>
         public static Vector3 ClosestPointOnLine_doubleSided(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
         {
             return linePosition + (Vector3.Dot(position - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
@@ -312,7 +337,6 @@ namespace Zombie1111_uDestruction
         /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
         /// <returns></returns>
         public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3[] poss, float preExitTolerance = 0.01f)
-        //public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshVerIds, int[] meshTris, Vector3[] poss, int id, float preExitTolerance = 0.01f)
         {
             int bestI = 0;
             float bestD = float.MaxValue;
@@ -742,7 +766,6 @@ namespace Zombie1111_uDestruction
                 if (conV.Add(tris[trisToSearch[i] + 2]) == true) GetAllTrisAtPos(vers[tris[trisToSearch[i] + 2]]);
             }
 
-            Debug.Log(trisToSearch.Count);
             return conV;
             
             void GetAllTrisAtPos(Vector3 pos)

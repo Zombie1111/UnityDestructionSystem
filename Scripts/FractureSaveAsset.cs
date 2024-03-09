@@ -22,28 +22,50 @@ namespace Zombie1111_uDestruction
         /// Creates a new saveAsset in the folder that is currently selected in the editor project tab (returns the newly saveAsset, null if no valid folder selected)
         /// Editor only
         /// </summary>
-        [MenuItem("Tools/Fracture/CreateSaveAssetInSelectedFolder")]
-        public static FractureSaveAsset TryCreateSaveAssetInSelectedFolder()
+        [MenuItem("Tools/Fracture/CreateSaveAsset")]
+        public static FractureSaveAsset CreateSaveAsset()
         {
+            //UnityEngine.Object[] selection = Selection.GetFiltered(typeof(UnityEngine.Object), SelectionMode.Assets);
+            //
+            //if (selection.Length == 1)
+            //{
+            //    string selectedFolderPath = AssetDatabase.GetAssetPath(selection[0]);
+            //    if (AssetDatabase.IsValidFolder(selectedFolderPath))
+            //    {
+            //        //Create the asset and save it
+            //        selectedFolderPath += "/fracSaveAsset.asset";
+            //        selectedFolderPath = AssetDatabase.GenerateUniqueAssetPath(selectedFolderPath);
+            //
+            //        ScriptableObject fracSaveAsset = ScriptableObject.CreateInstance<FractureSaveAsset>();
+            //        AssetDatabase.CreateAsset((FractureSaveAsset)fracSaveAsset, selectedFolderPath);
+            //        return (FractureSaveAsset)fracSaveAsset;
+            //    }
+            //}
+            //
+            //Debug.LogError("Please select a folder in the Project Tab the saveAsset should be created in");
+            //return null;
+
+            //get current selected folder (To make it open the panel there)
             UnityEngine.Object[] selection = Selection.GetFiltered(typeof(UnityEngine.Object), SelectionMode.Assets);
+
+            string selectedFolderPath;
 
             if (selection.Length == 1)
             {
-                string selectedFolderPath = AssetDatabase.GetAssetPath(selection[0]);
-                if (AssetDatabase.IsValidFolder(selectedFolderPath))
-                {
-                    //Create the asset and save it
-                    selectedFolderPath += "/fracSaveAsset.asset";
-                    selectedFolderPath = AssetDatabase.GenerateUniqueAssetPath(selectedFolderPath);
-
-                    ScriptableObject fracSaveAsset = ScriptableObject.CreateInstance<FractureSaveAsset>();
-                    AssetDatabase.CreateAsset((FractureSaveAsset)fracSaveAsset, selectedFolderPath);
-                    return (FractureSaveAsset)fracSaveAsset;
-                }
+                selectedFolderPath = AssetDatabase.GetAssetPath(selection[0]);
+                if (AssetDatabase.IsValidFolder(selectedFolderPath) == false) selectedFolderPath = "Assets/";
             }
+            else selectedFolderPath = "Assets/";
 
-            Debug.LogError("Please select a folder in the Project Tab the saveAsset should be created in");
-            return null;
+            //ask user where to save and create new asset
+            string path = EditorUtility.SaveFilePanel("Create save asset", selectedFolderPath, "fracSave", "asset");
+            if (string.IsNullOrEmpty(path)) return null;
+
+            path = FileUtil.GetProjectRelativePath(path);
+
+            ScriptableObject fracSaveAsset = ScriptableObject.CreateInstance<FractureSaveAsset>();
+            AssetDatabase.CreateAsset((FractureSaveAsset)fracSaveAsset, path);
+            return (FractureSaveAsset)fracSaveAsset;
         }
 #endif
 
@@ -62,12 +84,77 @@ namespace Zombie1111_uDestruction
             public BoneWeight[] saved_boneWe_broken = new BoneWeight[0];
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
+            public SavableMesh saved_rendMesh = new();
+            //public BoneWeight[] sMesh_boneWeights = null;
+            //public Matrix4x4[] sMesh_bindposes = null;
+            //public Vector3[] sMesh_vertics = null;
+            //public int[] sMesh_triangels = null;
+            //public Vector2[] sMesh_uvs = null;
+            public VecArray[] sMesh_colsVers = null;
+        }
+
+        [System.Serializable]
+        public class SavableMesh
+        {
             public BoneWeight[] sMesh_boneWeights = null;
             public Matrix4x4[] sMesh_bindposes = null;
             public Vector3[] sMesh_vertics = null;
             public int[] sMesh_triangels = null;
             public Vector2[] sMesh_uvs = null;
-            public VecArray[] sMesh_colsVers = null;
+
+            /// <summary>
+            /// Returns the saved data as a mesh
+            /// </summary>
+            /// <returns></returns>
+            public Mesh ToMesh()
+            {
+                Mesh newM = new()
+                {
+                    vertices = sMesh_vertics,
+                    triangles = sMesh_triangels,
+                    bindposes = sMesh_bindposes,
+                    boneWeights = sMesh_boneWeights,
+                    uv = sMesh_uvs
+                };
+
+                newM.RecalculateBounds();
+                newM.RecalculateNormals();
+                newM.RecalculateTangents();
+
+                return newM;
+            }
+
+            /// <summary>
+            /// Saves the given mesh
+            /// </summary>
+            public void FromMesh(Mesh mesh)
+            {
+                sMesh_boneWeights = mesh.boneWeights;
+                sMesh_bindposes = mesh.bindposes;
+                sMesh_vertics = mesh.vertices;
+                sMesh_triangels = mesh.triangles;
+                sMesh_uvs = mesh.uv;
+            }
+
+            /// <summary>
+            /// Sets all saved mesh data to null
+            /// </summary>
+            public void Clear()
+            {
+                sMesh_boneWeights = null;
+                sMesh_bindposes = null;
+                sMesh_vertics = null;
+                sMesh_triangels = null;
+                sMesh_uvs = null;
+            }
+
+            /// <summary>
+            /// Returns true if a valid mesh is stored
+            /// </summary>
+            public bool IsValidMeshSaved()
+            {
+                return sMesh_vertics != null && sMesh_vertics.Length > 0;
+            }
         }
 
         [System.Serializable]
@@ -95,11 +182,12 @@ namespace Zombie1111_uDestruction
             //save mesh stuff if prefab
             if (saveFrom.GetFracturePrefabType() > 0)
             {
-                fracSavedData.sMesh_boneWeights = saveFrom.fracRend.sharedMesh.boneWeights;
-                fracSavedData.sMesh_bindposes = saveFrom.fracRend.sharedMesh.bindposes;
-                fracSavedData.sMesh_vertics = saveFrom.fracRend.sharedMesh.vertices;
-                fracSavedData.sMesh_triangels = saveFrom.fracRend.sharedMesh.triangles;
-                fracSavedData.sMesh_uvs = saveFrom.fracRend.sharedMesh.uv;
+                fracSavedData.saved_rendMesh.FromMesh(saveFrom.fracRend.sharedMesh);
+                //fracSavedData.sMesh_boneWeights = saveFrom.fracRend.sharedMesh.boneWeights;
+                //fracSavedData.sMesh_bindposes = saveFrom.fracRend.sharedMesh.bindposes;
+                //fracSavedData.sMesh_vertics = saveFrom.fracRend.sharedMesh.vertices;
+                //fracSavedData.sMesh_triangels = saveFrom.fracRend.sharedMesh.triangles;
+                //fracSavedData.sMesh_uvs = saveFrom.fracRend.sharedMesh.uv;
 
                 if (saveFrom.allParts[0].col is MeshCollider)
                 {
@@ -118,11 +206,12 @@ namespace Zombie1111_uDestruction
             else
             {
                 //if not prefab clear the arrays
-                fracSavedData.sMesh_boneWeights = null;
-                fracSavedData.sMesh_bindposes = null;
-                fracSavedData.sMesh_vertics = null;
-                fracSavedData.sMesh_triangels = null;
-                fracSavedData.sMesh_uvs = null;
+                fracSavedData.saved_rendMesh.Clear();
+                //fracSavedData.sMesh_boneWeights = null;
+                //fracSavedData.sMesh_bindposes = null;
+                //fracSavedData.sMesh_vertics = null;
+                //fracSavedData.sMesh_triangels = null;
+                //fracSavedData.sMesh_uvs = null;
                 fracSavedData.sMesh_colsVers = null;
             }
 
@@ -173,20 +262,21 @@ namespace Zombie1111_uDestruction
             }
 
             //load meshes if was prefab
-            if (fracSavedData.sMesh_vertics == null || fracSavedData.sMesh_vertics.Length == 0) return true;
+            //if (fracSavedData.sMesh_vertics == null || fracSavedData.sMesh_vertics.Length == 0) return true;
+            if (fracSavedData.saved_rendMesh.IsValidMeshSaved() == false) return true;
 
-            loadTo.fracRend.sharedMesh = new()
-            {
-                vertices = fracSavedData.sMesh_vertics,
-                triangles = fracSavedData.sMesh_triangels,
-                bindposes = fracSavedData.sMesh_bindposes,
-                boneWeights = fracSavedData.sMesh_boneWeights,
-                uv = fracSavedData.sMesh_uvs
-            };
-
-            loadTo.fracRend.sharedMesh.RecalculateBounds();
-            loadTo.fracRend.sharedMesh.RecalculateNormals();
-            loadTo.fracRend.sharedMesh.RecalculateTangents();
+            loadTo.fracRend.sharedMesh = fracSavedData.saved_rendMesh.ToMesh();
+            //{
+            //    vertices = fracSavedData.sMesh_vertics,
+            //    triangles = fracSavedData.sMesh_triangels,
+            //    bindposes = fracSavedData.sMesh_bindposes,
+            //    boneWeights = fracSavedData.sMesh_boneWeights,
+            //    uv = fracSavedData.sMesh_uvs
+            //};
+            //
+            //loadTo.fracRend.sharedMesh.RecalculateBounds();
+            //loadTo.fracRend.sharedMesh.RecalculateNormals();
+            //loadTo.fracRend.sharedMesh.RecalculateTangents();
 
             if (fracSavedData.sMesh_colsVers == null || fracSavedData.sMesh_colsVers.Length == 0) return true;
             for (int i = 0; i < loadTo.allParts.Length; i += 1)
