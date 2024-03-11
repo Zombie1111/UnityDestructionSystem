@@ -145,16 +145,7 @@ namespace Zombie1111_uDestruction
 
         public void AddReferencesFromFracture(FractureThis addFrom)
         {
-            for (int i = 0; i < addFrom.allParts.Length; i += 1)
-            {
-                addFrom.allParts[i].col.hasModifiableContacts = true; //for some weird reason hasModifiableContacts must be set on awake for it to work
-                partsColInstanceId.TryAdd(addFrom.allParts[i].col.GetInstanceID(), new() { fracThis = addFrom, partIndex = i });
-                if (addFrom.isRealSkinnedM == true)
-                {
-                    addFrom.allSkinPartCols[i].hasModifiableContacts = true;
-                    partsColInstanceId.TryAdd(addFrom.allSkinPartCols[i].GetInstanceID(), new() { fracThis = addFrom, partIndex = i });
-                }
-            }
+
         }
 
         /// <summary>
@@ -285,29 +276,12 @@ namespace Zombie1111_uDestruction
             //denoise impact points and register them
             for (int i = 0; i < impPairs.Count; i++)
             {
-                //Debug.Log("count " +impPairs[i].impPoints.Count + " divide " + impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent + "ogforce " + impPairs[i].impForce);
-                //impPairs[i].impForce /= math.max(impPairs[i].impPoints.Count * impPairs[i].fracThis.partAvgBoundsExtent, 1.0f);
-                //didAnyBreak = false;
-
-                //foreach (var iPoint in impPairs[i].impPoints)
-                //{
-                //
-                //    if (impPairs[i].fracThis.RegisterCollision(
-                //        iPoint.partIndex,
-                //        impPairs[i].impForce,
-                //        impPairs[i].impVel,
-                //        iPoint.impPos,
-                //        impPairs[i].ignoreCauseRb == false ? impPairs[i].rbCausedImp : null) == true)
-                //    {
-                //        didAnyBreak = true;
-                //    }
-                //}
-
-                if (impPairs[i].fracThis.RegisterCollision(
-                    impPairs[i].impPoints,
-                    impPairs[i].impForce,
-                    impPairs[i].impVel,
-                    impPairs[i].rbCausedImp) == false) continue;
+                //Was used ealier, disabled for rewrite
+                //if (impPairs[i].fracThis.RegisterCollision(
+                //    impPairs[i].impPoints,
+                //    impPairs[i].impForce,
+                //    impPairs[i].impVel,
+                //    impPairs[i].rbCausedImp) == false) continue;
 
                 //when atleast one part will break, ignore contact
                 foreach (int pairI in impPairs[i].pairIndexes)

@@ -1018,6 +1018,7 @@ namespace Zombie1111_uDestruction
                             face);
 
                         if (dist > EPSILON)
+                        //if (dist > 0.01f)//controls convex accuracy (Higher = less accurate)
                         {
                             assigned = true;
 

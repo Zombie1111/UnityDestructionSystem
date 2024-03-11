@@ -13,16 +13,17 @@ MonoBehaviour:
   m_Name: tempFracSaveAsset 1
   m_EditorClassIdentifier: 
   fracSavedData:
-    id: -1
+    id: 0
     saved_verticsLinkedThreaded: []
     saved_partsOgResistanceThreaded: []
     saved_allParts: []
     saved_kinematicPartStatus: 
     saved_verticsPartThreaded: 
     saved_boneWe_broken: []
-    sMesh_boneWeights: []
-    sMesh_bindposes: []
-    sMesh_vertics: []
-    sMesh_triangels: 
-    sMesh_uvs: []
+    saved_rendMesh:
+      sMesh_boneWeights: []
+      sMesh_bindposes: []
+      sMesh_vertics: []
+      sMesh_triangels: 
+      sMesh_uvs: []
     sMesh_colsVers: []

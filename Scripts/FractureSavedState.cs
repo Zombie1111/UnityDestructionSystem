@@ -102,20 +102,20 @@ namespace Zombie1111_uDestruction
         [System.Serializable]
         public class PreS_fracedMeshesData
         {
-            public List<FractureThis.MeshData> fracedMeshes_d;
+            public List<FractureThis.FracMesh> fracedMeshes_d;
             public List<FractureSaveAsset.SavableMesh> fracedMeshes_m;
 
-            public List<FractureThis.MeshData> ToMeshData()
+            public List<FractureThis.FracMesh> ToFracMesh()
             {
                 for (int i = 0; i < fracedMeshes_d.Count; i++)
                 {
-                    fracedMeshes_d[i].mesh = fracedMeshes_m[i].ToMesh();
+                    fracedMeshes_d[i].meshW = fracedMeshes_m[i].ToMesh();
                 }
 
                 return fracedMeshes_d;
             }
 
-            public void FromMeshData(List<FractureThis.MeshData> meshDatas)
+            public void FromFracMesh(List<FractureThis.FracMesh> meshDatas)
             {
                 fracedMeshes_d = meshDatas;
                 fracedMeshes_m = new();
@@ -123,7 +123,7 @@ namespace Zombie1111_uDestruction
                 for (int i = 0; i < meshDatas.Count; i++)
                 {
                     fracedMeshes_m.Add(new());
-                    fracedMeshes_m[i].FromMesh(meshDatas[i].mesh);
+                    fracedMeshes_m[i].FromMesh(meshDatas[i].meshW);
                 }
             }
         }

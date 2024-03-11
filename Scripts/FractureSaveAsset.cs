@@ -14,7 +14,6 @@ using UnityEditor;
 
 namespace Zombie1111_uDestruction
 {
-    //[CreateAssetMenu(fileName = "fractureSaveAsset", menuName = "Fracture Save Asset", order = 101)]
     public class FractureSaveAsset : ScriptableObject
     {
 #if UNITY_EDITOR
@@ -25,26 +24,6 @@ namespace Zombie1111_uDestruction
         [MenuItem("Tools/Fracture/CreateSaveAsset")]
         public static FractureSaveAsset CreateSaveAsset()
         {
-            //UnityEngine.Object[] selection = Selection.GetFiltered(typeof(UnityEngine.Object), SelectionMode.Assets);
-            //
-            //if (selection.Length == 1)
-            //{
-            //    string selectedFolderPath = AssetDatabase.GetAssetPath(selection[0]);
-            //    if (AssetDatabase.IsValidFolder(selectedFolderPath))
-            //    {
-            //        //Create the asset and save it
-            //        selectedFolderPath += "/fracSaveAsset.asset";
-            //        selectedFolderPath = AssetDatabase.GenerateUniqueAssetPath(selectedFolderPath);
-            //
-            //        ScriptableObject fracSaveAsset = ScriptableObject.CreateInstance<FractureSaveAsset>();
-            //        AssetDatabase.CreateAsset((FractureSaveAsset)fracSaveAsset, selectedFolderPath);
-            //        return (FractureSaveAsset)fracSaveAsset;
-            //    }
-            //}
-            //
-            //Debug.LogError("Please select a folder in the Project Tab the saveAsset should be created in");
-            //return null;
-
             //get current selected folder (To make it open the panel there)
             UnityEngine.Object[] selection = Selection.GetFiltered(typeof(UnityEngine.Object), SelectionMode.Assets);
 
@@ -80,16 +59,10 @@ namespace Zombie1111_uDestruction
             public float[] saved_partsOgResistanceThreaded = new float[0];
             public FractureThis.FracPart[] saved_allParts = new FractureThis.FracPart[0];
             public bool[] saved_kinematicPartStatus = new bool[0];
-            public int[] saved_verticsPartThreaded = new int[0];
-            public BoneWeight[] saved_boneWe_broken = new BoneWeight[0];
+            public int saved_rendVertexCount = -1;
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
-            //public BoneWeight[] sMesh_boneWeights = null;
-            //public Matrix4x4[] sMesh_bindposes = null;
-            //public Vector3[] sMesh_vertics = null;
-            //public int[] sMesh_triangels = null;
-            //public Vector2[] sMesh_uvs = null;
             public VecArray[] sMesh_colsVers = null;
         }
 
@@ -170,24 +143,19 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         public int Save(FractureThis saveFrom)
         {
+            if (saveFrom.fracRend == null || saveFrom.fracRend.sharedMesh == null) return -1; //cant save if no fracture
+
             //save the data
             fracSavedData.id += 1;
             fracSavedData.saved_kinematicPartStatus = saveFrom.kinematicPartStatus.ToArray();
             fracSavedData.saved_verticsLinkedThreaded = saveFrom.verticsLinkedThreaded.ToArray();
             fracSavedData.saved_allParts = saveFrom.allParts.ToArray();
-            fracSavedData.saved_partsOgResistanceThreaded = saveFrom.allPartsResistance.ToArray();
-            fracSavedData.saved_verticsPartThreaded = saveFrom.verticsPartThreaded.ToArray();
-            fracSavedData.saved_boneWe_broken = saveFrom.boneWe_broken.ToArray();
+            fracSavedData.saved_rendVertexCount = saveFrom.fracRend.sharedMesh.vertexCount;
 
             //save mesh stuff if prefab
             if (saveFrom.GetFracturePrefabType() > 0)
             {
                 fracSavedData.saved_rendMesh.FromMesh(saveFrom.fracRend.sharedMesh);
-                //fracSavedData.sMesh_boneWeights = saveFrom.fracRend.sharedMesh.boneWeights;
-                //fracSavedData.sMesh_bindposes = saveFrom.fracRend.sharedMesh.bindposes;
-                //fracSavedData.sMesh_vertics = saveFrom.fracRend.sharedMesh.vertices;
-                //fracSavedData.sMesh_triangels = saveFrom.fracRend.sharedMesh.triangles;
-                //fracSavedData.sMesh_uvs = saveFrom.fracRend.sharedMesh.uv;
 
                 if (saveFrom.allParts[0].col is MeshCollider)
                 {
@@ -207,11 +175,6 @@ namespace Zombie1111_uDestruction
             {
                 //if not prefab clear the arrays
                 fracSavedData.saved_rendMesh.Clear();
-                //fracSavedData.sMesh_boneWeights = null;
-                //fracSavedData.sMesh_bindposes = null;
-                //fracSavedData.sMesh_vertics = null;
-                //fracSavedData.sMesh_triangels = null;
-                //fracSavedData.sMesh_uvs = null;
                 fracSavedData.sMesh_colsVers = null;
             }
 
@@ -241,7 +204,7 @@ namespace Zombie1111_uDestruction
                 || fracSavedData.saved_allParts.Length != loadTo.saved_allPartsCol.Length
                 || loadTo.fracRend == null
                 || loadTo.fracRend.transform != loadTo.transform
-                || (loadTo.fracRend.sharedMesh != null && loadTo.fracRend.sharedMesh.vertexCount != fracSavedData.saved_verticsPartThreaded.Length))
+                || (loadTo.fracRend.sharedMesh != null && loadTo.fracRend.sharedMesh.vertexCount != fracSavedData.saved_rendVertexCount))
             {
                 return false;
             }
@@ -250,9 +213,6 @@ namespace Zombie1111_uDestruction
             loadTo.kinematicPartStatus = fracSavedData.saved_kinematicPartStatus.ToArray();
             loadTo.verticsLinkedThreaded = fracSavedData.saved_verticsLinkedThreaded.ToArray();
             loadTo.allParts = fracSavedData.saved_allParts.ToArray();
-            loadTo.allPartsResistance = fracSavedData.saved_partsOgResistanceThreaded.ToArray();
-            loadTo.verticsPartThreaded = fracSavedData.saved_verticsPartThreaded.ToArray();
-            loadTo.boneWe_broken = fracSavedData.saved_boneWe_broken.ToArray();
 
             //Restore saved colliders to the allParts array
             for (int i = 0; i < loadTo.allParts.Length; i++)
@@ -262,21 +222,9 @@ namespace Zombie1111_uDestruction
             }
 
             //load meshes if was prefab
-            //if (fracSavedData.sMesh_vertics == null || fracSavedData.sMesh_vertics.Length == 0) return true;
             if (fracSavedData.saved_rendMesh.IsValidMeshSaved() == false) return true;
 
             loadTo.fracRend.sharedMesh = fracSavedData.saved_rendMesh.ToMesh();
-            //{
-            //    vertices = fracSavedData.sMesh_vertics,
-            //    triangles = fracSavedData.sMesh_triangels,
-            //    bindposes = fracSavedData.sMesh_bindposes,
-            //    boneWeights = fracSavedData.sMesh_boneWeights,
-            //    uv = fracSavedData.sMesh_uvs
-            //};
-            //
-            //loadTo.fracRend.sharedMesh.RecalculateBounds();
-            //loadTo.fracRend.sharedMesh.RecalculateNormals();
-            //loadTo.fracRend.sharedMesh.RecalculateTangents();
 
             if (fracSavedData.sMesh_colsVers == null || fracSavedData.sMesh_colsVers.Length == 0) return true;
             for (int i = 0; i < loadTo.allParts.Length; i += 1)
@@ -301,10 +249,6 @@ namespace Zombie1111_uDestruction
         {
             FractureSaveAsset myScript = (FractureSaveAsset)target;
 
-            ////always show next id
-            //SerializedProperty nextFId = serializedObject.FindProperty("nextFracId");
-            //EditorGUILayout.PropertyField(nextFId, true);
-
             // Show the button to toggle the float variable
             if (GUILayout.Button("Show Fracture Data (MAY FREEZE UNITY!)"))
             {
@@ -318,8 +262,6 @@ namespace Zombie1111_uDestruction
 
                 SerializedProperty fracSavedData = serializedObject.FindProperty("fracSavedData");
                 EditorGUILayout.PropertyField(fracSavedData, true);
-
-                //serializedObject.ApplyModifiedProperties(); // Apply changes to the serialized object
             }
 
             // Apply modifications to the asset

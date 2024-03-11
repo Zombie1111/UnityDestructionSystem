@@ -7,6 +7,12 @@ using System.Threading.Tasks;
 using Unity.VisualScripting.FullSerializer;
 using UnityEngine.Rendering;
 using g3;
+using OpenCover.Framework.Model;
+using Unity.Collections;
+using Unity.VisualScripting;
+
+
+
 
 
 
@@ -27,16 +33,6 @@ namespace Zombie1111_uDestruction
             rb.AddForceAtPosition(targetVelocity - rb.velocity, positionOfForce, ForceMode.VelocityChange);
         }
 
-        public static Color SetAlpha(this Color color, float value)
-        {
-            return new Color(color.r, color.g, color.b, value);
-        }
-
-        public static ISet<T> ToSet<T>(this IEnumerable<T> iEnumerable)
-        {
-            return new HashSet<T>(iEnumerable);
-        }
-
         public static T GetOrAddComponent<T>(this Component c) where T : Component
         {
             return c.gameObject.GetOrAddComponent<T>();
@@ -51,34 +47,6 @@ namespace Zombie1111_uDestruction
         public static T GetOrAddComponent<T>(this GameObject go) where T : Component
         {
             return GetOrAddComponent(go, typeof(T)) as T;
-        }
-
-        public static Vector3 SetX(this Vector3 vector3, float x)
-        {
-            return new Vector3(x, vector3.y, vector3.z);
-        }
-
-        public static Vector3 SetY(this Vector3 vector3, float y)
-        {
-            return new Vector3(vector3.x, y, vector3.z);
-        }
-
-        public static Vector3 SetZ(this Vector3 vector3, float z)
-        {
-            return new Vector3(vector3.x, vector3.y, z);
-        }
-
-        public static Vector3 Multiply(this Vector3 vectorA, Vector3 vectorB)
-        {
-            return Vector3.Scale(vectorA, vectorB);
-        }
-
-        public static Vector3 Abs(this Vector3 vector)
-        {
-            var x = Mathf.Abs(vector.x);
-            var y = Mathf.Abs(vector.y);
-            var z = Mathf.Abs(vector.z);
-            return new Vector3(x, y, z);
         }
 
         private static float SignedVolumeOfTriangle(Vector3 p1, Vector3 p2, Vector3 p3)
@@ -313,19 +281,26 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns the closest position on the given line (Returned position is always infront of the given position in lineDirection)
+        /// Returns the closest position to point on a line between start and end
         /// </summary>
-        public static Vector3 ClosestPointOnLine(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
+        public static Vector3 ClosestPointOnLine(Vector3 lineStart, Vector3 lineEnd, Vector3 point)
         {
-            return linePosition + Mathf.Clamp01(Vector3.Dot(position - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
+            Vector3 lineDirection = lineEnd - lineStart;
+            float lineLength = lineDirection.magnitude;
+            lineDirection.Normalize();
+
+            // Project the point onto the line
+            float dotProduct = Vector3.Dot(point - lineStart, lineDirection);
+            dotProduct = Mathf.Clamp(dotProduct, 0f, lineLength); // Ensure point is within the segment
+            return lineStart + dotProduct * lineDirection;
         }
 
         /// <summary>
-        /// Returns the closest position on the given line (Returned position can be behind lineDirection)
+        /// Returns the closest position to point on the given line
         /// </summary>
-        public static Vector3 ClosestPointOnLine_doubleSided(Vector3 position, Vector3 linePosition, Vector3 lineDirection)
+        public static Vector3 ClosestPointOnLineInfinit(Vector3 point, Vector3 linePosition, Vector3 lineDirection)
         {
-            return linePosition + (Vector3.Dot(position - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
+            return linePosition + (Vector3.Dot(point - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
         }
 
         /// <summary>
@@ -336,26 +311,44 @@ namespace Zombie1111_uDestruction
         /// <param name="pos">Closest triangel to these</param>
         /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
         /// <returns></returns>
-        public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3[] poss, float preExitTolerance = 0.01f)
+        public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3[] poss, float worldScale = 1.0f)
         {
             int bestI = 0;
             float bestD = float.MaxValue;
-            float currentD;
+            float disT;
+            float disP;
+            float worldScaleDis = worldScale * 0.00001f;
+            worldScaleDis *= worldScaleDis;
 
             for (int i = 0; i < meshTris.Length; i += 3)
             {
+
                 //if (Vector3.Dot(meshWorldNors[meshTris[i]].normalized, nor.normalized) < 0.5f) continue;
 
                 //if (meshVerIds[meshTris[i]] != id) continue;
-
-                currentD = 0.0f;
-                for (int ii = 0; ii < poss.Length; ii++) currentD += (poss[ii] - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], poss[ii])).sqrMagnitude;
-
-                if (currentD < bestD)
+                //if distance to tris is < 2x the distance to plane, We can use plane distance
+                disT = 0.0f;
+                disP = 0.0f;
+                for (int ii = 0; ii < poss.Length; ii++)
                 {
-                    bestD = currentD;
-                    bestI = i;
+                    disT += (poss[ii] - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], poss[ii])).sqrMagnitude;
+                    disP += (poss[ii] - ClosestPointOnPlaneInfinit(meshWorldVers[meshTris[i]],
+                        Vector3.Cross(meshWorldVers[meshTris[i]] - meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i]] - meshWorldVers[meshTris[i + 2]]), poss[ii])).sqrMagnitude;
+                }
 
+                //if (disT < disP * 3.0f) disT = disP;
+                if (disP < worldScaleDis) disT /= 9.0f;//The odds of this being true for "incorrect faces" and false for "correct faces" is besically 0%,
+                                                       //so it should never cause a problem. Since disT is squared 9.0f = 3.0f
+                //disT = disP;
+
+                //if (disT < bestD)
+                if (disT < bestD)
+                {
+                    //bestD = disT;
+                    bestD = disT;
+                    bestI = i;
+                    if (bestD == 0.0f) break;
+                     
                     //if (currentD < preExitTolerance) break;
                 }
             }
@@ -367,7 +360,11 @@ namespace Zombie1111_uDestruction
         {
             var verts = originalMesh.vertices;
             var normals = originalMesh.normals;
+            var boneWe = originalMesh.boneWeights;
             var uvs = originalMesh.uv;
+            bool hasUvs = uvs.Length > 0;
+            bool hasBoneWe = boneWe.Length > 0;
+
             Dictionary<Vector3, int> duplicateHashTable = new Dictionary<Vector3, int>();
             List<int> newVerts = new List<int>();
             int[] map = new int[verts.Length];
@@ -390,13 +387,16 @@ namespace Zombie1111_uDestruction
             //create new vertices
             var verts2 = new Vector3[newVerts.Count];
             var normals2 = new Vector3[newVerts.Count];
-            var uvs2 = new Vector2[newVerts.Count];
+            var uvs2 = new Vector2[hasUvs == true ? newVerts.Count : 0];
+            var boneWe2 = new BoneWeight[hasBoneWe == true ? newVerts.Count : 0];
+
             for (int i = 0; i < newVerts.Count; i++)
             {
                 int a = newVerts[i];
                 verts2[i] = verts[a];
                 normals2[i] = normals[a];
-                uvs2[i] = uvs[a];
+                if (hasUvs == true) uvs2[i] = uvs[a];
+                if (hasBoneWe == true) boneWe2[i] = boneWe[a];
             }
 
             //map the triangle to the new vertices
@@ -414,6 +414,7 @@ namespace Zombie1111_uDestruction
             originalMesh.SetVertices(verts2);
             originalMesh.SetNormals(normals2);
             originalMesh.uv = uvs2;
+            originalMesh.boneWeights = boneWe2;
 
             return originalMesh;
         }
@@ -534,10 +535,10 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns 2 meshes, [0] is the one containing vertexIndexesToSplit. May remove tris at split edges if some tris vertics are in vertexIndexesToSplit and some not
         /// </summary>
-        public static List<FractureThis.MeshData> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, FractureThis.MeshData orginalMeshD, bool doBones, FractureThis fT, Material dMat)
+        public static List<FractureThis.FracSource> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, FractureThis.FracSource orginalMeshD, bool doBones)
         {
             //get ogMesh tris, vers....
-            Mesh oMesh = orginalMeshD.mesh;
+            Mesh oMesh = orginalMeshD.meshW;
             int[] oTris = oMesh.triangles;
             Vector3[] oVerts = oMesh.vertices;
             Vector3[] oNors = oMesh.normals;
@@ -606,10 +607,10 @@ namespace Zombie1111_uDestruction
                 ProcessTriangle(vIndexA, vIndexB, vIndexC, splitA, i);
             }
 
-            FractureThis.MeshData newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA, splitLinkA);
-            FractureThis.MeshData newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB, splitLinkB);
+            FractureThis.FracSource newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA, splitLinkA);
+            FractureThis.FracSource newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB, splitLinkB);
 
-            return new List<FractureThis.MeshData> { newMA, newMB };
+            return new List<FractureThis.FracSource> { newMA, newMB };
 
             void ProcessTriangle(int vIndexA, int vIndexB, int vIndexC, bool splitA, int ogTrisI)
             {
@@ -667,7 +668,7 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            FractureThis.MeshData CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> splitTrisOgTris)
+            FractureThis.FracSource CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> splitTrisOgTris)
             {
                 Mesh mesh = new()
                 {
@@ -683,7 +684,7 @@ namespace Zombie1111_uDestruction
                 if (boneWeights.Count > 0)
                     mesh.boneWeights = boneWeights.ToArray();
 
-                if (triangles.Count == 0) return new() { mesh = mesh, subMeshMats = new() };
+                if (triangles.Count == 0) return new() { meshW = mesh, mMats = new() };
 
                 //set submesh                
                 Dictionary<int, int> usedOgSubI = new();
@@ -700,7 +701,7 @@ namespace Zombie1111_uDestruction
 
                     if (subI == newSubTrisI.Count)
                     {
-                        newSubMats.Add(orginalMeshD.subMeshMats[ogSubI]);
+                        newSubMats.Add(orginalMeshD.mMats[ogSubI]);
                         newSubTrisI.Add(new() { triangles[stI], triangles[stI + 1], triangles[stI + 2] });
                     }
                     else
@@ -721,7 +722,7 @@ namespace Zombie1111_uDestruction
                 mesh.RecalculateBounds();
                 mesh.RecalculateTangents();
 
-                return new() { mesh = mesh, subMeshMats = newSubMats };
+                return new() { meshW = mesh, mMats = newSubMats };
             }
         }
 
@@ -875,6 +876,28 @@ namespace Zombie1111_uDestruction
             return gIds;
         }
 
+        public static void GetLinksFromColors(HashSet<Color> colors, ref HashSet<float> gLinks)
+        {
+            foreach (Color col in colors)
+            {
+                foreach (float link in Gd_getLinksFromColor(col))
+                {
+                    gLinks.Add(link);
+                }
+            }
+        }
+
+        public static List<float> Gd_getLinksFromColor(Color color)
+        {
+            List<float> gLinks = new();
+            if (color.r <= 0.5f && color.r > 0.0f) gLinks.Add(color.r);
+            if (color.g <= 0.5f && color.g > 0.0f) gLinks.Add(color.g);
+            if (color.b <= 0.5f && color.b > 0.0f) gLinks.Add(color.b);
+            if (color.a <= 0.5f && color.a > 0.0f) gLinks.Add(color.a);
+
+            return gLinks;
+        }
+
         /// <summary>
         /// Returns true if the given group id matches the id in the color
         /// </summary>
@@ -957,6 +980,32 @@ namespace Zombie1111_uDestruction
             return verInId;
         }
 
+        /// <summary>
+        /// Returns a int that reprisent the id
+        /// </summary>
+        public static int Gd_getIntIdFromId(List<float> id)
+        {
+            if (id == null || id.Count == 0)
+            {
+                // Return a default hash code for an empty list
+                return 0;
+            }
+
+            int hashCode = 0;
+            foreach (float value in id)
+            {
+                // Convert each float to an integer by multiplying by 2^32
+                int intValue = (int)(value * int.MaxValue);
+                // XOR the integer representation of each float to the hash code
+                hashCode ^= intValue;
+            }
+
+            return hashCode;
+        }
+
+        /// <summary>
+        /// Converts normals and vertices of the given mesh into worldspace (Modifies the given mesh)
+        /// </summary>
         public static Mesh ConvertMeshWithMatrix(Mesh mesh, Matrix4x4 lTwMatrix)
         {
             //mesh.SetVertices(ConvertPositionsWithMatrix(mesh.vertices, lTwMatrix));
@@ -969,11 +1018,11 @@ namespace Zombie1111_uDestruction
         /// Returns a float for each mesh that is each mesh size compared to each other. All floats added = 1.0f
         /// </summary>
         /// <param name="useMeshBounds">If true, Mesh.bounds is used to get scales (Faster but less accurate)</param>
-        public static List<float> GetPerMeshScale(List<Mesh> meshes, bool useMeshBounds = false)
+        public static List<float> GetPerMeshScale(Mesh[] meshes, bool useMeshBounds = false)
         {
             List<float> meshVolumes = new List<float>();
             float totalVolume = 0.0f;
-            for (int i = 0; i < meshes.Count; i += 1)
+            for (int i = 0; i < meshes.Length; i += 1)
             {
                 if (useMeshBounds == false) meshVolumes.Add(meshes[i].Volume());
                 else meshVolumes.Add(GetBoundingBoxVolume(meshes[i].bounds));
@@ -981,7 +1030,7 @@ namespace Zombie1111_uDestruction
             }
 
             float perMCost = 1.0f / totalVolume;
-            for (int i = 0; i < meshes.Count; i += 1)
+            for (int i = 0; i < meshes.Length; i += 1)
             {
                 meshVolumes[i] = perMCost * meshVolumes[i];
             }
@@ -1001,100 +1050,313 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns a mesh that is as similar to sourceMesh as possible while being convex
+        /// Returns the most similar ver+tris in sourceMW for every ver+tris in newMW. newMW and sourceMW must in worldspace
         /// </summary>
-        public static Mesh MakeMeshConvex(Mesh sourceMesh, bool verticsOnly = false, float worldScaleDis = 0.001f)
+        public static void GetMostSimilarTris(Mesh newMW, Mesh sourceMW, out int[] nVersBestSVer, out int[] nTrisBestSTri, float worldScale = 1.0f)
+        {
+            //get the most similar og triangel for every triangel on the comMesh
+            int[] sTris = sourceMW.triangles;
+            Vector3[] sVers = sourceMW.vertices;
+
+            int[] nTris = newMW.triangles;
+            Vector3[] nVers = newMW.vertices;
+
+            int ntL = nTris.Length / 3;
+            NativeArray<int> closeOTris = new(ntL, Allocator.Temp);
+            int nvL = nVers.Length;
+            int[] closeOVer = Enumerable.Repeat(-1, nvL).ToArray();
+
+            //Debug_drawMesh(newMW, false, 10.0f);
+            //Debug_drawMesh(sourceMW, false, 10.0f);
+
+            Parallel.For(0, ntL, i =>
+            {
+                int tI = i * 3;
+
+                closeOTris[i] = FractureHelperFunc.GetClosestTriOnMesh(
+                    sVers,
+                    sTris,
+                    new Vector3[3] { nVers[nTris[tI]], nVers[nTris[tI + 1]], nVers[nTris[tI + 2]] },
+                    worldScale);
+
+                Vector3[] oTrisPoss = new Vector3[3] { sVers[sTris[closeOTris[i]]], sVers[sTris[closeOTris[i] + 1]], sVers[sTris[closeOTris[i] + 2]] };
+
+                ////debug stuff
+                //Vector3[] tPoss = new Vector3[3] { nVers[nTris[tI]], nVers[nTris[tI + 1]], nVers[nTris[tI + 2]] };
+                //foreach (Vector3 pos in tPoss)
+                //{
+                //    Debug.DrawLine(pos, ClosestPointOnTriangle(oTrisPoss[0], oTrisPoss[1], oTrisPoss[2], pos), Color.yellow, 10.0f);
+                //}
+
+                lock (closeOVer)
+                {
+                    if (closeOVer[nTris[tI]] < 0)
+                    {
+                        closeOVer[nTris[tI]] = sTris[closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                          oTrisPoss,
+                          nVers[nTris[tI]])];
+
+                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]], Color.magenta, 30.0f);
+                    }
+
+                    if (closeOVer[nTris[tI + 1]] < 0)
+                    {
+                        closeOVer[nTris[tI + 1]] = sTris[closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                          oTrisPoss,
+                          nVers[nTris[tI + 1]])];
+
+                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]], Color.magenta, 30.0f);
+                    }
+
+                    if (closeOVer[nTris[tI + 2]] < 0)
+                    {
+                        closeOVer[nTris[tI + 2]] = sTris[closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                          oTrisPoss,
+                          nVers[nTris[tI + 2]])];
+
+                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]], Color.magenta, 30.0f);
+                    }
+                }
+            });
+
+            nVersBestSVer = closeOVer;
+            nTrisBestSTri = closeOTris.ToArray();
+            closeOTris.Dispose();
+        }
+
+        /// <summary>
+        /// Returns a mesh that is as similar to sourceMesh as possible while being convex, sourceMeshW must be in worldspace
+        /// </summary>
+        public static Mesh MakeMeshConvex(Mesh sourceMeshW, bool verticsOnly = false, float worldScale = 1.0f)
         {   
             var calc = new QuickHull_convex();
             var verts = new List<Vector3>();
             var tris = new List<int>();
             var normals = new List<Vector3>();
-            
-            if (calc.GenerateHull(sourceMesh.vertices.ToList(), !verticsOnly, ref verts, ref tris, ref normals) == false)
-            {
-                verts = sourceMesh.vertices.ToList();
 
-                if (verticsOnly == true) MergeSimilarVectors(ref verts, worldScaleDis);
+            bool didMake = calc.GenerateHull(sourceMeshW.vertices.ToList(), !verticsOnly, ref verts, ref tris, ref normals);
+
+            if (didMake == false || verts.Count >= sourceMeshW.vertexCount)
+            {
+                //When unable to make convex or convex has more vertics than source, just use the source mesh
+                if (verticsOnly == true)
+                {
+                    verts = sourceMeshW.vertices.ToList();
+                    MergeSimilarVectors(ref verts, worldScale * 0.0001f);
+                }
                 else
                 {
-                    tris = sourceMesh.triangles.ToList();
-                    normals = sourceMesh.normals.ToList();
+                    return UnityEngine.Object.Instantiate(sourceMeshW);
+                    //tris = sourceMeshW.triangles.ToList();
+                    //normals = sourceMeshW.normals.ToList();
                 }
             }
 
-            Mesh convexMesh = new();
-            convexMesh.SetVertices(verts);
-            if (verticsOnly == true) return convexMesh;
+            Mesh convexMeshW = new();
+            convexMeshW.SetVertices(verts);
+            if (verticsOnly == true) return convexMeshW;
 
-            convexMesh.SetTriangles(tris, 0);
-            convexMesh.SetNormals(normals);
+            convexMeshW.SetTriangles(tris, 0);
+            convexMeshW.SetNormals(normals);
 
-            SetMeshFromOther(ref convexMesh, sourceMesh);
+            GetMostSimilarTris(convexMeshW, sourceMeshW, out int[] cVersBestSVer, out int[] cTrisBestSTri, worldScale);
+            //if (GetMostSimilarTris_reversed(convexMeshW, sourceMeshW, out int[] cVersBestSVer, out int[] cTrisBestSTri) == false) return convexMeshW;
 
-            return convexMesh;
+            //Vector3[] vers = sourceMeshW.vertices;
+            //for (int i = 0; i < cVersBestSVer.Length; i++)
+            //{
+            //    Debug.DrawLine(verts[i], vers[cVersBestSVer[i]], Color.red, 10.0f);
+            //}
+
+            SetMeshFromOther(ref convexMeshW, sourceMeshW, cVersBestSVer, cTrisBestSTri, GetTrisSubMeshI(sourceMeshW), true);
+
+            return convexMeshW;
         }
 
         /// <summary>
-        /// Sets newMesh uvs and submeshes from the best sourceMesh uvs+submeshes
+        /// Gets what submesh every triangel in the given mesh has, returned array has the same lenght as mesh.tris
         /// </summary>
-        public static void SetMeshFromOther(ref Mesh newMesh, Mesh sourceMesh)
+        public static int[] GetTrisSubMeshI(Mesh mesh)
         {
-            //set uvs
-            Vector3[] sVers = sourceMesh.vertices;
-            Vector3[] nVers = newMesh.vertices;
-            Vector2[] sUvs = sourceMesh.uv;
-            Vector2[] nUvs = new Vector2[nVers.Length];
+            int[] sTrisSubMeshI = new int[mesh.triangles.Length];
+            //int count = 0;
 
-            for (int i = 0; i < nUvs.Length; i++)
+            for (int subI = 0; subI < mesh.subMeshCount; subI++)
             {
-                nUvs[i] = sUvs[GetClosestPointInArray(sVers, nVers[i], 0.0f)];
+                SubMeshDescriptor subMesh = mesh.GetSubMesh(subI);
+                //int indexEnd = (subMesh.indexStart / 3) + (subMesh.indexCount / 3);
+                int indexEnd = (subMesh.indexStart) + (subMesh.indexCount);
+
+                //for (int tI = subMesh.indexStart / 3; tI < indexEnd; tI++)
+                for (int tI = subMesh.indexStart; tI < indexEnd; tI++)
+                {
+                    //count++;
+                    //Debug.Log(tI);
+                    sTrisSubMeshI[tI] = subI;
+                }
             }
 
-            newMesh.uv = nUvs;
+            //Debug.Log(count + " " + sTrisSubMeshI.Length);
+            return sTrisSubMeshI;
+        }
 
-            //get what submesh each source triangel has
-            int[] sTris = sourceMesh.triangles;
-            int[] sTrisSubMeshI = new int[sTris.Length];
+        /// <summary>
+        /// Returns a list containing all tris that exists in the given subMeshI, list[X], list[X + 1] ,list[X + 2] = versForSubTrisX
+        /// </summary>
+        public static List<int> GetAllTrisInSubMesh(Mesh mesh, int subMeshI)
+        {
+            if (mesh.subMeshCount <= subMeshI) return new();
+            return mesh.GetTriangles(subMeshI).ToList();
+        }
+
+        public static HashSet<int> GetAllVersInSubMesh(Mesh mesh, int subMeshI)
+        {
+            if (mesh.subMeshCount <= subMeshI) return new();
+
+            HashSet<int> subVers = new();
+            foreach (int vI in mesh.GetTriangles(subMeshI))
+            {
+                subVers.Add(vI);
+            }
+
+            return subVers;
+        }
+
+        public static void SetMeshInsideMats(ref Mesh mesh, ref List<Material> mMats, HashSet<int> insideVers, Dictionary<Material, Material> matInsideMat)
+        {
+            if (mesh.subMeshCount != mMats.Count)
+            {
+                Debug.LogError("Unable to get inside materials because the given mMats array is not valid for the given mesh");
+                return;
+            }
+
+            List<List<int>> subMeshTris = new();
+            int matCount = mMats.Count;
+
+            for (int subI = 0; subI < matCount; subI++)
+            {
+                //get all tris in subI
+                subMeshTris.Add(GetAllTrisInSubMesh(mesh, subI));
+
+                //continue if this subI does not have a inside material
+                if (matInsideMat.ContainsKey(mMats[subI]) == false) continue;
+
+                //get all tris that is inside and add them to a new submesh
+                int insideSubI = -1;
+
+                for (int stI = subMeshTris[subI].Count - 3; stI >= 0; stI -= 3)
+                {
+                    if (insideVers.Contains(subMeshTris[subI][stI]) == true
+                        || insideVers.Contains(subMeshTris[subI][stI + 1]) == true
+                        || insideVers.Contains(subMeshTris[subI][stI + 2]) == true)
+                    {
+                        if (insideSubI < 0)
+                        {
+                            insideSubI = subMeshTris.Count;
+                            subMeshTris.Add(new());
+                            mMats.Add(matInsideMat[mMats[subI]]);
+                        }
+
+                        subMeshTris[insideSubI].Add(subMeshTris[subI][stI]);
+                        subMeshTris[insideSubI].Add(subMeshTris[subI][stI + 1]);
+                        subMeshTris[insideSubI].Add(subMeshTris[subI][stI + 2]);
+                        subMeshTris[subI].RemoveRange(stI, 3);
+                    }
+                }
+            }
+
+            //remove unused submeshes
+            for (int subI = subMeshTris.Count - 1; subI >= 0; subI--)
+            {
+                if (subMeshTris[subI].Count > 0) continue;
+
+                subMeshTris.RemoveAt(subI);
+                mMats.RemoveAt(subI);
+            }
+
+            //set submeshes
+            mesh.subMeshCount = subMeshTris.Count;
+            for (int subI = subMeshTris.Count - 1; subI >= 0; subI--)
+            {
+                mesh.SetTriangles(subMeshTris[subI], subI);
+            }
+        }
+
+        /// <summary>
+        /// Sets newMesh uvs+submeshes from the best sourceMesh uvs+submeshes, the returned list is what source subMesh every new subMesh reprisent
+        /// </summary>
+        public static List<int> SetMeshFromOther(ref Mesh newMesh, Mesh sourceMesh, int[] nVersBestSVer, int[] nTrisBestSTri, int[] sTrisSubMeshI, bool setUvs = true)
+        {
+            //set uvs
+            if (setUvs == true)
+            {
+                Vector2[] sUvs = sourceMesh.uv;
+                Vector2[] nUvs = new Vector2[newMesh.vertexCount];
+
+                for (int nvI = 0; nvI < nUvs.Length; nvI++)
+                {
+                    nUvs[nvI] = sUvs[nVersBestSVer[nvI]];
+                }
+
+                newMesh.uv = nUvs;
+            }
+
+            //set boneWeights
+            if (sourceMesh.bindposes.Length > 0 && sourceMesh.boneWeights.Length > 0)
+            {
+                newMesh.bindposes = sourceMesh.bindposes;
+                BoneWeight[] nBoneWe = new BoneWeight[newMesh.vertexCount];
+                BoneWeight[] sBoneWe = sourceMesh.boneWeights;
+
+                for (int nvI = 0; nvI < nBoneWe.Length; nvI++)
+                {
+                    nBoneWe[nvI] = sBoneWe[nVersBestSVer[nvI]];
+                }
+            }
+
+            //set submeshes
+            //Creates two lists with the same lenght as source subMesh count. We cant use arrays since we will remove unused items later
+            List<int> nSubSSubI = new();
             List<List<int>> nSubTris = new();
-            
+
             for (int sI = 0; sI < sourceMesh.subMeshCount; sI++)
             {
                 nSubTris.Add(new());
-            
-                SubMeshDescriptor subMesh = sourceMesh.GetSubMesh(sI);
-                int indexEnd = (subMesh.indexStart / 3) + (subMesh.indexCount / 3);
-            
-                for (int tI = (subMesh.indexStart / 3); tI < indexEnd; tI++)
-                {
-                    sTrisSubMeshI[tI] = sI;
-                }
-            
-            }
-            
-            //set submeshes
-            int[] nTris = newMesh.triangles;
-            
-            for (int i = 0; i < nTris.Length; i += 3)
-            {
-                int stI = GetClosestTriOnMesh(sVers, sTris, new Vector3[3] { nVers[nTris[i]], nVers[nTris[i + 1]], nVers[nTris[i + 2]] }, 0.0f);
-                int ssI = sTrisSubMeshI[stI];
-            
-                nSubTris[ssI].Add(nTris[i]);
-                nSubTris[ssI].Add(nTris[i + 1]);
-                nSubTris[ssI].Add(nTris[i + 2]);
-            }
-            
-            for (int i = nSubTris.Count - 1; i >= 0; i--)
-            {
-                if (nSubTris[i].Count == 0) nSubTris.RemoveAt(i);
+                nSubSSubI.Add(sI);
             }
 
+            //get what source submesh each triangel in newMesh should have
+            int[] nTris = newMesh.triangles;
+            int triCount = nTris.Length / 3;
+
+            for (int i = 0; i < triCount; i++)
+            {
+                int ntI = i * 3;
+                int ssI = sTrisSubMeshI[nTrisBestSTri[i]];
+               
+                nSubTris[ssI].Add(nTris[ntI]);
+                nSubTris[ssI].Add(nTris[ntI + 1]);
+                nSubTris[ssI].Add(nTris[ntI + 2]);
+            }
+            
+            //remove unused submeshes
+            for (int nsI = nSubTris.Count - 1; nsI >= 0; nsI--)
+            {
+                if (nSubTris[nsI].Count > 0) continue;
+                    
+                nSubTris.RemoveAt(nsI);
+                nSubSSubI.RemoveAt(nsI);
+            }
+
+            //set newMesh submeshes
             newMesh.subMeshCount = nSubTris.Count;
 
             for (int i = 0; i < nSubTris.Count; i++)
             {
                 newMesh.SetTriangles(nSubTris[i], i);
             }
+
+            return nSubSSubI;
         }
 
         /// <summary>
@@ -1231,63 +1493,142 @@ namespace Zombie1111_uDestruction
             return midPos / positions.Length;
         }
 
-        public static Vector3 ClosestPointOnTriangle(Vector3 pointA, Vector3 pointB, Vector3 pointC, Vector3 queryPoint)
+        public static Vector3 ClosestPointOnPlaneInfinit(Vector3 planePos, Vector3 planeNor, Vector3 queryPoint)
         {
-            // Calculate triangle normal
-            Vector3 triNorm = Vector3.Cross(pointA - pointB, pointA - pointC);
+            return queryPoint + (-Vector3.Dot(planeNor, queryPoint - planePos) / Vector3.Dot(planeNor, planeNor)) * planeNor;
+        }
 
-            // Calculate the projection of the query point onto the triangle plane
-            Plane triPlane = new(pointA, triNorm);
-            triPlane.Set3Points(pointA, pointB, pointC);
-            Vector3 projectedPoint = triPlane.ClosestPointOnPlane(queryPoint);
+        public static Vector3 ClosestPointOnTriangle(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 queryPoint)
+        {
+            //first get closest point on plane
+            Vector3 pNor = Vector3.Cross(p0 - p1, p0 - p2);
+            Vector3 closeP = queryPoint + (-Vector3.Dot(pNor, queryPoint - p0) / Vector3.Dot(pNor, pNor)) * pNor;
 
-            // Check if the projected point is inside the triangle
-            if (IsPointInTriangle(projectedPoint, pointA, pointB, pointC))
+            //if the closest point on plane is inside the triangel, return closest planePoint
+            if (PointInTriangle(closeP) == true) return closeP;
+
+            //return closest point on the closest edge
+            //Vector3[] closeL = new Vector3[3] { ClosestPointOnLine(p0, p1, queryPoint), ClosestPointOnLine(p1, p2, queryPoint), ClosestPointOnLine(p0, p2, queryPoint) };
+            Vector3 pLine0 = ClosestPointOnLine(p0, p1, queryPoint);
+            Vector3 pLine1 = ClosestPointOnLine(p1, p2, queryPoint);
+            Vector3 pLine2 = ClosestPointOnLine(p0, p2, queryPoint);
+
+            float cLine0 = (pLine0 - queryPoint).sqrMagnitude;
+            float cLine1 = (pLine1 - queryPoint).sqrMagnitude;
+            float cLine2 = (pLine2 - queryPoint).sqrMagnitude;
+
+            if (cLine0 < cLine1)
             {
-                return projectedPoint;
-            }
-            else
-            {
-                // If not, find the closest point on each triangle edge
-                Vector3 closestOnAB = ClosestPointOnSegment(pointA, pointB, queryPoint);
-                Vector3 closestOnBC = ClosestPointOnSegment(pointB, pointC, queryPoint);
-                Vector3 closestOnCA = ClosestPointOnSegment(pointC, pointA, queryPoint);
-
-                // Find the closest point among these three
-                float distAB = Vector3.Distance(queryPoint, closestOnAB);
-                float distBC = Vector3.Distance(queryPoint, closestOnBC);
-                float distCA = Vector3.Distance(queryPoint, closestOnCA);
-
-                if (distAB < distBC && distAB < distCA)
-                    return closestOnAB;
-                else if (distBC < distCA)
-                    return closestOnBC;
-                else
-                    return closestOnCA;
+                //0 or 2 is closest
+                if (cLine2 < cLine0) return pLine2;
+                return pLine0;
             }
 
-
-            bool IsPointInTriangle(Vector3 point, Vector3 A, Vector3 B, Vector3 C)
+            if (cLine1 < cLine2)
             {
-                // Check if the point is inside the triangle using barycentric coordinates
-                float alpha = ((B - C).y * (point.x - C.x) + (C - B).x * (point.y - C.y)) /
-                              ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
-
-                float beta = ((C - A).y * (point.x - C.x) + (A - C).x * (point.y - C.y)) /
-                             ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
-
-                float gamma = 1.0f - alpha - beta;
-
-                return alpha > 0 && beta > 0 && gamma > 0;
+                //1 is closest. We checked 0 before
+                return pLine1;
             }
 
-            Vector3 ClosestPointOnSegment(Vector3 start, Vector3 end, Vector3 queryPoint)
+            return pLine2;
+
+
+            //return closeL[GetClosestPointInArray(closeL, queryPoint, 0.0f)];
+
+            bool PointInTriangle(Vector3 p)
             {
-                // Find the closest point on a line segment
-                Vector3 direction = end - start;
-                float t = Mathf.Clamp01(Vector3.Dot(queryPoint - start, direction) / direction.sqrMagnitude);
-                return start + t * direction;
+                // Lets define some local variables, we can change these
+                // without affecting the references passed in
+                Vector3 a = p0 - p;
+                Vector3 b = p1 - p;
+                Vector3 c = p2 - p;
+
+                // The point should be moved too, so they are both
+                // relative, but because we don't use p in the
+                // equation anymore, we don't need it!
+                // p -= p;
+
+                // Compute the normal vectors for triangles:
+                // u = normal of PBC
+                // v = normal of PCA
+                // w = normal of PAB
+
+                Vector3 u = Vector3.Cross(b, c);
+                Vector3 v = Vector3.Cross(c, a);
+                Vector3 w = Vector3.Cross(a, b);
+
+                // Test to see if the normals are facing 
+                // the same direction, return false if not
+                if (Vector3.Dot(u, v) < 0f)
+                {
+                    return false;
+                }
+                if (Vector3.Dot(u, w) < 0.0f)
+                {
+                    return false;
+                }
+
+                // All normals facing the same way, return true
+                return true;
             }
+
+            //// Calculate triangle normal
+            //Vector3 triNorm = Vector3.Cross(pointA - pointB, pointA - pointC);
+            //
+            //// Calculate the projection of the query point onto the triangle plane
+            //Plane triPlane = new(triNorm, pointA);
+            //triPlane.Set3Points(pointA, pointB, pointC);
+            //Vector3 projectedPoint = triPlane.ClosestPointOnPlane(queryPoint);
+            //return projectedPoint;
+            //
+            //// Check if the projected point is inside the triangle
+            //if (IsPointInTriangle(projectedPoint, pointA, pointB, pointC))
+            //{
+            //    return projectedPoint;
+            //}
+            //else
+            //{
+            //    // If not, find the closest point on each triangle edge
+            //    Vector3 closestOnAB = ClosestPointOnSegment(pointA, pointB, queryPoint);
+            //    Vector3 closestOnBC = ClosestPointOnSegment(pointB, pointC, queryPoint);
+            //    Vector3 closestOnCA = ClosestPointOnSegment(pointC, pointA, queryPoint);
+            //
+            //    // Find the closest point among these three
+            //    float distAB = Vector3.Distance(queryPoint, closestOnAB);
+            //    float distBC = Vector3.Distance(queryPoint, closestOnBC);
+            //    float distCA = Vector3.Distance(queryPoint, closestOnCA);
+            //
+            //    if (distAB < distBC && distAB < distCA)
+            //        return closestOnAB;
+            //    else if (distBC < distCA)
+            //        return closestOnBC;
+            //    else
+            //        return closestOnCA;
+            //}
+            //
+            //
+            //bool IsPointInTriangle(Vector3 point, Vector3 A, Vector3 B, Vector3 C)
+            //{
+            //
+            //    // Check if the point is inside the triangle using barycentric coordinates
+            //    float alpha = ((B - C).y * (point.x - C.x) + (C - B).x * (point.y - C.y)) /
+            //                  ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
+            //
+            //    float beta = ((C - A).y * (point.x - C.x) + (A - C).x * (point.y - C.y)) /
+            //                 ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
+            //
+            //    float gamma = 1.0f - alpha - beta;
+            //
+            //    return alpha > 0 && beta > 0 && gamma > 0;
+            //}
+            //
+            //Vector3 ClosestPointOnSegment(Vector3 start, Vector3 end, Vector3 queryPoint)
+            //{
+            //    // Find the closest point on a line segment
+            //    Vector3 direction = end - start;
+            //    float t = Mathf.Clamp01(Vector3.Dot(queryPoint - start, direction) / direction.sqrMagnitude);
+            //    return start + t * direction;
+            //}
         }
 
 
@@ -1420,11 +1761,11 @@ namespace Zombie1111_uDestruction
 
                 foreach (Vector3 wPos in possLocal)
                 {
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tSide), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
                     if (cDis > extents.x) extents.x = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tUp), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
@@ -1444,11 +1785,11 @@ namespace Zombie1111_uDestruction
 
                 foreach (Vector3 wPos in possLocal)
                 {
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tSide), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
                     if (cDis > extents.x) extents.x = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tUp), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
@@ -1469,11 +1810,11 @@ namespace Zombie1111_uDestruction
 
                 foreach (Vector3 wPos in possLocal)
                 {
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tFor), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tSide), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
                     if (cDis > extents.x) extents.x = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLine_doubleSided(wPos, tPos, tUp), tPos);
+                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
@@ -1719,30 +2060,6 @@ namespace Zombie1111_uDestruction
             Debug.DrawLine(corners[1], corners[5], color, duration);
             Debug.DrawLine(corners[2], corners[6], color, duration);
             Debug.DrawLine(corners[3], corners[7], color, duration);
-        }
-
-        public static void Debug_drawMaterial(FractureThis.MeshData mesh, Material mat)
-        {
-            int subI = -1;
-
-            for (int i = 0; i < mesh.subMeshMats.Count; i++)
-            {
-                if (mesh.subMeshMats[i] == mat)
-                {
-                    subI = i;
-                    break;
-                }
-            }
-
-            if (subI < 0) return;
-
-            Mesh me = mesh.mesh;
-            Vector3[] vers = me.vertices;
-
-            foreach (int vI in me.GetTriangles(subI))
-            {
-                Debug_drawBox(vers[vI], 0.005f, Color.blue, 10.0f);
-            }
         }
 #endif
     }
