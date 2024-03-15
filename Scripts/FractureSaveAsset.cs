@@ -58,7 +58,7 @@ namespace Zombie1111_uDestruction
             public FractureThis.IntList[] saved_verticsLinkedThreaded = new FractureThis.IntList[0];
             public float[] saved_partsOgResistanceThreaded = new float[0];
             public FractureThis.FracPart[] saved_allParts = new FractureThis.FracPart[0];
-            public bool[] saved_kinematicPartStatus = new bool[0];
+            public HashSet<int> saved_kinematicPartsStatus = new();
             public int saved_rendVertexCount = -1;
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
@@ -147,7 +147,7 @@ namespace Zombie1111_uDestruction
 
             //save the data
             fracSavedData.id += 1;
-            fracSavedData.saved_kinematicPartStatus = saveFrom.kinematicPartStatus.ToArray();
+            fracSavedData.saved_kinematicPartsStatus = saveFrom.partsKinematicStatus.ToHashSet();
             fracSavedData.saved_verticsLinkedThreaded = saveFrom.verticsLinkedThreaded.ToArray();
             fracSavedData.saved_allParts = saveFrom.allParts.ToArray();
             fracSavedData.saved_rendVertexCount = saveFrom.fracRend.sharedMesh.vertexCount;
@@ -160,8 +160,8 @@ namespace Zombie1111_uDestruction
                 if (saveFrom.allParts[0].col is MeshCollider)
                 {
                     //if mesh colliders save the them too
-                    fracSavedData.sMesh_colsVers = new VecArray[saveFrom.allParts.Length];
-                    for (int i = 0; i < saveFrom.allParts.Length; i += 1)
+                    fracSavedData.sMesh_colsVers = new VecArray[saveFrom.allParts.Count];
+                    for (int i = 0; i < saveFrom.allParts.Count; i += 1)
                     {
                         fracSavedData.sMesh_colsVers[i] = new()
                         {
@@ -179,8 +179,8 @@ namespace Zombie1111_uDestruction
             }
 
             //because ScriptableObject cannot save actual components we save it on FractureThis
-            saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Length];
-            for (int i = 0; i < saveFrom.allParts.Length; i += 1)
+            saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Count];
+            for (int i = 0; i < saveFrom.allParts.Count; i += 1)
             {
                 saveFrom.saved_allPartsCol[i] = saveFrom.allParts[i].col;
             }
@@ -210,12 +210,12 @@ namespace Zombie1111_uDestruction
             }
 
             //Apply saved data to the provided FractureThis instance
-            loadTo.kinematicPartStatus = fracSavedData.saved_kinematicPartStatus.ToArray();
+            loadTo.partsKinematicStatus = fracSavedData.saved_kinematicPartsStatus.ToHashSet();
             loadTo.verticsLinkedThreaded = fracSavedData.saved_verticsLinkedThreaded.ToArray();
-            loadTo.allParts = fracSavedData.saved_allParts.ToArray();
+            loadTo.allParts = fracSavedData.saved_allParts.ToList();
 
             //Restore saved colliders to the allParts array
-            for (int i = 0; i < loadTo.allParts.Length; i++)
+            for (int i = 0; i < loadTo.allParts.Count; i++)
             {
                 loadTo.allParts[i].col = loadTo.saved_allPartsCol[i];
                 loadTo.allParts[i].trans = loadTo.saved_allPartsCol[i].transform;
@@ -227,7 +227,7 @@ namespace Zombie1111_uDestruction
             loadTo.fracRend.sharedMesh = fracSavedData.saved_rendMesh.ToMesh();
 
             if (fracSavedData.sMesh_colsVers == null || fracSavedData.sMesh_colsVers.Length == 0) return true;
-            for (int i = 0; i < loadTo.allParts.Length; i += 1)
+            for (int i = 0; i < loadTo.allParts.Count; i += 1)
             {
                 ((MeshCollider)loadTo.allParts[i].col).sharedMesh = new()
                 {

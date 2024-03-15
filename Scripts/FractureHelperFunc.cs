@@ -1365,121 +1365,64 @@ namespace Zombie1111_uDestruction
         /// <param name="fracMeshes">Must have same lenght as fracParts</param>
         public static Mesh CombineMeshes(Mesh[] fracMeshes, ref FractureThis.FracPart[] fracParts)
         {
-            int partCount = fracParts.Length;
-            Mesh comMesh = new();
-            comMesh.indexFormat = IndexFormat.UInt32;
-            List<CombineInstance> comMeshes = new();
-            List<bool> comHadSub = new();
-            int subMeshCount = 0;
+            return null;
 
-            for (int i = 0; i < partCount; i++)
-            {
-                comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 0 });
-                subMeshCount++;
-                if (fracMeshes[i].subMeshCount > 1)
-                {
-                    comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 1 });
-                    comHadSub.Add(true);
-                }
-                else comHadSub.Add(false);
-            }
-
-            comMesh.CombineMeshes(comMeshes.ToArray(), false, false, false);//if we lucky, combinedMesh submesh[0] == comMesh[0], if thats the case we can just use unity combine
-            comMesh.Optimize();//Should be safe to call since submeshes order does not change?
-            Debug_doesMeshContainUnusedVers(comMesh);
-            int partI = 0;
-            List<int> newSubTrisA = new();
-            List<int> newSubTrisB = new();
-
-            for (int comI = 0; comI < comMeshes.Count; comI++)
-            {
-                foreach (int vI in comMesh.GetTriangles(comI))
-                {
-                    newSubTrisA.Add(vI);
-                    if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
-                }
-
-                if (comHadSub[partI] == false)
-                {
-                    partI++;
-                    continue;
-                }
-
-                comI++;
-                foreach (int vI in comMesh.GetTriangles(comI))
-                {
-                    newSubTrisB.Add(vI);
-                    if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
-                }
-
-                partI++;
-            }
-            
-            comMesh.subMeshCount = newSubTrisB.Count > 0 ? 2 : 1;
-            comMesh.SetTriangles(newSubTrisA, 0);
-            if (newSubTrisB.Count > 0) comMesh.SetTriangles(newSubTrisB, 1);
-
-            Debug_doesMeshContainUnusedVers(comMesh);
-            return comMesh;
-
-            //List<Vector3> combinedVertices = new List<Vector3>();
-            //List<Vector3> combinedNormals = new List<Vector3>();
-            //List<Vector2> combinedUVs = new List<Vector2>();
-            //List<int> combinedTrianglesA = new List<int>();
-            //List<int> combinedTrianglesB = new List<int>();
-            ////List<BoneWeight> combinedBones = new List<BoneWeight>();
-            //int vertexOffset = 0;
+            //int partCount = fracParts.Length;
+            //Mesh comMesh = new();
+            //comMesh.indexFormat = IndexFormat.UInt32;
+            //List<CombineInstance> comMeshes = new();
+            //List<bool> comHadSub = new();
+            //int subMeshCount = 0;
             //
-            //for (int i = 0; i < fracMeshes.Length; i += 1)
+            //for (int i = 0; i < partCount; i++)
             //{
-            //    Mesh mesh = fracMeshes[i];
-            //
-            //    // Get the vertices, normals, and UVs from the small mesh
-            //    Vector3[] vertices = mesh.vertices;
-            //    Vector3[] normals = mesh.normals;
-            //    Vector2[] uvs = mesh.uv;
-            //    //BoneWeight[] bones = mesh.boneWeights;
-            //
-            //    //link combined vertices to fracture part
-            //    for (int ii = 0; ii < vertices.Length; ii += 1)
+            //    comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 0 });
+            //    subMeshCount++;
+            //    if (fracMeshes[i].subMeshCount > 1)
             //    {
-            //        fracParts[i].rendLinkVerIndexes.Add(combinedVertices.Count + ii);
+            //        comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 1 });
+            //        comHadSub.Add(true);
             //    }
-            //
-            //    // Append the vertex data to the combined lists
-            //    combinedVertices.AddRange(vertices);
-            //    combinedNormals.AddRange(normals);
-            //    combinedUVs.AddRange(uvs);
-            //    //combinedBones.AddRange(bones);
-            //
-            //    int[] trianglesA = mesh.GetTriangles(0);
-            //    int[] trianglesB = new int[0];
-            //    if (mesh.subMeshCount > 1) trianglesB = mesh.GetTriangles(1);
-            //
-            //    // Append the triangle data to the combined list, adjusting the indices with the vertex offset
-            //    for (int j = 0; j < trianglesA.Length; j++)
-            //    {
-            //        combinedTrianglesA.Add(trianglesA[j] + vertexOffset);
-            //    }
-            //
-            //    for (int j = 0; j < trianglesB.Length; j++)
-            //    {
-            //        combinedTrianglesB.Add(trianglesB[j] + vertexOffset);
-            //    }
-            //
-            //    // Update the vertex offset for the next small mesh
-            //    vertexOffset += vertices.Length;
+            //    else comHadSub.Add(false);
             //}
             //
-            //Mesh combinedMesh = new Mesh();
-            //combinedMesh.vertices = combinedVertices.ToArray();
-            //combinedMesh.normals = combinedNormals.ToArray();
-            //combinedMesh.uv = combinedUVs.ToArray();
-            //combinedMesh.subMeshCount = 2;
-            //combinedMesh.SetTriangles(combinedTrianglesA.ToArray(), 0);
-            //combinedMesh.SetTriangles(combinedTrianglesB.ToArray(), 1);
-            ////combinedMesh.boneWeights = combinedBones.ToArray(); //if no 0 we get error, (Must implement og bones to fractured mesh bones)
-            //return combinedMesh;
+            //comMesh.CombineMeshes(comMeshes.ToArray(), false, false, false);//if we lucky, combinedMesh submesh[0] == comMesh[0], if thats the case we can just use unity combine
+            //comMesh.Optimize();//Should be safe to call since submeshes order does not change?
+            //Debug_doesMeshContainUnusedVers(comMesh);
+            //int partI = 0;
+            //List<int> newSubTrisA = new();
+            //List<int> newSubTrisB = new();
+            //
+            //for (int comI = 0; comI < comMeshes.Count; comI++)
+            //{
+            //    foreach (int vI in comMesh.GetTriangles(comI))
+            //    {
+            //        newSubTrisA.Add(vI);
+            //        if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
+            //    }
+            //
+            //    if (comHadSub[partI] == false)
+            //    {
+            //        partI++;
+            //        continue;
+            //    }
+            //
+            //    comI++;
+            //    foreach (int vI in comMesh.GetTriangles(comI))
+            //    {
+            //        newSubTrisB.Add(vI);
+            //        if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
+            //    }
+            //
+            //    partI++;
+            //}
+            //
+            //comMesh.subMeshCount = newSubTrisB.Count > 0 ? 2 : 1;
+            //comMesh.SetTriangles(newSubTrisA, 0);
+            //if (newSubTrisB.Count > 0) comMesh.SetTriangles(newSubTrisB, 1);
+            //
+            //Debug_doesMeshContainUnusedVers(comMesh);
+            //return comMesh;
         }
 
         public static Vector3 GetMedianPosition(Vector3[] positions)

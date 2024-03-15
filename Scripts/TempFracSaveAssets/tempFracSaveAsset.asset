@@ -13,13 +13,1611 @@ MonoBehaviour:
   m_Name: tempFracSaveAsset
   m_EditorClassIdentifier: 
   fracSavedData:
-    id: 449
+    id: 455
     saved_verticsLinkedThreaded: []
     saved_partsOgResistanceThreaded: []
-    saved_allParts: []
-    saved_kinematicPartStatus: 
-    saved_verticsPartThreaded: 
-    saved_boneWe_broken: []
+    saved_allParts:
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    - col: {fileID: 0}
+      neighbourParts: 
+      groupIdInt: 0
+      groupId: []
+      groupLinks: []
+      parentIndex: 0
+      trans: {fileID: 0}
+      partMeshVerts: 
+    saved_rendVertexCount: 13356
     saved_rendMesh:
       sMesh_boneWeights: []
       sMesh_bindposes: []

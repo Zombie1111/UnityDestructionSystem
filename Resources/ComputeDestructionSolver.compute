@@ -1,0 +1,13 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel SolveDestructionStep
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+
+[numthreads(32,1,1)]
+void SolveDestructionStep(uint3 id : SV_DispatchThreadID)
+{
+
+}
