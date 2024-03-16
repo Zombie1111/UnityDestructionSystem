@@ -153,16 +153,7 @@ namespace Zombie1111_uDestruction
 
         private void OnDrawGizmos()
         {
-            if (computeDestructionSolver != null)
-            {
-                Debug_toggleTimer();
-                for (int i = 0; i < 300; i++)
-                {
-                    computeDestructionSolver.Dispatch(cpKernelId_SolveDestructionStep, 1, 1, 1);
-                }
-                Debug_toggleTimer();
-            }
-
+            //Do not run while playing
             if (Application.isPlaying == true) return;
 
             //load saveAsset if needed
@@ -196,6 +187,8 @@ namespace Zombie1111_uDestruction
                 Gen_removeFracture(false, false, false);
                 return;
             }
+
+            GlobalUpdate();
         }
 
         private void OnDrawGizmosSelected()
@@ -401,7 +394,13 @@ namespace Zombie1111_uDestruction
             if (doSave == true)
             {
                 //save
+                SyncFracRendData(); //Rend must be synced before saving since fr_[] variabels are "saved" inside the renderer
                 saved_fracId = saveAsset.Save(this);
+
+                //save scene (Since the user agreed to saving before fracturing we can just save without asking)
+#if UNITY_EDITOR
+                if (Application.isPlaying == false) EditorSceneManager.SaveOpenScenes();
+#endif
                 return;
             }
 
@@ -418,6 +417,8 @@ namespace Zombie1111_uDestruction
                     " (Use a different saveAsset or use a prefab to have multiable identical fractures)");
                 return;
             }
+
+            SyncFracRendData();
         }
 
         /// <summary>
@@ -509,11 +510,11 @@ namespace Zombie1111_uDestruction
 
             //clear saved variabels
             saved_allPartsCol = new Collider[0];
-            verticsLinkedThreaded = new IntList[0];
             allParts = new();
             allParents = new();
             partsDefualtData = new();
             partsKinematicStatus = new();
+            parentsThatNeedsUpdating = new();
 
             if (didChangeAnything == true) EditorUtility.SetDirty(objToUse);
             if (doSave == false) return didChangeAnything;
@@ -550,6 +551,8 @@ namespace Zombie1111_uDestruction
 
             foreach (Component comp in objToUse.GetComponentsInChildren<Component>())
             {
+                if (comp == fracRend) continue;
+
                 OrginalCompData newOgD = new();
                 Type targetType = comp.GetType();
                 if (IsValidType(targetType) == false) continue;
@@ -624,6 +627,11 @@ namespace Zombie1111_uDestruction
             /// The total mass of all parts that uses this parent
             /// </summary>
             public float parentMass;
+
+            /// <summary>
+            /// The total number of kinematic parts that uses this parent
+            /// </summary>
+            public int parentKinematic;
         }
 
 
@@ -824,13 +832,8 @@ namespace Zombie1111_uDestruction
                 CreateAndAddFObjectsFromFMeshes(partMeshesW);
 
                 //save to save asset
-                   if (UpdateProgressBar("Saving") == false) return CancelFracturing();
+                if (UpdateProgressBar("Saving") == false) return CancelFracturing();
                 SaveOrLoadAsset(true);
-
-                //save scene (Since the user agreed to saving before fracturing we can just save without asking)
-#if UNITY_EDITOR
-                if (Application.isPlaying == false) EditorSceneManager.SaveOpenScenes();
-#endif
 
                 //log result when done, log when done
                 if (fracRend.bones.Length > 500) Debug.LogWarning(transform.name + " has " + fracRend.bones.Length + " bones (skinnedMeshRenderers seems to have a limitation of ~500 bones before it breaks)");
@@ -973,15 +976,16 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        private List<Vector3> fr_verticesL;
-        private List<Vector3> fr_normalsL;
-        private List<Vector2> fr_uvs;
-        private List<BoneWeight> fr_boneWeights;
-        private List<BoneWeight> fr_boneWeightsSkin;
-        private List<Material> fr_materials;
-        private List<int>[] fr_subTris;
-        private List<Transform> fr_bones;
-        private List<Matrix4x4> fr_bindPoses;
+        //fracRend mesh will be set from all fr_[] variabels when synced, they should only be modified by destructionSystem
+        [System.NonSerialized] public List<Vector3> fr_verticesL;
+        [System.NonSerialized] public List<Vector3> fr_normalsL;
+        [System.NonSerialized] public List<Vector2> fr_uvs;
+        [System.NonSerialized] public List<BoneWeight> fr_boneWeights;
+        [System.NonSerialized] public List<BoneWeight> fr_boneWeightsSkin;
+        [System.NonSerialized] public List<Material> fr_materials;
+        [System.NonSerialized] public List<List<int>> fr_subTris;
+        [System.NonSerialized] public List<Transform> fr_bones;
+        [System.NonSerialized] public List<Matrix4x4> fr_bindPoses;
 
         /// <summary>
         /// Sets fracRend defualt values so its ready to get parts added to it, returns true if valid fracRend
@@ -1008,7 +1012,7 @@ namespace Zombie1111_uDestruction
             fr_boneWeights = new();
             fr_boneWeightsSkin = new();
             fr_materials = new();
-            fr_subTris = new List<int>[0];
+            fr_subTris = new();
             fr_bones = new();
             fr_bindPoses = new();
 
@@ -1022,17 +1026,48 @@ namespace Zombie1111_uDestruction
             SyncFracRendData();
 
             //create defualt parent
-            if (mainFracSource != null) CreateNewParent(skinRendSource == null ? mainFracSource.sRend.transform : skinRendSource.rootBone);
-            else CreateNewParent(null);
+            Transform defualtParentTrans = null;
+            if (mainFracSource != null)
+            {
+                if (skinRendSource != null) defualtParentTrans = skinRendSource.rootBone;
+                else
+                {
+                    defualtParentTrans = mainFracSource.sRend.transform;
+                    int loopCount;
+
+                    for (loopCount = 0; loopCount < 10; loopCount++)
+                    {
+                        if ((defualtParentTrans.lossyScale - (Vector3.one * defualtParentTrans.lossyScale.x)).magnitude < 0.00001f
+                            || defualtParentTrans == transform) break;
+                        defualtParentTrans = defualtParentTrans.parent;
+                    }
+
+                    if (loopCount != 0) Debug.LogWarning(mainFracSource.sRend.transform.name + " cant be used as base parent because it does not have a uniform lossy scale, " + defualtParentTrans.name + " will be used as base parent instead!");
+                }
+            }
+
+            CreateNewParent(defualtParentTrans == transform ? null : defualtParentTrans);
 
             return true;
         }
 
+        private bool wantToSyncFracRendData = false;
+
         /// <summary>
-        /// Call to assign fracRend with data from fr_[] and sync with gpu
+        /// Calls SyncFracRendData() once the next frame
         /// </summary>
-        private void SyncFracRendData(List<int> modifedSubMeshI = null)
+        private void RequestSyncFracRendData()
         {
+            wantToSyncFracRendData = true;
+        }
+
+        /// <summary>
+        /// Call to assign fracRend with data from fr_[] and sync with gpu (RequestSyncFracRendData() should be used instead to prevent SyncFracRendData() from being called many times a frame)
+        /// </summary>
+        private void SyncFracRendData()
+        {
+            wantToSyncFracRendData = false;
+
             //set the renderer
             fracRend.SetSharedMaterials(fr_materials);
             fracRend.bones = fr_bones.ToArray();
@@ -1043,19 +1078,12 @@ namespace Zombie1111_uDestruction
             fracRend.sharedMesh.boneWeights = isRealSkinnedM == false ? fr_boneWeights.ToArray() : fr_boneWeightsSkin.ToArray();
 
             //set rend submeshes
-            fracRend.sharedMesh.subMeshCount = fr_subTris.Length;
+            fracRend.sharedMesh.subMeshCount = fr_subTris.Count;
 
-            if (modifedSubMeshI == null)
+            for (int subI = 0; subI < fr_subTris.Count; subI++)
             {
-                for (int subI = 0; subI < fr_subTris.Length; subI++)
-                {
-                    fracRend.sharedMesh.SetTriangles(fr_subTris[subI], subI);
-                }
+                fracRend.sharedMesh.SetTriangles(fr_subTris[subI], subI);
             }
-            else foreach (int subI in modifedSubMeshI)
-                {
-                    fracRend.sharedMesh.SetTriangles(fr_subTris[subI], subI);
-                }
 
             //sync data with gpu
 
@@ -1110,16 +1138,6 @@ namespace Zombie1111_uDestruction
 
             fObj.groupId = fMesh.groupId;
 
-            //debug renderer and destroy
-            Renderer rend = pTrans.GetOrAddComponent<MeshRenderer>();
-            MeshFilter mF = pTrans.GetOrAddComponent<MeshFilter>();
-            
-            rend.sharedMaterials = fObj.mMaterials.ToArray();
-            mF.sharedMesh = FractureHelperFunc.ConvertMeshWithMatrix(fObj.meshW, pTrans.worldToLocalMatrix);
-            mF.sharedMesh.RecalculateBounds();
-            rend.ResetBounds();
-            //DestroyImmediate(fObj.col.gameObject);
-
             //return the new fObject
             return fObj;
         }
@@ -1130,7 +1148,7 @@ namespace Zombie1111_uDestruction
         public FracObject CreateFObjectFromObject(GameObject obj, List<float>[] groupIds = null)
         {
             FracObject fObj = new();
-            
+            Debug.LogError("Not implemented");
             return fObj;
         }
 
@@ -1180,9 +1198,10 @@ namespace Zombie1111_uDestruction
             Matrix4x4 rendWtoL = fracRend.transform.worldToLocalMatrix;
             int newBoneI = fr_bones.Count;
             int partVerCount = fObj.meshW.vertexCount;
-            int newVerEndI = fr_verticesL.Count + partVerCount;
+            int newVerOffset = fr_verticesL.Count;
+            int newVerEndI = newVerOffset + partVerCount;
 
-            for (int nvI = fr_verticesL.Count; nvI < newVerEndI; nvI++)
+            for (int nvI = newVerOffset; nvI < newVerEndI; nvI++)
             {
                 newPart.partMeshVerts.Add(nvI);
             }
@@ -1190,13 +1209,35 @@ namespace Zombie1111_uDestruction
             fr_bones.Add(fObj.col.transform);
             fr_bindPoses.Add(fObj.col.transform.worldToLocalMatrix * fracRend.transform.localToWorldMatrix);
             fr_verticesL.AddRange(FractureHelperFunc.ConvertPositionsWithMatrix(fObj.meshW.vertices, rendWtoL));
-            fr_normalsL.AddRange(FractureHelperFunc.ConvertPositionsWithMatrix(fObj.meshW.normals, rendWtoL));
+            fr_normalsL.AddRange(FractureHelperFunc.ConvertDirectionsWithMatrix(fObj.meshW.normals, rendWtoL));
             fr_uvs.AddRange(fObj.meshW.uv);
 
             //add mesh submeshes+mats+tris
-            for (int subI = 0; subI < fObj.mMaterials.Count; subI++)
+            for (int sI = 0; sI < fObj.mMaterials.Count; sI++)
             {
-                //to do
+                //get what fracSubmesh uses this material, or create new submesh layer if material does not exists in frac
+                int newSubI = -1;
+
+                for (int nsI = 0; nsI < fr_materials.Count; nsI++)
+                {
+                    if (fr_materials[nsI] != fObj.mMaterials[sI]) continue;
+
+                    newSubI = nsI;
+                    break;
+                }
+
+                if (newSubI < 0)
+                {
+                    newSubI = fr_materials.Count;
+                    fr_materials.Add(fObj.mMaterials[sI]);
+                    fr_subTris.Add(new());
+                }
+
+                //add the tris to the correct submesh
+                foreach (int vI in fObj.meshW.GetTriangles(sI))
+                {
+                    fr_subTris[newSubI].Add(newVerOffset + vI);
+                }
             }
 
             //add mesh boneweights
@@ -1230,8 +1271,7 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            SyncFracRendData();
-
+            RequestSyncFracRendData();
             return true;
 
             void SetPartNeighboursAndConnections()
@@ -1262,7 +1302,7 @@ namespace Zombie1111_uDestruction
                         //near col is not a part
                         if (phyMainOptions.mainPhysicsType != OptMainPhysicsType.overlappingIsKinematic || partIsKin == true) continue;
 
-                        partIsKin = lapCols[i].attachedRigidbody == null || lapCols[i].attachedRigidbody.isKinematic == false;
+                        partIsKin = lapCols[i].attachedRigidbody == null || lapCols[i].attachedRigidbody.isKinematic == true;
 
                         continue;
                     }
@@ -1276,13 +1316,37 @@ namespace Zombie1111_uDestruction
                 newPart.groupIdInt = FractureHelperFunc.Gd_getIntIdFromId(newPart.groupId);
                 partGroupD = GetGroupIdDataFromIntId(newPart.groupIdInt);
 
-                //add part to kinematic list if needed
-                if (partIsKin == true || partGroupD.isKinematic == true) partsKinematicStatus.Add(newPartI);
-
                 //set part parent
                 if (newPartParentI <= 0 && nearPartIndexes.Count > 0) newPartParentI = allParts[nearPartIndexes[0]].parentIndex;
                 if (newPartParentI < 0) newPartParentI = CreateNewParent(null);
                 SetPartParent(newPartI, newPartParentI);
+
+                //add part to kinematic list if needed
+                if (partIsKin == true || partGroupD.isKinematic == true) SetPartKinematicStatus(newPartI, true);
+            }
+        }
+
+        /// <summary>
+        /// Sets the given part kinematicStatus and updates parents
+        /// </summary>
+        public void SetPartKinematicStatus(int partI, bool newKinematicStatus)
+        {
+            //return if already has the given kinematicStatus
+            if (partsKinematicStatus.Contains(partI) == newKinematicStatus) return;
+
+            //add/remove from kinematic parts list
+            if (newKinematicStatus == true) partsKinematicStatus.Add(partI);
+            else partsKinematicStatus.Remove(partI);
+
+            //update the parent the part uses
+            int parentI = allParts[partI].parentIndex;
+
+            if (parentI >= 0)
+            {
+                if (newKinematicStatus == false) allParents[parentI].parentKinematic--;
+                else allParents[parentI].parentKinematic++;
+
+                MarkParentAsModified(parentI);
             }
         }
 
@@ -1327,6 +1391,8 @@ namespace Zombie1111_uDestruction
             {
                 allParents[allParts[partI].parentIndex].partIndexes.Remove(partI);
                 allParents[allParts[partI].parentIndex].parentMass -= partGData.mass * phyMainOptions.massMultiplier;
+                if (partsKinematicStatus.Contains(partI) == true) allParents[allParts[partI].parentIndex].parentKinematic--;
+
                 MarkParentAsModified(allParts[partI].parentIndex);
             }
             else FromNoParentToParent();
@@ -1344,6 +1410,7 @@ namespace Zombie1111_uDestruction
             allParts[partI].trans.SetParent(newParentI > 0 || partsDefualtData.Count == 0 ? allParents[newParentI].parentTrans : partsDefualtData[partI].defParent);
             allParents[newParentI].partIndexes.Add(partI);
             allParents[newParentI].parentMass += partGData.mass * phyMainOptions.massMultiplier;
+            if (partsKinematicStatus.Contains(partI) == true) allParents[allParts[partI].parentIndex].parentKinematic++;
             MarkParentAsModified(newParentI);
 
             void FromParentToNoParent()
@@ -1434,6 +1501,19 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Updates the given parent (Better to call MarkParentAsModified() as it will call this function the next frame, to prevent this from running many times a frame)
+        /// </summary>
+        private void UpdateParentData(int parentI)
+        {
+            //update parent rigidbody
+            if (allParents[parentI].parentRb != null)
+            {
+                allParents[parentI].parentRb.mass = allParents[parentI].parentMass;
+                allParents[parentI].parentRb.isKinematic = allParents[parentI].parentKinematic > 0;
+            }
+        }
+
+        /// <summary>
         /// Returns the world position of the given part
         /// </summary>
         private Vector3 GetPartWorldPosition(int partI)
@@ -1483,7 +1563,7 @@ namespace Zombie1111_uDestruction
 
             if (saveAsset == null && (globalHandler == null || globalHandler.TryCreateTempSaveAsset(this) == false))
             {
-                Debug.LogError("You must assign a saveAsset to " + transform.name);
+                Debug.LogError("Cannot fracture " + transform.name + " because a saveAsset has not been assigned to it");
                 return false;
             }
 
@@ -1988,9 +2068,15 @@ namespace Zombie1111_uDestruction
         /// </summary>
         [SerializeField] private bool isRealSkinnedM;
 
+        /// <summary>
+        /// This is true if the destructionSystem is valid and running (Runtime only)
+        /// </summary>
+        [System.NonSerialized] public bool fractureIsValid = false;
+
         private void Awake()
         {
             //verify fracture
+            fractureIsValid = false;
             if (fracRend == null) return;
             if (globalHandler == null && VerifyGlobalHandler() == false)
             {
@@ -2013,6 +2099,37 @@ namespace Zombie1111_uDestruction
             }
 
             cpKernelId_SolveDestructionStep = computeDestructionSolver.FindKernel("SolveDestructionStep");
+
+            //sync with gpu
+            SyncFracRendData();
+            fractureIsValid = true;
+        }
+
+        private void Update()
+        {
+            //return if fracture is invalid
+            if (fractureIsValid == false) return;
+
+            GlobalUpdate();
+        }
+
+        /// <summary>
+        /// Runs once every frame at runtime and in editor
+        /// </summary>
+        private void GlobalUpdate()
+        {
+            //update modified parents
+            if (parentsThatNeedsUpdating.Count > 0)
+            {
+                foreach (int parentI in parentsThatNeedsUpdating) UpdateParentData(parentI);
+                parentsThatNeedsUpdating.Clear();
+            }
+
+            //sync with gpu, wantToSyncFracRendData is set to false inside SyncFracRendData()
+            if (wantToSyncFracRendData == true)
+            {
+                SyncFracRendData();
+            }
         }
 
         private int cpKernelId_SolveDestructionStep;
@@ -2031,6 +2148,10 @@ namespace Zombie1111_uDestruction
         /// All parents. All connected fracParts share the same fracParent
         /// </summary>
         public List<FracParent> allParents = new();
+
+        /// <summary>
+        /// Contains the index of all parents that should be updated the next frame
+        /// </summary>
         private HashSet<int> parentsThatNeedsUpdating = new();
 
         /// <summary>
@@ -2047,11 +2168,6 @@ namespace Zombie1111_uDestruction
         /// The renderer used to render the fractured mesh (always skinned)
         /// </summary>
         public SkinnedMeshRenderer fracRend = null;
-
-        /// <summary>
-        /// Each intList contains all vertices that share the ~same position. Each vertex only exists once.
-        /// </summary>
-        [System.NonSerialized] public IntList[] verticsLinkedThreaded = new IntList[0];
 
         /// <summary>
         /// The global handler, must always exists if it is fractured
