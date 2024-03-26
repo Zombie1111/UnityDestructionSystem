@@ -231,7 +231,7 @@ namespace Zombie1111_uDestruction
             for (int i = 0; i < boundsA.Length; i++)
             {
                 // Check if both bounds have the same center and size
-                 if (boundsA[i].center != boundsB[i].center || boundsA[i].size != boundsB[i].size) return false;
+                if (boundsA[i].center != boundsB[i].center || boundsA[i].size != boundsB[i].size) return false;
             }
 
             return true;
@@ -276,7 +276,7 @@ namespace Zombie1111_uDestruction
 
             //Move the projected point into the disc radius
             if ((discNormal - discCenter).sqrMagnitude > discRadiusSquared) discNormal = discCenter + (discNormal - discCenter).normalized * discRadius;
-            
+
             return discNormal;
         }
 
@@ -339,7 +339,7 @@ namespace Zombie1111_uDestruction
                 //if (disT < disP * 3.0f) disT = disP;
                 if (disP < worldScaleDis) disT /= 9.0f;//The odds of this being true for "incorrect faces" and false for "correct faces" is besically 0%,
                                                        //so it should never cause a problem. Since disT is squared 9.0f = 3.0f
-                //disT = disP;
+                                                       //disT = disP;
 
                 //if (disT < bestD)
                 if (disT < bestD)
@@ -348,12 +348,37 @@ namespace Zombie1111_uDestruction
                     bestD = disT;
                     bestI = i;
                     if (bestD == 0.0f) break;
-                     
+
                     //if (currentD < preExitTolerance) break;
                 }
             }
 
             return bestI;
+        }
+
+        /// <summary>
+        /// Returns the closest position to pos on the given mesh
+        /// </summary>
+        public static Vector3 ClosestPointOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3 pos)
+        {
+            float bestD = float.MaxValue;
+            Vector3 closePos = pos;
+            float disT;
+            Vector3 posT;
+
+            for (int i = 0; i < meshTris.Length; i += 3)
+            {
+                posT = ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], pos);
+                disT = (pos - posT).sqrMagnitude;
+
+                if (disT < bestD)
+                {
+                    bestD = disT;
+                    closePos = posT;
+                }
+            }
+
+            return closePos;
         }
 
         public static Mesh MergeVerticesInMesh(Mesh originalMesh)
@@ -677,7 +702,7 @@ namespace Zombie1111_uDestruction
                     uv = uvs.ToArray(),
                     triangles = triangles.ToArray()
                 };
-                
+
                 if (colors.Count > 0)
                     mesh.colors = colors.ToArray();
 
@@ -711,7 +736,7 @@ namespace Zombie1111_uDestruction
                         newSubTrisI[subI].Add(triangles[stI + 2]);
                     }
                 }
-                
+
                 mesh.subMeshCount = newSubTrisI.Count;
 
                 for (int i = 0; i < newSubTrisI.Count; i++)
@@ -768,7 +793,7 @@ namespace Zombie1111_uDestruction
             }
 
             return conV;
-            
+
             void GetAllTrisAtPos(Vector3 pos)
             {
                 //for (int i = 0; i < trisL; i++)
@@ -778,15 +803,15 @@ namespace Zombie1111_uDestruction
 
                     //if (usedFaces.Contains(tI) == false)
                     //{
-                        if ((vers[tris[tI]] - pos).sqrMagnitude < verDisTol
-                  || (vers[tris[tI + 1]] - pos).sqrMagnitude < verDisTol
-                  || (vers[tris[tI + 2]] - pos).sqrMagnitude < verDisTol)
+                    if ((vers[tris[tI]] - pos).sqrMagnitude < verDisTol
+              || (vers[tris[tI + 1]] - pos).sqrMagnitude < verDisTol
+              || (vers[tris[tI + 2]] - pos).sqrMagnitude < verDisTol)
+                    {
+                        lock (trisToSearch)
                         {
-                            lock (trisToSearch)
-                            {
-                                if (usedFaces.Add(tI) == true) trisToSearch.Add(tI);
-                            }
+                            if (usedFaces.Add(tI) == true) trisToSearch.Add(tI);
                         }
+                    }
                     //}
                 });
             }
@@ -918,7 +943,7 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns true if colorA is linked with colorB
+        /// Returns true if colorA is linked with colorB (They can be connected)
         /// </summary>
         public static bool Gd_isColorLinkedWithColor(Color colorA, Color colorB)
         {
@@ -929,11 +954,43 @@ namespace Zombie1111_uDestruction
             if (CheckPrimIdWithSecId(aIsPrim == true ? colAId : colBId, aIsPrim == false ? colAId : colBId) == true) return true;
 
             //get if connected with links
-            HashSet<float> colBs = new() { colorB.r, colorB.g, colorB.b, colorB.a};
+            HashSet<float> colBs = new() { colorB.r, colorB.g, colorB.b, colorB.a };
             if (colorA.r <= 0.5f && colorA.r > 0.0f && colBs.Contains(colorA.r) == true) return true;
             if (colorA.g <= 0.5f && colorA.g > 0.0f && colBs.Contains(colorA.g) == true) return true;
             if (colorA.b <= 0.5f && colorA.b > 0.0f && colBs.Contains(colorA.b) == true) return true;
             if (colorA.a <= 0.5f && colorA.a > 0.0f && colBs.Contains(colorA.a) == true) return true;
+            return false;
+
+            static bool CheckPrimIdWithSecId(List<float> primIds, List<float> secIds)
+            {
+                if (primIds == null) return secIds == null;
+
+                foreach (float primId in primIds)
+                {
+                    if (secIds.Contains(primId) == false) return false;
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if partA is linked with partB (They can be connected)
+        /// </summary>
+        public static bool Gd_isPartLinkedWithPart(FractureThis.FracPart partA, FractureThis.FracPart partB)
+        {
+            //get if connected with id
+            List<float> partAId = partA.groupId;
+            List<float> partBId = partB.groupId;
+            bool aIsPrim = partAId == null || (partBId != null && partAId.Count < partBId.Count);
+            if (CheckPrimIdWithSecId(aIsPrim == true ? partAId : partBId, aIsPrim == false ? partAId : partBId) == true) return true;
+
+            //get if connected with links
+            foreach (float gLink in partA.groupLinks)
+            {
+                if (partB.groupLinks.Contains(gLink) == true) return true;
+            }
+
             return false;
 
             static bool CheckPrimIdWithSecId(List<float> primIds, List<float> secIds)
@@ -1006,12 +1063,12 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Converts normals and vertices of the given mesh into worldspace (Modifies the given mesh)
         /// </summary>
-        public static Mesh ConvertMeshWithMatrix(Mesh mesh, Matrix4x4 lTwMatrix)
+        public static void ConvertMeshWithMatrix(ref Mesh mesh, Matrix4x4 lTwMatrix)
         {
             //mesh.SetVertices(ConvertPositionsWithMatrix(mesh.vertices, lTwMatrix));
             mesh.SetVertices(ConvertPositionsWithMatrix(mesh.vertices, lTwMatrix));
             mesh.SetNormals(ConvertDirectionsWithMatrix(mesh.normals, lTwMatrix));
-            return mesh;
+            //return mesh;
         }
 
         /// <summary>
@@ -1312,6 +1369,8 @@ namespace Zombie1111_uDestruction
                 {
                     nBoneWe[nvI] = sBoneWe[nVersBestSVer[nvI]];
                 }
+
+                newMesh.boneWeights = nBoneWe;
             }
 
             //set submeshes

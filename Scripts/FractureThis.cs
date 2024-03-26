@@ -22,6 +22,8 @@ using UnityEditor.ShaderKeywordFilter;
 using System.Net.NetworkInformation;
 using UnityEditor.ShaderGraph;
 using TreeEditor;
+using Unity.VisualScripting;
+using UnityEngine.Experimental.AI;
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -103,7 +105,7 @@ namespace Zombie1111_uDestruction
 
         [Space(10)]
         [Header("Mesh")]
-        
+
         [Space(10)]
         [Header("Material")]
         [SerializeField] private Material insideMat_fallback = null;
@@ -229,13 +231,51 @@ namespace Zombie1111_uDestruction
 
         skipDrawGroups:
 
+            //visualize fracture structure
+            if (debugMode == DebugMode.showStructure)
+            {
+                Gizmos.color = Color.red;
+                Vector3 sPos;
+                bool prevWasKind = true;
+
+                for (int structI = 0; structI < desStructure.Count; structI++)
+                {
+                    sPos = allParts[desStructure[structI].refPartI].trans.localToWorldMatrix.MultiplyPoint(desStructure[structI].posL);
+                    if (partsKinematicStatus.Contains(desStructure[structI].refPartI) == true)
+                    {
+                        if (prevWasKind == false)
+                        {
+                            Gizmos.color = Color.red;
+                            prevWasKind = true;
+                        }
+                    }
+                    else
+                    {
+                        if (prevWasKind == true)
+                        {
+                            Gizmos.color = Color.blue;
+                            prevWasKind = false;
+                        }
+                    }
+
+                    foreach (int nStructI in desStructure[structI].neighbourStructs)
+                    {
+                        Gizmos.DrawLine(allParts[desStructure[nStructI].refPartI].trans.localToWorldMatrix.MultiplyPoint(desStructure[nStructI].posL),
+                            sPos);
+                        //Gizmos.DrawLine(allParts[structI].trans.position, allParts[nStructI].trans.position);
+                    }
+                }
+            }
+
             //visualize fracture bones
             if (debugMode == DebugMode.showBones)
             {
+                Gizmos.color = Color.blue;
+
                 Transform[] tBones = fracRend.bones;
                 for (int i = 0; i < tBones.Length - 1; i += 1)
                 {
-                    Debug.DrawLine(tBones[i].position, tBones[i + 1].position, Color.blue, 0.0f, false);
+                    Gizmos.DrawLine(tBones[i].position, tBones[i + 1].position);
                 }
             }
         }
@@ -515,6 +555,8 @@ namespace Zombie1111_uDestruction
             partsDefualtData = new();
             partsKinematicStatus = new();
             parentsThatNeedsUpdating = new();
+            desStructure = new();
+            syncFR_modifiedPartsI = new();
 
             if (didChangeAnything == true) EditorUtility.SetDirty(objToUse);
             if (doSave == false) return didChangeAnything;
@@ -634,6 +676,38 @@ namespace Zombie1111_uDestruction
             public int parentKinematic;
         }
 
+        [System.Serializable]
+        public class FracWeight
+        {
+            /// <summary>
+            /// The index of every struct in the weight
+            /// </summary>
+            public List<int> structsI;
+
+            /// <summary>
+            /// The weight of each structI (Total = 1.0f)
+            /// </summary>
+            public List<float> weights;
+        }
+
+        [System.Serializable]
+        public class FracStruct
+        {
+            /// <summary>
+            /// The position of this struct in refPartI localspace
+            /// </summary>
+            public Vector3 posL;
+
+            /// <summary>
+            /// The index of all other structs this struct is connected with
+            /// </summary>
+            public List<int> neighbourStructs;
+
+            /// <summary>
+            /// The index of the part this struct uses (Currently not needed since partIndex always equal structIndex)
+            /// </summary>
+            public int refPartI;
+        }
 
         [System.Serializable]
         public class FracPart
@@ -643,7 +717,10 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public Collider col;
 
-            public List<int> neighbourParts;
+            /// <summary>
+            /// All desStructures that uses this part (Currently not needed since partIndex always equal structIndex)
+            /// </summary>
+            public List<int> desStructIndexes;
 
             /// <summary>
             /// The groupIdInt the part has, used to get what groupData the part uses
@@ -658,7 +735,7 @@ namespace Zombie1111_uDestruction
             /// <summary>
             /// Each float is a link (If two parts contains the same float they can be connected)
             /// </summary>
-            public List<float> groupLinks;
+            public HashSet<float> groupLinks;
 
             public int parentIndex = -69420;
 
@@ -988,6 +1065,11 @@ namespace Zombie1111_uDestruction
         [System.NonSerialized] public List<Matrix4x4> fr_bindPoses;
 
         /// <summary>
+        /// The desStructs each vertex in fracRend.sharedmesh uses
+        /// </summary>
+        [System.NonSerialized] public List<FracWeight> fr_fracWeights;
+
+        /// <summary>
         /// Sets fracRend defualt values so its ready to get parts added to it, returns true if valid fracRend
         /// </summary>
         private bool Gen_setupFracRend(FracSource mainFracSource = null, SkinSourceData skinRendSource = null)
@@ -1015,6 +1097,7 @@ namespace Zombie1111_uDestruction
             fr_subTris = new();
             fr_bones = new();
             fr_bindPoses = new();
+            fr_fracWeights = new();
 
             //add data from source
             if (skinRendSource != null)
@@ -1054,11 +1137,17 @@ namespace Zombie1111_uDestruction
         private bool wantToSyncFracRendData = false;
 
         /// <summary>
-        /// Calls SyncFracRendData() once the next frame
+        /// Contains the index of the parts that will be recalculated when SyncFracRendData() is called
         /// </summary>
-        private void RequestSyncFracRendData()
+        private HashSet<int> syncFR_modifiedPartsI = new();
+
+        /// <summary>
+        /// Calls SyncFracRendData() once the next frame and if modifiedPartI >= 0 the given part will be recalculated
+        /// </summary>
+        private void RequestSyncFracRendData(int modifiedPartI = -1)
         {
             wantToSyncFracRendData = true;
+            if (modifiedPartI >= 0) syncFR_modifiedPartsI.Add(modifiedPartI);
         }
 
         /// <summary>
@@ -1067,6 +1156,7 @@ namespace Zombie1111_uDestruction
         private void SyncFracRendData()
         {
             wantToSyncFracRendData = false;
+            float worldScaleDis = worldScale * 0.00001f;
 
             //set the renderer
             fracRend.SetSharedMaterials(fr_materials);
@@ -1085,8 +1175,95 @@ namespace Zombie1111_uDestruction
                 fracRend.sharedMesh.SetTriangles(fr_subTris[subI], subI);
             }
 
+            //update modified parts
+            if (syncFR_modifiedPartsI.Count > 0) SetModifiedParts();
+
             //sync data with gpu
 
+
+            void SetModifiedParts()
+            {
+                //Set the desStruct weight for every vertex used by the modified parts
+                //get world position of every struct
+                Vector3[] structsWPos = new Vector3[allParts.Count];
+                for (int partI = 0; partI < allParts.Count; partI++)
+                {
+                    structsWPos[partI] = GetStructWorldPosition(partI);
+                }
+
+                //get the weight for every vertex in every part
+                UpdateFracWorldSpaceMesh(true);//Could be made much faster by only updating the vertices for the modified parts
+                Vector3[] frWVers = fracWorldSpaceMesh.vertices;
+
+                Debug_toggleTimer();
+
+                HashSet<int> usedVers = new();
+                
+                foreach (int partI in syncFR_modifiedPartsI)
+                {
+                    usedVers.Clear();
+
+                    foreach (int vI in allParts[partI].partMeshVerts)
+                    {
+                        if (usedVers.Contains(vI) == true) continue;
+
+                        SetFracWeightFromPartAndV(partI, vI);
+
+                        //All vers in this part that share the ~same pos must always have the same weight 
+                        foreach (int vII in allParts[partI].partMeshVerts)
+                        {
+                            if (vII == vI) continue;
+                        
+                            if ((frWVers[vI] - frWVers[vII]).sqrMagnitude < worldScaleDis)
+                            {
+                                usedVers.Add(vII);
+                                fr_fracWeights[vII] = fr_fracWeights[vI];
+                            }
+                        }
+                    }
+                }
+
+                //Combine weights for vertics that share the same pos
+
+
+                Debug_toggleTimer();
+
+                syncFR_modifiedPartsI.Clear();
+
+                void SetFracWeightFromPartAndV(int partI, int vI)
+                {
+                    //reset weights
+                    if (fr_fracWeights[vI] == null) fr_fracWeights[vI] = new(); //it does not make since why this is null, lazy fix
+                    fr_fracWeights[vI].structsI = new();
+                    fr_fracWeights[vI].weights = new();
+                    float totalDis = 0.0f;
+
+                    //add weights from each nearby struct (Get weights from distance to ver from struct)
+                    AddWeightFromStruct(partI);
+
+                    foreach (int nearPI in desStructure[partI].neighbourStructs)
+                    {
+                        AddWeightFromStruct(nearPI);
+                    }
+
+                    //Nomilize weights so total weight = 1.0f
+                    float totalWeight = 0.0f;//currently only used for debug
+                    for (int wI = 0; wI < fr_fracWeights[vI].weights.Count; wI++)
+                    {
+                        fr_fracWeights[vI].weights[wI] /= totalDis;
+                        totalWeight += fr_fracWeights[vI].weights[wI];
+                    }
+
+                    if (Mathf.Approximately(totalWeight, 1.0f) == false) Debug.Log(totalWeight);
+
+                    void AddWeightFromStruct(int structI)
+                    {
+                        fr_fracWeights[vI].structsI.Add(structI);
+                        fr_fracWeights[vI].weights.Add((structsWPos[structI] - frWVers[vI]).magnitude);
+                        totalDis += fr_fracWeights[vI].weights[^1];
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -1183,17 +1360,24 @@ namespace Zombie1111_uDestruction
             FracPart newPart = new()
             {
                 groupId = fObj.groupId,
-                groupLinks = fObj.groupId,
+                groupLinks = fObj.groupLinks,
                 parentIndex = -69420,
                 col = fObj.col,
                 trans = fObj.col.transform,
-                partMeshVerts = new()
+                partMeshVerts = new(),
+                desStructIndexes = new()
+                //neighbourParts = new()
             };
 
             int newPartI = allParts.Count;
+            newPart.trans.name = newPart.trans.name.Replace("unusedPart", newPartI.ToString());
             allParts.Add(newPart);
+
+            //create fracStruct
+            int partMainNeighbour = -1;
+
             SetPartNeighboursAndConnections();
-            
+
             //add part mesh
             Matrix4x4 rendWtoL = fracRend.transform.worldToLocalMatrix;
             int newBoneI = fr_bones.Count;
@@ -1211,6 +1395,8 @@ namespace Zombie1111_uDestruction
             fr_verticesL.AddRange(FractureHelperFunc.ConvertPositionsWithMatrix(fObj.meshW.vertices, rendWtoL));
             fr_normalsL.AddRange(FractureHelperFunc.ConvertDirectionsWithMatrix(fObj.meshW.normals, rendWtoL));
             fr_uvs.AddRange(fObj.meshW.uv);
+            fr_fracWeights.AddRange(new FracWeight[partVerCount]); //fr_fracWeights will be assigned later in SyncFracRendData
+                                                                   //but we still want to add here to prevent potential out of bounds error
 
             //add mesh submeshes+mats+tris
             for (int sI = 0; sI < fObj.mMaterials.Count; sI++)
@@ -1254,7 +1440,10 @@ namespace Zombie1111_uDestruction
 
                 if (boneWes.Length != partVerCount)
                 {
-                    BoneWeight backupBoneWe = fr_boneWeightsSkin[allParts[newPart.neighbourParts[0]].partMeshVerts[0]];
+                    BoneWeight backupBoneWe;
+
+                    if (partMainNeighbour < 0) backupBoneWe = new() { boneIndex0 = 0, weight0 = 1.0f };
+                    else backupBoneWe = fr_boneWeightsSkin[allParts[partMainNeighbour].partMeshVerts[0]];
 
                     for (int i = 0; i < partVerCount; i++)
                     {
@@ -1271,14 +1460,14 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            RequestSyncFracRendData();
+            RequestSyncFracRendData(newPartI);
             return true;
 
             void SetPartNeighboursAndConnections()
             {
                 //do box overlaps to get all nearby colliders
                 PhysicsScene phyScene = fObj.col.gameObject.scene.GetPhysicsScene();
-                Collider[] lapCols = new Collider[0];
+                Collider[] lapCols = new Collider[20];
 
                 int lapCount = phyScene.OverlapBox(fObj.col.bounds.center,
                             fObj.col.bounds.extents * 1.05f,
@@ -1294,6 +1483,20 @@ namespace Zombie1111_uDestruction
                 for (int i = 0; i < lapCount; i++)
                 {
                     if (lapCols[i] == fObj.col) continue;
+
+                    if (generationQuality == GenerationQuality.high)
+                    {
+                        if (Physics.ComputePenetration(//Accurate overlaps (It will still depend on collider type,
+                                                       //is that fine or do I need to use the actuall meshes to get overlaps for parts?)
+                            fObj.col,
+                            Vector3.MoveTowards(fObj.col.transform.position,
+                            lapCols[i].transform.position, worldScale * 0.001f),
+                            fObj.col.transform.rotation,
+                            lapCols[i],
+                            lapCols[i].transform.position,
+                            lapCols[i].transform.rotation,
+                            out _, out _) == false) continue;
+                    }
 
                     int partI = TryGetPartIndexFromTrans(lapCols[i].transform);
 
@@ -1323,6 +1526,30 @@ namespace Zombie1111_uDestruction
 
                 //add part to kinematic list if needed
                 if (partIsKin == true || partGroupD.isKinematic == true) SetPartKinematicStatus(newPartI, true);
+
+                //get what nearPartIndexes is actually valid neighbours and create structure for the new part
+                if (newPartI != desStructure.Count)
+                    Debug.LogError(transform.name + " destructionStructure or parts is invalid! (part = " + newPartI + " struct = " + desStructure.Count + ")");
+
+                desStructure.Add(new()
+                {
+                    posL = allParts[newPartI].trans.worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)),
+                    refPartI = newPartI,
+                    neighbourStructs = new()
+                });
+
+                foreach (int nearPartI in nearPartIndexes)
+                {
+                    //ignore if this neighbour part is invalid
+                    if (newPart.parentIndex != allParts[nearPartI].parentIndex
+                        || FractureHelperFunc.Gd_isPartLinkedWithPart(newPart, allParts[nearPartI]) == false) continue;
+
+                    //add neighbours to newPart struct and neighbour part struct
+                    desStructure[nearPartI].neighbourStructs.Add(newPartI);
+                    desStructure[newPartI].neighbourStructs.Add(newPartI);
+
+                    partMainNeighbour = nearPartI;
+                }
             }
         }
 
@@ -1421,7 +1648,7 @@ namespace Zombie1111_uDestruction
 
                 //add and set rigidbody
                 Rigidbody newRb = allParts[partI].trans.gameObject.AddComponent<Rigidbody>();
-                
+
                 newRb.mass = partGData.mass;
                 newRb.interpolation = phyPartsOptions.interpolate;//Do we really need these properties to be configurable?
                 newRb.drag = phyPartsOptions.drag;
@@ -1514,11 +1741,16 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns the world position of the given part
+        /// Returns the center world position of the given part (center of the part collider)
         /// </summary>
         private Vector3 GetPartWorldPosition(int partI)
         {
             return allParts[partI].trans.position;
+        }
+
+        private Vector3 GetStructWorldPosition(int structI)
+        {
+            return allParts[structI].trans.localToWorldMatrix.MultiplyPoint(desStructure[structI].posL);
         }
 
         /// <summary>
@@ -1789,7 +2021,7 @@ namespace Zombie1111_uDestruction
                 if (meshIsValid == false || hadInvalidChunkPart == true)
                 {
                     //Debug.LogError("Unable to properly fracture chunk " + nextOgMeshId + " of " + transform.name + " (Some parts of the mesh may be missing)");
-                    Debug.LogError("Chunk " + nextOgMeshId + " of " + transform.name + " was difficult to fracture (Some parts of the mesh may be missing)");
+                    Debug.LogWarning("Chunk " + nextOgMeshId + " of " + transform.name + " was difficult to fracture (Some parts of the mesh may be missing)");
                 }
             }
 
@@ -1910,7 +2142,7 @@ namespace Zombie1111_uDestruction
             HashSet<List<float>> newGroupIds = new();
             for (int i = 0; i < meshesToFrac.Count; i++)
             {                
-                meshesToFrac[i].meshW = FractureHelperFunc.ConvertMeshWithMatrix(meshesToFrac[i].meshW, meshesToFrac[i].sRend.localToWorldMatrix);
+                FractureHelperFunc.ConvertMeshWithMatrix(ref meshesToFrac[i].meshW, meshesToFrac[i].sRend.localToWorldMatrix);
                 FractureHelperFunc.Gd_getIdsFromColors(meshesToFrac[i].meshW.colors, ref newGroupIds);
             }
 
@@ -2150,6 +2382,11 @@ namespace Zombie1111_uDestruction
         public List<FracParent> allParents = new();
 
         /// <summary>
+        /// The structure used to compute destruction
+        /// </summary>
+        [System.NonSerialized] public List<FracStruct> desStructure = new();
+
+        /// <summary>
         /// Contains the index of all parents that should be updated the next frame
         /// </summary>
         private HashSet<int> parentsThatNeedsUpdating = new();
@@ -2233,6 +2470,23 @@ namespace Zombie1111_uDestruction
             //if (match.Success == true && int.TryParse(match.Groups[1].Value, out int partId) == true) return partId;
             //
             //return -1;
+        }
+
+        /// <summary>
+        /// The mesh used by fracRend in worldspace, call UpdateFracWorldSpaceMesh() to update
+        /// </summary>
+        private Mesh fracWorldSpaceMesh = null;
+
+        /// <summary>
+        /// Assigns fracWorldSpaceMesh with the mesh used by the fracRend but in worldSpace
+        /// </summary>
+        private void UpdateFracWorldSpaceMesh(bool verticsOnly = false)
+        {
+            if (fracWorldSpaceMesh == null) fracWorldSpaceMesh = new();
+
+            fracRend.BakeMesh(fracWorldSpaceMesh, true);
+            if (verticsOnly == false) FractureHelperFunc.ConvertMeshWithMatrix(ref fracWorldSpaceMesh, fracRend.localToWorldMatrix);
+            else fracWorldSpaceMesh.SetVertices(FractureHelperFunc.ConvertPositionsWithMatrix(fracWorldSpaceMesh.vertices, fracRend.localToWorldMatrix));
         }
 
         /// <summary>
