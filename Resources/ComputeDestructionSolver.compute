@@ -1,13 +1,33 @@
-// Each #kernel tells which function to compile; you can have many kernels
+
+
+class FracStruct
+{
+    float3 posL;
+    int neighbourStructs[16];
+};
+
+class FracWeight
+{
+    int structsI[32];
+    float weights[32];
+};
+
+RWStructuredBuffer<FracWeight> desWeights;
+RWStructuredBuffer<FracStruct> desStructure;
+RWStructuredBuffer<int> fr_fracWeightsI;
+
 #pragma kernel SolveDestructionStep
-
-// Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
-RWTexture2D<float4> Result;
-
 
 [numthreads(32,1,1)]
 void SolveDestructionStep(uint3 id : SV_DispatchThreadID)
+{
+
+}
+
+#pragma kernel ApplyDeformation
+
+[numthreads(32, 1, 1)]
+void ApplyDeformation(uint3 id : SV_DispatchThreadID)
 {
 
 }

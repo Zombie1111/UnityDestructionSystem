@@ -6,24 +6,11 @@ using UnityEditor;
 using System.Threading.Tasks;
 using Debug = UnityEngine.Debug;
 using System;
-using Time = UnityEngine.Time;
 using Component = UnityEngine.Component;
 using System.Data;
-using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
-using Unity.Mathematics;
 using UnityEditor.SceneManagement;
-using UnityEngine.Jobs;
-using Unity.Collections;
-using Unity.Jobs;
-using System.Diagnostics;
-using UnityEngine.Rendering;
-using UnityEditor.ShaderKeywordFilter;
-using System.Net.NetworkInformation;
-using UnityEditor.ShaderGraph;
-using TreeEditor;
 using Unity.VisualScripting;
-using UnityEngine.Experimental.AI;
+
 namespace Zombie1111_uDestruction
 {
     public class FractureThis : MonoBehaviour
@@ -240,8 +227,8 @@ namespace Zombie1111_uDestruction
 
                 for (int structI = 0; structI < desStructure.Count; structI++)
                 {
-                    sPos = allParts[desStructure[structI].refPartI].trans.localToWorldMatrix.MultiplyPoint(desStructure[structI].posL);
-                    if (partsKinematicStatus.Contains(desStructure[structI].refPartI) == true)
+                    sPos = allParts[structI].trans.localToWorldMatrix.MultiplyPoint(desStructure[structI].posL);
+                    if (partsKinematicStatus.Contains(structI) == true)
                     {
                         if (prevWasKind == false)
                         {
@@ -260,7 +247,7 @@ namespace Zombie1111_uDestruction
 
                     foreach (int nStructI in desStructure[structI].neighbourStructs)
                     {
-                        Gizmos.DrawLine(allParts[desStructure[nStructI].refPartI].trans.localToWorldMatrix.MultiplyPoint(desStructure[nStructI].posL),
+                        Gizmos.DrawLine(allParts[nStructI].trans.localToWorldMatrix.MultiplyPoint(desStructure[nStructI].posL),
                             sPos);
                         //Gizmos.DrawLine(allParts[structI].trans.position, allParts[nStructI].trans.position);
                     }
@@ -556,6 +543,7 @@ namespace Zombie1111_uDestruction
             partsKinematicStatus = new();
             parentsThatNeedsUpdating = new();
             desStructure = new();
+            desWeights = new();
             syncFR_modifiedPartsI = new();
 
             if (didChangeAnything == true) EditorUtility.SetDirty(objToUse);
@@ -702,11 +690,6 @@ namespace Zombie1111_uDestruction
             /// The index of all other structs this struct is connected with
             /// </summary>
             public List<int> neighbourStructs;
-
-            /// <summary>
-            /// The index of the part this struct uses (Currently not needed since partIndex always equal structIndex)
-            /// </summary>
-            public int refPartI;
         }
 
         [System.Serializable]
@@ -716,11 +699,6 @@ namespace Zombie1111_uDestruction
             /// The part collider
             /// </summary>
             public Collider col;
-
-            /// <summary>
-            /// All desStructures that uses this part (Currently not needed since partIndex always equal structIndex)
-            /// </summary>
-            public List<int> desStructIndexes;
 
             /// <summary>
             /// The groupIdInt the part has, used to get what groupData the part uses
@@ -1065,10 +1043,14 @@ namespace Zombie1111_uDestruction
         [System.NonSerialized] public List<Matrix4x4> fr_bindPoses;
 
         /// <summary>
-        /// The desStructs each vertex in fracRend.sharedmesh uses
+        /// All different weights a vertex in fracRend.sharedmesh can have
         /// </summary>
-        [System.NonSerialized] public List<FracWeight> fr_fracWeights;
+        [System.NonSerialized] public List<FracWeight> desWeights = new();
 
+        /// <summary>
+        /// The desWeights index each vertex in fracRend.sharedmesh uses
+        /// </summary>
+        [System.NonSerialized] public List<int> fr_fracWeightsI;
         /// <summary>
         /// Sets fracRend defualt values so its ready to get parts added to it, returns true if valid fracRend
         /// </summary>
@@ -1097,7 +1079,7 @@ namespace Zombie1111_uDestruction
             fr_subTris = new();
             fr_bones = new();
             fr_bindPoses = new();
-            fr_fracWeights = new();
+            fr_fracWeightsI = new();
 
             //add data from source
             if (skinRendSource != null)
@@ -1150,6 +1132,10 @@ namespace Zombie1111_uDestruction
             if (modifiedPartI >= 0) syncFR_modifiedPartsI.Add(modifiedPartI);
         }
 
+        ComputeBuffer buf_desWeights;
+        ComputeBuffer buf_desStructure;
+        ComputeBuffer buf_fr_fracWeightsI;
+
         /// <summary>
         /// Call to assign fracRend with data from fr_[] and sync with gpu (RequestSyncFracRendData() should be used instead to prevent SyncFracRendData() from being called many times a frame)
         /// </summary>
@@ -1179,7 +1165,28 @@ namespace Zombie1111_uDestruction
             if (syncFR_modifiedPartsI.Count > 0) SetModifiedParts();
 
             //sync data with gpu
+            SyncWithGpu();
 
+            void SyncWithGpu()
+            {
+                if (syncFR_modifiedPartsI.Count > 0)
+                {
+                    //part related buffers only needs updating if parts has been modified
+                    //sync desWeights
+                    buf_desWeights = new ComputeBuffer(desWeights.Count, sizeof(int) * 32 + sizeof(float) * 32);
+                    buf_desWeights.SetData(desWeights.ToArray());
+                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "desWeights", buf_desWeights);
+                    computeDestructionSolver.SetBuffer(cpKernelId_SolveDestructionStep, "desWeights", buf_desWeights);
+
+                    //sync buf_fr_fracWeightsI
+                    buf_fr_fracWeightsI = new ComputeBuffer(fr_fracWeightsI.Count, sizeof(int));
+                    buf_fr_fracWeightsI.SetData(fr_fracWeightsI);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "fr_fracWeightsI", buf_fr_fracWeightsI);
+                    computeDestructionSolver.SetBuffer(cpKernelId_SolveDestructionStep, "fr_fracWeightsI", buf_fr_fracWeightsI);
+
+                    //sync desStructure (The data already stored on the gpu must be kept)
+                }
+            }
 
             void SetModifiedParts()
             {
@@ -1198,7 +1205,10 @@ namespace Zombie1111_uDestruction
                 Debug_toggleTimer();
 
                 HashSet<int> usedVers = new();
-                
+                List<List<int>> actuallPartVers = new();
+                List<int> actuallPartVers_partI = new();
+                Dictionary<int, FracWeight> newVersIFracWE = new();
+
                 foreach (int partI in syncFR_modifiedPartsI)
                 {
                     usedVers.Clear();
@@ -1207,35 +1217,121 @@ namespace Zombie1111_uDestruction
                     {
                         if (usedVers.Contains(vI) == true) continue;
 
-                        SetFracWeightFromPartAndV(partI, vI);
+                        newVersIFracWE.Add(vI, CreateFracWeightFromPartAndV(partI, vI));
+                        actuallPartVers.Add(new() { vI });
+                        actuallPartVers_partI.Add(partI);
 
                         //All vers in this part that share the ~same pos must always have the same weight 
                         foreach (int vII in allParts[partI].partMeshVerts)
                         {
                             if (vII == vI) continue;
-                        
+
                             if ((frWVers[vI] - frWVers[vII]).sqrMagnitude < worldScaleDis)
                             {
                                 usedVers.Add(vII);
-                                fr_fracWeights[vII] = fr_fracWeights[vI];
+                                actuallPartVers[^1].Add(vII);
+                                newVersIFracWE.Add(vII, newVersIFracWE[vI]);
                             }
                         }
                     }
                 }
 
                 //Combine weights for vertics that share the same pos
+                usedVers.Clear();
+                int debugTotal = 0;
 
+                for (int i = 0; i < actuallPartVers.Count; i++)
+                {
+                    //Get the vertics that share the same pos
+                    HashSet<int> sameVers = new();
+                    foreach (int partVI in actuallPartVers[i])
+                    {
+                        if (usedVers.Add(partVI) == false) continue;
+                        sameVers.Add(partVI);
+                    }
+
+                    if (sameVers.Count == 0) continue; //Continue if all vers are already used
+
+                    int vI = actuallPartVers[i][0];
+                    int requiredFracWeI = -1;
+
+                    foreach (int nearPart in desStructure[actuallPartVers_partI[i]].neighbourStructs)
+                    {
+                        foreach (int nearVI in allParts[nearPart].partMeshVerts)
+                        {
+                            //Loops once for all vertics in all neighbour parts
+                            if (usedVers.Contains(nearVI) == true) continue;
+                            if ((frWVers[vI] - frWVers[nearVI]).sqrMagnitude >= worldScaleDis) continue;
+                            if (syncFR_modifiedPartsI.Contains(nearPart) == false)
+                            {
+                                if (requiredFracWeI < 0) requiredFracWeI = fr_fracWeightsI[nearVI];
+                                else if (requiredFracWeI != fr_fracWeightsI[nearVI]) continue;
+                            }
+
+                            sameVers.Add(nearVI);
+                            usedVers.Add(nearVI);
+                        }
+                    }
+
+                    //Merge the weight of all vertices that share the ~same pos by
+                    //adding all weights togehter and then normlilizing them
+                    //add all weights togehter
+                    FracWeight newFW = new() { structsI = new(), weights = new() };
+                    Dictionary<int, int> structIToNewFWI = new();
+                    float totalWeight = 0.0f;
+
+                    foreach (int sameVI in sameVers)
+                    {
+                        if (newVersIFracWE.TryGetValue(sameVI, out FracWeight fracWE) == false) fracWE = desWeights[fr_fracWeightsI[sameVI]];
+
+                        for (int wI = 0; wI < fracWE.structsI.Count; wI++)
+                        {
+                            int sI = fracWE.structsI[wI];
+                            float weight = fracWE.weights[wI];
+                            totalWeight += weight;
+
+                            if (structIToNewFWI.TryAdd(sI, newFW.structsI.Count) == true)
+                            {
+                                newFW.structsI.Add(sI);
+                                newFW.weights.Add(weight);
+                            }
+                            else
+                            {
+                                newFW.weights[structIToNewFWI[sI]] += weight;
+                            }
+                        }
+                    }
+
+                    //normilize the weights
+                    for (int wI = 0; wI < newFW.weights.Count; wI++)
+                    {
+                        newFW.weights[wI] /= totalWeight;
+                    }
+
+                    //assign updated weights to desWeights
+                    if (requiredFracWeI < 0)
+                    {
+                        requiredFracWeI = desWeights.Count;
+                        desWeights.Add(newFW);
+                    }
+
+                    foreach (int sameVI in sameVers)
+                    {
+                        debugTotal++;
+                        fr_fracWeightsI[sameVI] = requiredFracWeI;
+                    }
+                }
+
+                Debug.Log(desWeights.Count + " " + fr_fracWeightsI.Count + " t " + debugTotal);
 
                 Debug_toggleTimer();
 
                 syncFR_modifiedPartsI.Clear();
 
-                void SetFracWeightFromPartAndV(int partI, int vI)
+                FracWeight CreateFracWeightFromPartAndV(int partI, int vI)
                 {
                     //reset weights
-                    if (fr_fracWeights[vI] == null) fr_fracWeights[vI] = new(); //it does not make since why this is null, lazy fix
-                    fr_fracWeights[vI].structsI = new();
-                    fr_fracWeights[vI].weights = new();
+                    FracWeight newFracWE = new() { structsI = new(), weights = new() };
                     float totalDis = 0.0f;
 
                     //add weights from each nearby struct (Get weights from distance to ver from struct)
@@ -1248,19 +1344,21 @@ namespace Zombie1111_uDestruction
 
                     //Nomilize weights so total weight = 1.0f
                     float totalWeight = 0.0f;//currently only used for debug
-                    for (int wI = 0; wI < fr_fracWeights[vI].weights.Count; wI++)
+                    for (int wI = 0; wI < newFracWE.weights.Count; wI++)
                     {
-                        fr_fracWeights[vI].weights[wI] /= totalDis;
-                        totalWeight += fr_fracWeights[vI].weights[wI];
+                        newFracWE.weights[wI] /= totalDis;
+                        totalWeight += newFracWE.weights[wI];
                     }
 
-                    if (Mathf.Approximately(totalWeight, 1.0f) == false) Debug.Log(totalWeight);
+                    if (Mathf.Approximately(totalWeight, 1.0f) == false) Debug.LogError(totalWeight);
+
+                    return newFracWE;
 
                     void AddWeightFromStruct(int structI)
                     {
-                        fr_fracWeights[vI].structsI.Add(structI);
-                        fr_fracWeights[vI].weights.Add((structsWPos[structI] - frWVers[vI]).magnitude);
-                        totalDis += fr_fracWeights[vI].weights[^1];
+                        newFracWE.structsI.Add(structI);
+                        newFracWE.weights.Add((structsWPos[structI] - frWVers[vI]).magnitude);
+                        totalDis += newFracWE.weights[^1];
                     }
                 }
             }
@@ -1364,8 +1462,7 @@ namespace Zombie1111_uDestruction
                 parentIndex = -69420,
                 col = fObj.col,
                 trans = fObj.col.transform,
-                partMeshVerts = new(),
-                desStructIndexes = new()
+                partMeshVerts = new()
                 //neighbourParts = new()
             };
 
@@ -1395,9 +1492,8 @@ namespace Zombie1111_uDestruction
             fr_verticesL.AddRange(FractureHelperFunc.ConvertPositionsWithMatrix(fObj.meshW.vertices, rendWtoL));
             fr_normalsL.AddRange(FractureHelperFunc.ConvertDirectionsWithMatrix(fObj.meshW.normals, rendWtoL));
             fr_uvs.AddRange(fObj.meshW.uv);
-            fr_fracWeights.AddRange(new FracWeight[partVerCount]); //fr_fracWeights will be assigned later in SyncFracRendData
+            fr_fracWeightsI.AddRange(new int[partVerCount]); //fr_fracWeights will be assigned later in SyncFracRendData
                                                                    //but we still want to add here to prevent potential out of bounds error
-
             //add mesh submeshes+mats+tris
             for (int sI = 0; sI < fObj.mMaterials.Count; sI++)
             {
@@ -1534,7 +1630,6 @@ namespace Zombie1111_uDestruction
                 desStructure.Add(new()
                 {
                     posL = allParts[newPartI].trans.worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)),
-                    refPartI = newPartI,
                     neighbourStructs = new()
                 });
 
@@ -1706,11 +1801,13 @@ namespace Zombie1111_uDestruction
                 }
                 else transToUse.GetComponent<Rigidbody>();
 
-                allParents.Add(new() {
+                allParents.Add(new()
+                {
                     parentTrans = transToUse,
                     parentRb = parentRb,
                     partIndexes = new(),
-                    parentMass = 0.0f });
+                    parentMass = 0.0f
+                });
             }
 
             //set new parent defualt properties
@@ -1856,7 +1953,7 @@ namespace Zombie1111_uDestruction
             return newCol;
         }
 
-       
+
         private bool mustConfirmHighCount = true;
 
         /// <summary>
@@ -2141,7 +2238,7 @@ namespace Zombie1111_uDestruction
             //convert all meshes to world space
             HashSet<List<float>> newGroupIds = new();
             for (int i = 0; i < meshesToFrac.Count; i++)
-            {                
+            {
                 FractureHelperFunc.ConvertMeshWithMatrix(ref meshesToFrac[i].meshW, meshesToFrac[i].sRend.localToWorldMatrix);
                 FractureHelperFunc.Gd_getIdsFromColors(meshesToFrac[i].meshW.colors, ref newGroupIds);
             }
@@ -2173,12 +2270,14 @@ namespace Zombie1111_uDestruction
                 //add split result
                 for (int ii = 0; ii < splittedMeshes.Count; ii += 1)
                 {
-                    meshesToFrac.Add(new() {
+                    meshesToFrac.Add(new()
+                    {
                         meshW = splittedMeshes[ii].meshW,
                         sRend = meshesToFrac[i].sRend,
                         mGroupId = splittedMeshes[ii].mGroupId,
                         mMats = splittedMeshes[ii].mMats,
-                        trisSubMeshI = FractureHelperFunc.GetTrisSubMeshI(splittedMeshes[ii].meshW) });
+                        trisSubMeshI = FractureHelperFunc.GetTrisSubMeshI(splittedMeshes[ii].meshW)
+                    });
                 }
 
                 meshesToFrac.RemoveAt(i);
@@ -2219,7 +2318,8 @@ namespace Zombie1111_uDestruction
                     //if has saveState but mayor stuff has changed, return false and clear savedPrefracture
                     saveState.ClearSavedPrefracture();
 
-                    saveState.SavePrefracture(new() {
+                    saveState.SavePrefracture(new()
+                    {
                         dynamicFractureCount = dynamicFractureCount,
                         worldScale = worldScale,
                         seed = seed,
@@ -2229,7 +2329,8 @@ namespace Zombie1111_uDestruction
                         randomness = randomness,
                         remeshing = remeshing,
                         toFracRendBounds = fRendBounds,
-                        totalVerCount = totalVerCount });
+                        totalVerCount = totalVerCount
+                    });
 
                     return false;
                 }
@@ -2331,6 +2432,7 @@ namespace Zombie1111_uDestruction
             }
 
             cpKernelId_SolveDestructionStep = computeDestructionSolver.FindKernel("SolveDestructionStep");
+            cpKernelId_ApplyDeformation = computeDestructionSolver.FindKernel("ApplyDeformation");
 
             //sync with gpu
             SyncFracRendData();
@@ -2343,6 +2445,12 @@ namespace Zombie1111_uDestruction
             if (fractureIsValid == false) return;
 
             GlobalUpdate();
+        }
+
+        private void OnDestroy()
+        {
+            //avoid memory leaks
+            ClearUsedGpuAndCpuMemory();
         }
 
         /// <summary>
@@ -2364,7 +2472,24 @@ namespace Zombie1111_uDestruction
             }
         }
 
+        /// <summary>
+        /// Call to dispose variabels from gpu and cpu
+        /// </summary>
+        private void ClearUsedGpuAndCpuMemory()
+        {
+            //dispose buffers
+            buf_desWeights.Release();
+            buf_desWeights.Dispose();
+
+            buf_desStructure.Release();
+            buf_desStructure.Dispose();
+
+            buf_fr_fracWeightsI.Release();
+            buf_fr_fracWeightsI.Dispose();
+        }
+
         private int cpKernelId_SolveDestructionStep;
+        private int cpKernelId_ApplyDeformation;
         [SerializeField] private ComputeShader computeDestructionSolver;
 
         #endregion MainUpdateFunctions

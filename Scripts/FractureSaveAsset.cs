@@ -59,7 +59,8 @@ namespace Zombie1111_uDestruction
             public HashSet<int> saved_kinematicPartsStatus = new();
             public int saved_rendVertexCount = -1;
             public List<FractureThis.FracStruct> saved_desStructure = new();
-            public List<FractureThis.FracWeight> saved_fracWeights = new();
+            public List<FractureThis.FracWeight> saved_desWeights = new();
+            public List<int> saved_fracWeightsI = new();
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
@@ -172,7 +173,8 @@ namespace Zombie1111_uDestruction
             fracSavedData.saved_allParts = saveFrom.allParts.ToArray();
             fracSavedData.saved_rendVertexCount = saveFrom.fracRend.sharedMesh.vertexCount;
             fracSavedData.saved_desStructure = saveFrom.desStructure.ToList();
-            fracSavedData.saved_fracWeights = saveFrom.fr_fracWeights.ToList();
+            fracSavedData.saved_desWeights = saveFrom.desWeights.ToList();
+            fracSavedData.saved_fracWeightsI = saveFrom.fr_fracWeightsI.ToList();
 
             //save mesh stuff if prefab
             if (saveFrom.GetFracturePrefabType() > 0)
@@ -240,7 +242,8 @@ namespace Zombie1111_uDestruction
             loadTo.partsKinematicStatus = fracSavedData.saved_kinematicPartsStatus.ToHashSet();
             loadTo.desStructure = fracSavedData.saved_desStructure.ToList();
             loadTo.allParts = fracSavedData.saved_allParts.ToList();
-            loadTo.fr_fracWeights = fracSavedData.saved_fracWeights.ToList();
+            loadTo.desWeights = fracSavedData.saved_desWeights.ToList();
+            loadTo.fr_fracWeightsI = fracSavedData.saved_fracWeightsI.ToList();
 
             //Restore saved colliders to the allParts array
             for (int i = 0; i < loadTo.allParts.Count; i++)
