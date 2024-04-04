@@ -4,8 +4,7 @@ using UnityEngine;
 using JetBrains.Annotations;
 using Unity.VisualScripting.FullSerializer;
 using System.Linq;
-using UnityEngine.SceneManagement;
-using Microsoft.Win32.SafeHandles;
+
 
 
 #if UNITY_EDITOR
@@ -56,11 +55,13 @@ namespace Zombie1111_uDestruction
             public int id = -1;
 
             public FractureThis.FracPart[] saved_allParts = new FractureThis.FracPart[0];
-            public HashSet<int> saved_kinematicPartsStatus = new();
+            public List<int> saved_kinematicPartsStatus = new();
             public int saved_rendVertexCount = -1;
-            public List<FractureThis.FracStruct> saved_desStructure = new();
+            public List<Vector3> saved_structs_posL = new();
+            public List<int> saved_structs_parentI = new();
             public List<FractureThis.FracWeight> saved_desWeights = new();
             public List<int> saved_fracWeightsI = new();
+            public List<int> saved_fr_verToPartI = new();
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
@@ -78,19 +79,23 @@ namespace Zombie1111_uDestruction
             public Vector2[] sMesh_uvs = null;
 
             /// <summary>
-            /// Returns the saved data as a mesh
+            /// Returns the saved data as a mesh, if ignoreSkin is true boneWeights and bindposes will be ignored
             /// </summary>
             /// <returns></returns>
-            public Mesh ToMesh()
+            public Mesh ToMesh(bool ignoreSkin = false)
             {
                 //load basics
                 Mesh newM = new()
                 {
                     vertices = sMesh_vertics,
-                    bindposes = sMesh_bindposes,
-                    boneWeights = sMesh_boneWeights,
                     uv = sMesh_uvs
                 };
+
+                if (ignoreSkin == false)
+                {
+                    newM.bindposes = sMesh_bindposes;
+                    newM.boneWeights = sMesh_boneWeights;
+                }
 
                 //load submeshes and tris
                 newM.subMeshCount = sMesh_triangels.Length;
@@ -109,13 +114,17 @@ namespace Zombie1111_uDestruction
             }
 
             /// <summary>
-            /// Saves the given mesh
+            /// Saves the given mesh, if ignoreSkin is true boneWeights and bindposes will be ignored
             /// </summary>
-            public void FromMesh(Mesh mesh)
+            public void FromMesh(Mesh mesh, bool ignoreSkin = false)
             {
                 //save basic
-                sMesh_boneWeights = mesh.boneWeights;
-                sMesh_bindposes = mesh.bindposes;
+                if (ignoreSkin == false)
+                {
+                    sMesh_boneWeights = mesh.boneWeights;
+                    sMesh_bindposes = mesh.bindposes;
+                }
+
                 sMesh_vertics = mesh.vertices;
                 sMesh_uvs = mesh.uv;
 
@@ -148,7 +157,7 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public bool IsValidMeshSaved()
             {
-                return sMesh_vertics != null && sMesh_vertics.Length > 0;
+                return sMesh_vertics != null && sMesh_vertics.Length > 2;
             }
         }
 
@@ -165,25 +174,24 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         public int Save(FractureThis saveFrom)
         {
-            if (saveFrom.fracRend == null || saveFrom.fracRend.sharedMesh == null) return -1; //cant save if no fracture
+            if (saveFrom.fracRend == null || saveFrom.fracFilter == null || saveFrom.fracFilter.sharedMesh == null) return -1; //cant save if no fracture
 
             //save the data
             fracSavedData.id += 1;
-            fracSavedData.saved_kinematicPartsStatus = saveFrom.partsKinematicStatus.ToHashSet();
+            fracSavedData.saved_kinematicPartsStatus = saveFrom.partsKinematicStatus.ToList();
             fracSavedData.saved_allParts = saveFrom.allParts.ToArray();
-            fracSavedData.saved_rendVertexCount = saveFrom.fracRend.sharedMesh.vertexCount;
-            fracSavedData.saved_desStructure = saveFrom.desStructure.ToList();
+            fracSavedData.saved_rendVertexCount = saveFrom.fracFilter.sharedMesh.vertexCount;
+            fracSavedData.saved_structs_posL = saveFrom.structs_posL.ToList();
+            fracSavedData.saved_structs_parentI = saveFrom.structs_parentI.ToList();
             fracSavedData.saved_desWeights = saveFrom.desWeights.ToList();
             fracSavedData.saved_fracWeightsI = saveFrom.fr_fracWeightsI.ToList();
+            fracSavedData.saved_fr_verToPartI = saveFrom.fr_verToPartI.ToList();
 
             //save mesh stuff if prefab
             if (saveFrom.GetFracturePrefabType() > 0)
             {
-                //save nonSkinnedBoneWeights (skinnedBoneWeights is saved inside the fracRendMesh)
-                fracSavedData.saved_nonSkinnedBoneWe = saveFrom.fr_boneWeights;
-
                 //save fracRend mesh
-                fracSavedData.saved_rendMesh.FromMesh(saveFrom.fracRend.sharedMesh);
+                fracSavedData.saved_rendMesh.FromMesh(saveFrom.fracFilter.sharedMesh, true);
 
                 //if mesh colliders save the them too
                 if (saveFrom.allParts[0].col is MeshCollider)
@@ -204,8 +212,12 @@ namespace Zombie1111_uDestruction
                 //if not prefab clear the arrays
                 fracSavedData.saved_rendMesh.Clear();
                 fracSavedData.sMesh_colsVers = null;
-                fracSavedData.saved_nonSkinnedBoneWe = null;
             }
+
+            //save skin stuff
+            fracSavedData.saved_nonSkinnedBoneWe = saveFrom.fr_boneWeights.ToList();
+            fracSavedData.saved_rendMesh.sMesh_boneWeights = saveFrom.fr_boneWeightsSkin.ToArray();
+            fracSavedData.saved_rendMesh.sMesh_bindposes = saveFrom.fr_bindPoses.ToArray();
 
             //because ScriptableObject cannot save actual components we save it on FractureThis
             saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Count];
@@ -233,14 +245,15 @@ namespace Zombie1111_uDestruction
                 || fracSavedData.saved_allParts.Length != loadTo.saved_allPartsCol.Length
                 || loadTo.fracRend == null
                 || loadTo.fracRend.transform != loadTo.transform
-                || (loadTo.fracRend.sharedMesh != null && loadTo.fracRend.sharedMesh.vertexCount != fracSavedData.saved_rendVertexCount))
+                || (loadTo.fracFilter.sharedMesh != null && loadTo.fracFilter.sharedMesh.vertexCount != fracSavedData.saved_rendVertexCount))
             {
                 return false;
             }
 
             //Apply saved data to the provided FractureThis instance
             loadTo.partsKinematicStatus = fracSavedData.saved_kinematicPartsStatus.ToHashSet();
-            loadTo.desStructure = fracSavedData.saved_desStructure.ToList();
+            loadTo.structs_posL = fracSavedData.saved_structs_posL.ToList();
+            loadTo.structs_parentI = fracSavedData.saved_structs_parentI.ToList();
             loadTo.allParts = fracSavedData.saved_allParts.ToList();
             loadTo.desWeights = fracSavedData.saved_desWeights.ToList();
             loadTo.fr_fracWeightsI = fracSavedData.saved_fracWeightsI.ToList();
@@ -255,7 +268,7 @@ namespace Zombie1111_uDestruction
             //load fracRend mesh if was prefab
             if (fracSavedData.saved_rendMesh.IsValidMeshSaved() == true)
             {
-                loadTo.fracRend.sharedMesh = fracSavedData.saved_rendMesh.ToMesh();
+                loadTo.fracFilter.sharedMesh = fracSavedData.saved_rendMesh.ToMesh(true);
             }
 
             //load meshColliders mesh if was prefab
@@ -271,22 +284,18 @@ namespace Zombie1111_uDestruction
             }
 
             //restore fr_[] variabels from fracRend mesh
-            Mesh fracRendMesh = loadTo.fracRend.sharedMesh;
-            loadTo.fr_bones = loadTo.fracRend.bones.ToList();
+            Mesh fracRendMesh = loadTo.fracFilter.sharedMesh;
             loadTo.fr_materials = loadTo.fracRend.sharedMaterials.ToList();
-            loadTo.fr_bindPoses = fracRendMesh.bindposes.ToList();
             loadTo.fr_verticesL = fracRendMesh.vertices.ToList();
             loadTo.fr_normalsL = fracRendMesh.normals.ToList();
             loadTo.fr_uvs = fracRendMesh.uv.ToList();
-            if (fracSavedData.saved_nonSkinnedBoneWe != null)
-            {
-                loadTo.fr_boneWeights = fracSavedData.saved_nonSkinnedBoneWe;
-                loadTo.fr_boneWeightsSkin = fracRendMesh.boneWeights.ToList();
-            }
-            else loadTo.fr_boneWeights = fracRendMesh.boneWeights.ToList();
-            
+            loadTo.fr_boneWeights = fracSavedData.saved_nonSkinnedBoneWe.ToList();
+            loadTo.fr_boneWeightsSkin = fracSavedData.saved_rendMesh.sMesh_boneWeights.ToList();
+            loadTo.fr_bindPoses = fracSavedData.saved_rendMesh.sMesh_bindposes.ToList();
             loadTo.fr_subTris = new();
-            
+            loadTo.fr_boneWeightsCurrent = loadTo.isRealSkinnedM == true ? loadTo.fr_boneWeightsSkin.ToList() : loadTo.fr_boneWeights.ToList();
+            loadTo.fr_verToPartI = fracSavedData.saved_fr_verToPartI.ToList();
+
             for (int sI = 0; sI < fracRendMesh.subMeshCount; sI++)
             {
                 loadTo.fr_subTris.Add(new());

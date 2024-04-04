@@ -1,33 +1,130 @@
 
 
-class FracStruct
-{
-    float3 posL;
-    int neighbourStructs[16];
-};
 
-class FracWeight
+struct FracWeight
 {
+    int stWe_lenght;
     int structsI[32];
     float weights[32];
 };
 
-RWStructuredBuffer<FracWeight> desWeights;
-RWStructuredBuffer<FracStruct> desStructure;
-RWStructuredBuffer<int> fr_fracWeightsI;
-
-#pragma kernel SolveDestructionStep
-
-[numthreads(32,1,1)]
-void SolveDestructionStep(uint3 id : SV_DispatchThreadID)
+struct BoneWeight
 {
+    float weight0;
+    float weight1;
+    float weight2;
+    float weight3;
+    int boneIndex0;
+    int boneIndex1;
+    int boneIndex2;
+    int boneIndex3;
+};
 
+inline float4x4 inverse(float4x4 m)
+{
+    float n11 = m[0][0], n12 = m[1][0], n13 = m[2][0], n14 = m[3][0];
+    float n21 = m[0][1], n22 = m[1][1], n23 = m[2][1], n24 = m[3][1];
+    float n31 = m[0][2], n32 = m[1][2], n33 = m[2][2], n34 = m[3][2];
+    float n41 = m[0][3], n42 = m[1][3], n43 = m[2][3], n44 = m[3][3];
+
+    float t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
+    float t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
+    float t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
+    float t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
+
+    float det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
+    float idet = 1.0f / det;
+
+    float4x4 ret;
+
+    ret[0][0] = t11 * idet;
+    ret[0][1] = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * idet;
+    ret[0][2] = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * idet;
+    ret[0][3] = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * idet;
+
+    ret[1][0] = t12 * idet;
+    ret[1][1] = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * idet;
+    ret[1][2] = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * idet;
+    ret[1][3] = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * idet;
+
+    ret[2][0] = t13 * idet;
+    ret[2][1] = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * idet;
+    ret[2][2] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * idet;
+    ret[2][3] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * idet;
+
+    ret[3][0] = t14 * idet;
+    ret[3][1] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * idet;
+    ret[3][2] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * idet;
+    ret[3][3] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * idet;
+
+    return ret;
 }
+
+//stuff we can combine, (Must have the same lenght and be set at the same time)
+//fr_normalsL, fr_verticsL, fr_fracWeightsI and fr_verToPartI
+
+RWStructuredBuffer<FracWeight> desWeights; //Weights used for deformation
+RWStructuredBuffer<float3> structs_posL;
+RWStructuredBuffer<float3> structs_posLPrev;
+RWStructuredBuffer<int> structs_parentI; //The parent struct X has
+
+int partBoneOffset; //allFracBonesLToW[partI + partBoneOffset] is the LToW matrix for the part
+int fracRendVerCount; //The number of vertics in the frac mesh
+float4x4 fracRendWToL; //The WToL matrix for the frac mesh
+RWStructuredBuffer<float4x4> allFracBonesLToW; //The LToW matrix for every bone
+RWStructuredBuffer<int> fr_fracWeightsI; //Contains a desWeights index for every vertex
+RWStructuredBuffer<BoneWeight> fr_boneWeightsCurrent; //The bone weight for every vertex in frac mesh
+RWStructuredBuffer<float3> fr_verticsL;//fracMesh vertics, Deformed but not skinned
+RWStructuredBuffer<float3> fr_normalsL; //fracMesh normals, Deformed but not skinned
+RWStructuredBuffer<int> fr_verToPartI;
 
 #pragma kernel ApplyDeformation
+#define VERTEX_32BIT_STRIDE 6 // float3 position, float3 normal, 
+#define NORMAL_OFFSET 3 // float3 position, 
 
-[numthreads(32, 1, 1)]
+RWByteAddressBuffer verNors;
+
+[numthreads(128, 1, 1)]
 void ApplyDeformation(uint3 id : SV_DispatchThreadID)
 {
-
+    //return if out of bounds
+    if (id.x >= (uint)fracRendVerCount) return;
+    
+    //get skin bone matrix
+    BoneWeight
+        boneWeight = fr_boneWeightsCurrent[id.x];
+    float4x4 boneMatrix = allFracBonesLToW[boneWeight.boneIndex0] * boneWeight.weight0 +
+        allFracBonesLToW[boneWeight.boneIndex1] * boneWeight.weight1 +
+        allFracBonesLToW[boneWeight.boneIndex2] * boneWeight.weight2 +
+        allFracBonesLToW[boneWeight.boneIndex3] * boneWeight.weight3;
+    
+    //deform mesh
+    int requiredParentI = structs_parentI[fr_verToPartI[id.x]];
+    
+    if (requiredParentI >= 0)
+    {
+        //get current and prev offset pos
+        float3 cPosW;
+        float3 pPosW;
+        int nearPartI;
+        FracWeight verFW = desWeights[fr_fracWeightsI[id.x]];
+    
+        for (int i = 0; i < verFW.stWe_lenght; i++)
+        {
+            nearPartI = verFW.structsI[i];
+            if (structs_parentI[nearPartI] != requiredParentI) continue;
+            
+            cPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posL[nearPartI], 1.0f)).xyz * verFW.weights[i];
+            pPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posLPrev[nearPartI], 1.0f)).xyz * verFW.weights[i];
+        }
+        
+        fr_verticsL[id.x] += mul(inverse(boneMatrix), float4(cPosW - pPosW, 1.0));
+    }
+    
+    //Write updated vertics and normals to mesh
+    verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrix, float4(fr_verticsL[id.x], 1.0))).xyz));
+    verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3)fracRendWToL, mul((float3x3)boneMatrix, fr_normalsL[id.x]))));
+    
+    
 }
+

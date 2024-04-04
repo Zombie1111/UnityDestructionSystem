@@ -222,6 +222,32 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Removes or Adds elements to the given list so its count matches desiredLength
+        /// </summary>
+        public static void SetListLenght<T>(ref List<T> list, int desiredLength)
+        {
+            if (desiredLength < 0) return;
+
+            int currentLength = list.Count;
+            if (currentLength == desiredLength) return;
+
+            if (desiredLength > currentLength)
+            {
+                //Add items
+                int elementsToAdd = desiredLength - currentLength;
+                for (int i = 0; i < elementsToAdd; i++)
+                {
+                    list.Add(default);
+                }
+            }
+            else
+            {
+                //Remove items
+                list.RemoveRange(desiredLength, currentLength - desiredLength);
+            }
+        }
+
+        /// <summary>
         /// Returns true if boundsA = boundsB (Size and position wize)
         /// </summary>
         public static bool AreBoundsArrayEqual(Bounds[] boundsA, Bounds[] boundsB)
@@ -1879,6 +1905,11 @@ namespace Zombie1111_uDestruction
         {
             if (vector.magnitude <= amount) return Vector3.zero;
             return vector.normalized * (vector.magnitude - amount);
+        }
+
+        public static float QuaternionSqrMagnitude(Quaternion quaternion)
+        {
+            return quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z + quaternion.w * quaternion.w;
         }
 
         /// <summary>

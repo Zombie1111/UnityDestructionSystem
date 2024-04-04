@@ -17,7 +17,6 @@ namespace Zombie1111_uDestruction
     {
         [Header("Global Fracture Config")]
         [SerializeField] private float damageThreshold = 2.0f;
-        [SerializeField] private bool syncFixedTimestepWithFps = false;
         public float impactZoneRadius = 0.1f;
 
         private ConcurrentDictionary<int, GlobalFracData> partsColInstanceId = new();
@@ -127,8 +126,9 @@ namespace Zombie1111_uDestruction
 
         private void Update()
         {
+#pragma warning disable 0162
             //sync fixedTimestep with fps
-            if (syncFixedTimestepWithFps == true)
+            if (FracGlobalSettings.syncFixedTimestepWithFps == true)
             {
                 syncTime += Time.unscaledDeltaTime;
                 syncFrames++;
@@ -141,6 +141,7 @@ namespace Zombie1111_uDestruction
                     syncFrames = 0;
                 }
             }
+#pragma warning restore 0162
         }
 
         public void AddReferencesFromFracture(FractureThis addFrom)
