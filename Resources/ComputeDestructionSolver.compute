@@ -20,6 +20,14 @@ struct BoneWeight
     int boneIndex3;
 };
 
+struct MeshData
+{
+    float3 vertexL;
+    float3 normalL;
+    int fracWeightI;
+    int verToPartI;
+};
+
 inline float4x4 inverse(float4x4 m)
 {
     float n11 = m[0][0], n12 = m[1][0], n13 = m[2][0], n14 = m[3][0];
@@ -72,20 +80,17 @@ int partBoneOffset; //allFracBonesLToW[partI + partBoneOffset] is the LToW matri
 int fracRendVerCount; //The number of vertics in the frac mesh
 float4x4 fracRendWToL; //The WToL matrix for the frac mesh
 RWStructuredBuffer<float4x4> allFracBonesLToW; //The LToW matrix for every bone
-RWStructuredBuffer<int> fr_fracWeightsI; //Contains a desWeights index for every vertex
 RWStructuredBuffer<BoneWeight> fr_boneWeightsCurrent; //The bone weight for every vertex in frac mesh
-RWStructuredBuffer<float3> fr_verticsL;//fracMesh vertics, Deformed but not skinned
-RWStructuredBuffer<float3> fr_normalsL; //fracMesh normals, Deformed but not skinned
-RWStructuredBuffer<int> fr_verToPartI;
+RWStructuredBuffer<MeshData> fr_meshData;
 
-#pragma kernel ApplyDeformation
+#pragma kernel ComputeSkinDef
 #define VERTEX_32BIT_STRIDE 6 // float3 position, float3 normal, 
 #define NORMAL_OFFSET 3 // float3 position, 
 
 RWByteAddressBuffer verNors;
 
 [numthreads(128, 1, 1)]
-void ApplyDeformation(uint3 id : SV_DispatchThreadID)
+void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
 {
     //return if out of bounds
     if (id.x >= (uint)fracRendVerCount) return;
@@ -93,22 +98,23 @@ void ApplyDeformation(uint3 id : SV_DispatchThreadID)
     //get skin bone matrix
     BoneWeight
         boneWeight = fr_boneWeightsCurrent[id.x];
-    float4x4 boneMatrix = allFracBonesLToW[boneWeight.boneIndex0] * boneWeight.weight0 +
+    float4x4 boneMatrixLToW = allFracBonesLToW[boneWeight.boneIndex0] * boneWeight.weight0 +
         allFracBonesLToW[boneWeight.boneIndex1] * boneWeight.weight1 +
         allFracBonesLToW[boneWeight.boneIndex2] * boneWeight.weight2 +
         allFracBonesLToW[boneWeight.boneIndex3] * boneWeight.weight3;
     
     //deform mesh
-    int requiredParentI = structs_parentI[fr_verToPartI[id.x]];
+    MeshData meshD = fr_meshData[id.x];
+    int requiredParentI = structs_parentI[meshD.verToPartI];
     
     if (requiredParentI >= 0)
     {
         //get current and prev offset pos
-        float3 cPosW;
-        float3 pPosW;
+        float3 cPosW = float3(0.0f, 0.0f, 0.0f);
+        float3 pPosW = float3(0.0f, 0.0f, 0.0f);
         int nearPartI;
-        FracWeight verFW = desWeights[fr_fracWeightsI[id.x]];
-    
+        FracWeight verFW = desWeights[meshD.fracWeightI];
+        
         for (int i = 0; i < verFW.stWe_lenght; i++)
         {
             nearPartI = verFW.structsI[i];
@@ -118,13 +124,20 @@ void ApplyDeformation(uint3 id : SV_DispatchThreadID)
             pPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posLPrev[nearPartI], 1.0f)).xyz * verFW.weights[i];
         }
         
-        fr_verticsL[id.x] += mul(inverse(boneMatrix), float4(cPosW - pPosW, 1.0));
+        meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), cPosW - pPosW);
+        fr_meshData[id.x] = meshD;
     }
     
     //Write updated vertics and normals to mesh
-    verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrix, float4(fr_verticsL[id.x], 1.0))).xyz));
-    verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3)fracRendWToL, mul((float3x3)boneMatrix, fr_normalsL[id.x]))));
-    
+    verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
+    verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
+}
+
+#pragma kernel ApplySkinDef
+
+[numthreads(128, 1, 1)]
+void ApplySkinDef(uint3 id : SV_DispatchThreadID)
+{
     
 }
 

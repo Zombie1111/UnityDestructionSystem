@@ -15,6 +15,7 @@ using Unity.Jobs;
 using UnityEngine.Jobs;
 using Unity.Burst;
 using UnityEngine.Rendering;
+using UnityEngine.UIElements;
 
 namespace Zombie1111_uDestruction
 {
@@ -138,6 +139,9 @@ namespace Zombie1111_uDestruction
             showDestruction
         }
 
+        public Transform debugTrans;
+        public Vector3 debugPos;
+
         private void OnDrawGizmos()
         {
             //Do not run while playing
@@ -157,7 +161,38 @@ namespace Zombie1111_uDestruction
                 return;
             }
 
+            //update fracture
             GlobalUpdate();
+
+            if (fractureIsValid == false) return;
+            GetTransformData_end(); //send skin+def to gpu happens inside this
+            GetTransformData_start();
+
+            //debug
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float cDis;
+            Vector3 tPos = debugTrans.position;
+
+            for (int i = 0; i < structs_posL.Count; i++)
+            {
+                cDis = Vector3.Distance(GetStructWorldPosition(i), tPos);
+
+                if (cDis < bestD)
+                {
+                    bestD = cDis;
+                    bestI = i;
+                }
+            }
+
+            Vector3 toMove = tPos - debugPos;
+            debugPos = tPos;
+
+            structs_posL[bestI] += allParts[bestI].trans.InverseTransformDirection(toMove);
+            wantToApplyDeformation = true;
+            wantToApplySkinning = true;
+
+            //debug end
         }
 
         private void OnDrawGizmosSelected()
@@ -1092,15 +1127,19 @@ namespace Zombie1111_uDestruction
         //fracRend mesh will be set from all fr_[] variabels when synced, they should only be modified by destructionSystem
         public MeshFilter fracFilter;
         public MeshRenderer fracRend;
+        /// <summary>
+        /// The desWeights index each vertex in fracRend.sharedmesh uses
+        /// </summary>
+        [System.NonSerialized] public List<int> fr_fracWeightsI;
         [System.NonSerialized] public List<Vector3> fr_verticesL;
         [System.NonSerialized] public List<Vector3> fr_normalsL;
+        [System.NonSerialized] public List<int> fr_verToPartI;
         [System.NonSerialized] public List<Vector2> fr_uvs;
         [System.NonSerialized] public List<BoneWeight> fr_boneWeights;
         [System.NonSerialized] public List<BoneWeight> fr_boneWeightsSkin;
         [System.NonSerialized] public List<BoneWeight> fr_boneWeightsCurrent;
         [System.NonSerialized] public List<Material> fr_materials;
         [System.NonSerialized] public List<List<int>> fr_subTris;
-        [System.NonSerialized] public List<int> fr_verToPartI;
         public List<Transform> fr_bones;
 
         /// <summary>
@@ -1114,10 +1153,6 @@ namespace Zombie1111_uDestruction
         /// </summary>
         [System.NonSerialized] public List<FracWeight> desWeights = new();
 
-        /// <summary>
-        /// The desWeights index each vertex in fracRend.sharedmesh uses
-        /// </summary>
-        [System.NonSerialized] public List<int> fr_fracWeightsI;
         /// <summary>
         /// Sets fracRend defualt values so its ready to get parts added to it, returns true if valid fracRend
         /// </summary>
@@ -1204,11 +1239,12 @@ namespace Zombie1111_uDestruction
 
         private ComputeBuffer buf_desWeights;
         private ComputeBuffer buf_allFracBonesLToW;
-        private ComputeBuffer buf_fr_fracWeightsI;
-        private ComputeBuffer buf_fr_verticsL;
-        private ComputeBuffer buf_fr_normalsL;
+        private ComputeBuffer buf_meshData;
+        //private ComputeBuffer buf_fr_fracWeightsI;
+        //private ComputeBuffer buf_fr_verticsL;
+        //private ComputeBuffer buf_fr_normalsL;
+        //private ComputeBuffer buf_fr_verToPartI;
         private ComputeBuffer buf_fr_boneWeightsCurrent;
-        private ComputeBuffer buf_fr_verToPartI;
         private ComputeBuffer buf_fracRendWToL;
         private ComputeBuffer buf_structs_posL;
         private ComputeBuffer buf_structs_posLPrev;
@@ -1221,6 +1257,14 @@ namespace Zombie1111_uDestruction
             public static int verNors = Shader.PropertyToID("verNors");
         }
 
+        private struct MeshData
+        {
+            public Vector3 vertexL;
+            public Vector3 normalL;
+            public int fracWeightI;
+            public int verToPartI;
+        };
+
         /// <summary>
         /// Call to assign fracRend with data from fr_[] and sync with gpu (RequestSyncFracRendData() should be used instead to prevent SyncFracRendData() from being called many times a frame)
         /// </summary>
@@ -1228,27 +1272,18 @@ namespace Zombie1111_uDestruction
         {
             gpuIsReady = false;
             wantToSyncFracRendData = false;
-            float worldScaleDis = FracGlobalSettings.worldScale * 0.00001f;
+            float worldScaleDis = FracGlobalSettings.worldScale * 0.0001f;
 
             //read vertics and normals from gpu to keep deformed data
-            if (buf_fr_verticsL != null && gpuIsReady == true)
+            if (buf_meshData != null && gpuIsReady == true)
             {
-                Vector3[] tempData = new Vector3[fracFilter.sharedMesh.vertexCount];
-                buf_fr_verticsL.GetData(tempData);
+                MeshData[] tempData = new MeshData[buf_meshData.count];
+                buf_meshData.GetData(tempData);
 
                 for (int i = 0; i < tempData.Length; i++)
                 {
-                    fr_verticesL[i] = tempData[i];
-                }
-
-                if (buf_fr_normalsL != null)
-                {
-                    buf_fr_normalsL.GetData(tempData);
-
-                    for (int i = 0; i < tempData.Length; i++)
-                    {
-                        fr_normalsL[i] = tempData[i];
-                    }
+                    fr_verticesL[i] = tempData[i].vertexL;//vertics and normals cant be removed so tempData can never be longer than fr_verticesL
+                    fr_normalsL[i] = tempData[i].normalL;
                 }
             }
 
@@ -1280,7 +1315,7 @@ namespace Zombie1111_uDestruction
             void SyncWithGpu()
             {
                 //load compute shaders
-                if (computeDestructionSolver == null || cpKernelId_ApplyDeformation < 0)
+                if (computeDestructionSolver == null || cpKernelId_ComputeSkinDef < 0)
                 {
                     computeDestructionSolver = Resources.Load<ComputeShader>("ComputeDestructionSolver");
                     if (computeDestructionSolver == null)
@@ -1289,26 +1324,30 @@ namespace Zombie1111_uDestruction
                         return;
                     }
 
-                    cpKernelId_ApplyDeformation = computeDestructionSolver.FindKernel("ApplyDeformation");
+                    cpKernelId_ComputeSkinDef = computeDestructionSolver.FindKernel("ComputeSkinDef");
+                    cpKernelId_ApplySkinDef = computeDestructionSolver.FindKernel("ApplySkinDef");
                 }
 
-                //send normals and vertics to the gpu
+                //sync vertics, normals, verToPartI and fracWeightsI with gpu
                 if (fr_verticesL.Count > 0 && fr_normalsL.Count > 0)
                 {
-                    buf_fr_verticsL = new ComputeBuffer(fr_verticesL.Count,
-                        sizeof(float) * 3);
-                    buf_fr_verticsL.SetData(fr_verticesL);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "fr_verticsL", buf_fr_verticsL);
+                    buf_meshData = new ComputeBuffer(fr_verticesL.Count,
+                        (sizeof(float) * 6) + (sizeof(int) * 2));
 
-                    buf_fr_normalsL = new ComputeBuffer(fr_normalsL.Count,
-                        sizeof(float) * 3);
-                    buf_fr_normalsL.SetData(fr_normalsL);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "fr_normalsL", buf_fr_normalsL);
+                    List <MeshData> newMD = new();
+                    for (int i = 0; i < fr_verticesL.Count; i++)
+                    {
+                        newMD.Add(new MeshData()
+                        {
+                            fracWeightI = fr_fracWeightsI[i],
+                            vertexL = fr_verticesL[i],
+                            normalL = fr_normalsL[i],
+                            verToPartI = fr_verToPartI[i],
+                        });
+                    }
 
-                    buf_fr_verToPartI = new ComputeBuffer(fr_verToPartI.Count, 
-                        sizeof(int));
-                    buf_fr_verToPartI.SetData(fr_verToPartI);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "fr_verToPartI", buf_fr_verToPartI);
+                    buf_meshData.SetData(newMD);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "fr_meshData", buf_meshData);
                 }
 
                 //part related buffers only needs updating if parts has been modified
@@ -1320,21 +1359,14 @@ namespace Zombie1111_uDestruction
                         (sizeof(int) * 32) + (sizeof(float) * 32) + sizeof(int));
 
                     buf_desWeights.SetData(desWeights.ToArray());
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "desWeights", buf_desWeights);
-
-                    //sync buf_fr_fracWeightsI
-                    buf_fr_fracWeightsI = new ComputeBuffer(fr_fracWeightsI.Count,
-                        sizeof(int));
-
-                    buf_fr_fracWeightsI.SetData(fr_fracWeightsI);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "fr_fracWeightsI", buf_fr_fracWeightsI);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "desWeights", buf_desWeights);
 
                     //sync boneWeights
                     buf_fr_boneWeightsCurrent = new ComputeBuffer(fr_boneWeightsCurrent.Count,
                         (sizeof(float) * 4) + (sizeof(int) * 4));
 
                     buf_fr_boneWeightsCurrent.SetData(fr_boneWeightsCurrent);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "fr_boneWeightsCurrent", buf_fr_boneWeightsCurrent);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "fr_boneWeightsCurrent", buf_fr_boneWeightsCurrent);
 
                     if (buf_allFracBonesLToW == null || buf_allFracBonesLToW.IsValid() == false || buf_allFracBonesLToW.count == 0)
                     {
@@ -1342,7 +1374,7 @@ namespace Zombie1111_uDestruction
                         GetTransformData_end();
                     }
 
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "allFracBonesLToW", buf_allFracBonesLToW);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "allFracBonesLToW", buf_allFracBonesLToW);
 
                     //sync fracRend mesh vertics and normals for gpu write
                     Mesh mesh = fracFilter.sharedMesh;
@@ -1357,7 +1389,7 @@ namespace Zombie1111_uDestruction
                     );
 
                     buf_verNors = mesh.GetVertexBuffer(index: 0);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, ShaderIDs.verNors, buf_verNors);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, ShaderIDs.verNors, buf_verNors);
                     fracFilter.sharedMesh = mesh;
 
                     //sync structs pos and parents
@@ -1371,9 +1403,9 @@ namespace Zombie1111_uDestruction
                     buf_structs_parentI.SetData(structs_parentI);
                     buf_structs_posL.SetData(structs_posL);
                     buf_structs_posLPrev.SetData(structs_posL);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "structs_parentI", buf_structs_parentI);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "structs_posL", buf_structs_posL);
-                    computeDestructionSolver.SetBuffer(cpKernelId_ApplyDeformation, "structs_posLPrev", buf_structs_posLPrev);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "structs_parentI", buf_structs_parentI);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "structs_posL", buf_structs_posL);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "structs_posLPrev", buf_structs_posLPrev);
                     computeDestructionSolver.SetInt("partBoneOffset", partBoneOffset);
                 }
 
@@ -1410,9 +1442,11 @@ namespace Zombie1111_uDestruction
                     if (skinnedVerParts.Add(partI) == true) SkinPartVertics(partI);
 
                     usedVers.Clear();
+                    HashSet<int> deAdded = new();
 
                     foreach (int vI in allParts[partI].partMeshVerts)
                     {
+                        if (deAdded.Add(vI) == false) Debug.LogError("twice");
                         if (usedVers.Contains(vI) == true) continue;
 
                         newVersIFracWE.Add(vI, CreateFracWeightFromPartAndV(partI, vI));
@@ -1426,7 +1460,16 @@ namespace Zombie1111_uDestruction
 
                             if ((skinnedVerticsW[vI] - skinnedVerticsW[vII]).sqrMagnitude < worldScaleDis)
                             {
-                                usedVers.Add(vII);
+                                if (usedVers.Add(vII) == false)
+                                {
+                                    Debug.LogError("How the fuck, " + vII + " " + ((skinnedVerticsW[vII] - skinnedVerticsW[vI]).sqrMagnitude < worldScaleDis) + " " +
+                                        + vI + " " + partI + " " + newVersIFracWE[vII].GetHashCode() + " " + newVersIFracWE[vI].GetHashCode());
+
+                                    FractureHelperFunc.Debug_drawBox(skinnedVerticsW[vI], 0.1f, Color.magenta, 10.0f);
+                                    FractureHelperFunc.Debug_drawBox(skinnedVerticsW[vII], 0.1f, Color.red, 10.0f);
+                                    continue;
+                                }
+
                                 actuallPartVers[^1].Add(vII);
                                 newVersIFracWE.Add(vII, newVersIFracWE[vI]);
                             }
@@ -2611,6 +2654,9 @@ namespace Zombie1111_uDestruction
 
 #endregion GenerateFractureSystem
 
+
+
+
         #region MainUpdateFunctions
 
         /// <summary>
@@ -2635,6 +2681,26 @@ namespace Zombie1111_uDestruction
         private void Update()
         {
             GlobalUpdate();
+        }
+
+        private void FixedUpdate()
+        {
+            if (fractureIsValid == false) return;
+
+            ComputeDestruction_end();
+            GetTransformData_start();
+
+            //run late fixedUpdate later
+            StartCoroutine(LateFixedUpdate());
+        }
+
+        private IEnumerator LateFixedUpdate()
+        {
+            //wait for late fixed update
+            yield return new WaitForFixedUpdate();
+
+            GetTransformData_end(); //send skin+def to gpu happens inside this
+            ComputeDestruction_start();
         }
 
         private void OnDisable()
@@ -2665,9 +2731,7 @@ namespace Zombie1111_uDestruction
                 parentsThatNeedsUpdating.Clear();
             }
 
-            //get transform data
-            GetTransformData_end();
-            GetTransformData_start();
+            
         }
 
         /// <summary>
@@ -2687,22 +2751,10 @@ namespace Zombie1111_uDestruction
                 buf_desWeights.Dispose();
             }
 
-            if (buf_fr_fracWeightsI != null)
+            if (buf_meshData != null)
             {
-                buf_fr_fracWeightsI.Release();
-                buf_fr_fracWeightsI.Dispose();
-            }
-
-            if (buf_fr_normalsL != null)
-            {
-                buf_fr_normalsL.Release();
-                buf_fr_normalsL.Dispose();
-            }
-
-            if (buf_fr_verticsL != null)
-            {
-                buf_fr_verticsL.Release();
-                buf_fr_verticsL.Dispose();
+                buf_meshData.Release();
+                buf_meshData.Dispose();
             }
 
             if (buf_fr_boneWeightsCurrent != null)
@@ -2744,8 +2796,15 @@ namespace Zombie1111_uDestruction
             if (jGTD_job.fracBonesLocValue.IsCreated == true) jGTD_job.fracBonesLocValue.Dispose();
         }
 
-        private int cpKernelId_ApplyDeformation = -1;
+        private int cpKernelId_ComputeSkinDef = -1;
+        private int cpKernelId_ApplySkinDef = -1;
         [SerializeField] private ComputeShader computeDestructionSolver;
+
+        #endregion MainUpdateFunctions
+
+
+
+
 
         #region GetTransformData
 
@@ -2792,6 +2851,7 @@ namespace Zombie1111_uDestruction
 
         private bool wantToApplySkinning = true;
         private int fracRendDividedVerCount = 1;
+        private bool wantToApplyDeformation = false;
 
         private void GetTransformData_end()
         {
@@ -2851,12 +2911,16 @@ namespace Zombie1111_uDestruction
                 };
             }
             
-            //apply deformation
+            //apply deformation and skinning
             if (wantToApplySkinning == true && gpuIsReady == true)
             {
+                if (wantToApplyDeformation == true) buf_structs_posL.SetData(structs_posL);
                 computeDestructionSolver.SetMatrix("fracRendWToL", fracRend.worldToLocalMatrix);
-                computeDestructionSolver.Dispatch(cpKernelId_ApplyDeformation, fracRendDividedVerCount, 1, 1);
+                computeDestructionSolver.Dispatch(cpKernelId_ComputeSkinDef, fracRendDividedVerCount, 1, 1);
                 wantToApplySkinning = false;
+
+                if (wantToApplyDeformation == true) buf_structs_posLPrev.SetData(structs_posL);
+                wantToApplyDeformation = false;
             }
         }
 
@@ -2889,7 +2953,25 @@ namespace Zombie1111_uDestruction
 
         #endregion GetTransformData
 
-        #endregion MainUpdateFunctions
+
+
+
+        #region ComputeDestruction
+
+        private void ComputeDestruction_start()
+        {
+
+        }
+
+        private void ComputeDestruction_end()
+        {
+
+        }
+
+        #endregion ComputeDestruction
+
+
+
 
         #region InternalFractureData
 
