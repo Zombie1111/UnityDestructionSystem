@@ -16,5 +16,6 @@ namespace Zombie1111_uDestruction
         public const int maxFractureAttempts = 20;
         public const float worldScale = 1.0f;
         public const bool syncFixedTimestepWithFps = false;
+        public const bool addAllActiveRigidbodiesOnLoad = true;
     }
 }

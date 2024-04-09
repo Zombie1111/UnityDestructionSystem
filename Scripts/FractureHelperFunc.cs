@@ -270,7 +270,7 @@ namespace Zombie1111_uDestruction
         /// <param name="pos">Closest position to this</param>
         /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
         /// <returns></returns>
-        public static int GetClosestPointInArray(Vector3[] positions, Vector3 pos, float preExitTolerance = 0.01f)
+        public static int GetClosestPointInArray(Vector3[] positions, Vector3 pos)
         {
             int bestI = 0;
             float bestD = float.MaxValue;
@@ -416,8 +416,8 @@ namespace Zombie1111_uDestruction
             bool hasUvs = uvs.Length > 0;
             bool hasBoneWe = boneWe.Length > 0;
 
-            Dictionary<Vector3, int> duplicateHashTable = new Dictionary<Vector3, int>();
-            List<int> newVerts = new List<int>();
+            Dictionary<Vector3, int> duplicateHashTable = new();
+            List<int> newVerts = new();
             int[] map = new int[verts.Length];
 
             //create mapping and find duplicates, dictionaries are like hashtables, mean fast
@@ -626,24 +626,24 @@ namespace Zombie1111_uDestruction
             }
 
             //create lists to assign the splitted mesh data to
-            List<Vector3> splitVerA = new List<Vector3>(oVerts.Length);
-            List<Vector3> splitNorA = new List<Vector3>(oNors.Length);
-            List<Vector2> splitUvsA = new List<Vector2>(oUvs.Length);
-            List<int> splitTriA = new List<int>(otL);
-            List<BoneWeight> splitBonA = new List<BoneWeight>(oBones.Length);
-            List<Color> splitColsA = new List<Color>(oCols.Length);
+            List<Vector3> splitVerA = new(oVerts.Length);
+            List<Vector3> splitNorA = new(oNors.Length);
+            List<Vector2> splitUvsA = new(oUvs.Length);
+            List<int> splitTriA = new(otL);
+            List<BoneWeight> splitBonA = new(oBones.Length);
+            List<Color> splitColsA = new(oCols.Length);
             List<int> splitLinkA = new();
 
-            List<Vector3> splitVerB = new List<Vector3>(oVerts.Length);
-            List<Vector3> splitNorB = new List<Vector3>(oNors.Length);
-            List<Vector2> splitUvsB = new List<Vector2>(oUvs.Length);
-            List<int> splitTriB = new List<int>(otL);
-            List<BoneWeight> splitBonB = new List<BoneWeight>(oBones.Length);
-            List<Color> splitColsB = new List<Color>(oCols.Length);
+            List<Vector3> splitVerB = new(oVerts.Length);
+            List<Vector3> splitNorB = new(oNors.Length);
+            List<Vector2> splitUvsB = new(oUvs.Length);
+            List<int> splitTriB = new(otL);
+            List<BoneWeight> splitBonB = new(oBones.Length);
+            List<Color> splitColsB = new(oCols.Length);
             List<int> splitLinkB = new();
 
-            Dictionary<Vector3, int> vertexIndexMapA = new Dictionary<Vector3, int>();
-            Dictionary<Vector3, int> vertexIndexMapB = new Dictionary<Vector3, int>();
+            Dictionary<Vector3, int> vertexIndexMapA = new();
+            Dictionary<Vector3, int> vertexIndexMapB = new();
 
             //######Everything works above this
             //split the mesh
@@ -1103,7 +1103,7 @@ namespace Zombie1111_uDestruction
         /// <param name="useMeshBounds">If true, Mesh.bounds is used to get scales (Faster but less accurate)</param>
         public static List<float> GetPerMeshScale(Mesh[] meshes, bool useMeshBounds = false)
         {
-            List<float> meshVolumes = new List<float>();
+            List<float> meshVolumes = new();
             float totalVolume = 0.0f;
             for (int i = 0; i < meshes.Length; i += 1)
             {
@@ -1450,6 +1450,7 @@ namespace Zombie1111_uDestruction
         /// <param name="fracMeshes">Must have same lenght as fracParts</param>
         public static Mesh CombineMeshes(Mesh[] fracMeshes, ref FractureThis.FracPart[] fracParts)
         {
+            Debug.LogError("Not yet implemented??");
             return null;
 
             //int partCount = fracParts.Length;
@@ -1508,6 +1509,33 @@ namespace Zombie1111_uDestruction
             //
             //Debug_doesMeshContainUnusedVers(comMesh);
             //return comMesh;
+        }
+
+        /// <summary>
+        /// Returns the angular velocity
+        /// </summary>
+        internal static Vector3 GetAngularVelocity(Quaternion prevRot, Quaternion currentRot, float deltaTime)
+        {
+            var q = currentRot * Quaternion.Inverse(prevRot);
+            // no rotation?
+            // You may want to increase this closer to 1 if you want to handle very small rotations.
+            // Beware, if it is too close to one your answer will be Nan
+            if (Mathf.Abs(q.w) > 1023.5f / 1024.0f)
+                return new Vector3(0, 0, 0);
+            float gain;
+            // handle negatives, we could just flip it but this is faster
+            if (q.w < 0.0f)
+            {
+                var angle = Mathf.Acos(-q.w);
+                gain = -2.0f * angle / (Mathf.Sin(angle) * deltaTime);
+            }
+            else
+            {
+                var angle = Mathf.Acos(q.w);
+                gain = 2.0f * angle / (Mathf.Sin(angle) * deltaTime);
+            }
+
+            return new Vector3(q.x * gain, q.y * gain, q.z * gain);
         }
 
         public static Vector3 GetMedianPosition(Vector3[] positions)
@@ -1988,7 +2016,7 @@ namespace Zombie1111_uDestruction
 
         public static void Debug_createMeshRend(Mesh meshW, Material mat = null)
         {
-            GameObject newO = new GameObject();
+            GameObject newO = new();
             MeshFilter meshF = newO.AddComponent<MeshFilter>();
             MeshRenderer meshR = newO.AddComponent<MeshRenderer>();
             
