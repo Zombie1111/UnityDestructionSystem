@@ -1514,7 +1514,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns the angular velocity
         /// </summary>
-        internal static Vector3 GetAngularVelocity(Quaternion prevRot, Quaternion currentRot, float deltaTime)
+        public static Vector3 GetAngularVelocity(Quaternion prevRot, Quaternion currentRot, float deltaTime)
         {
             var q = currentRot * Quaternion.Inverse(prevRot);
             // no rotation?
@@ -1536,6 +1536,44 @@ namespace Zombie1111_uDestruction
             }
 
             return new Vector3(q.x * gain, q.y * gain, q.z * gain);
+        }
+
+        public static Vector3 GetObjectVelocityAtPoint(Matrix4x4 objWToLPrev, Matrix4x4 objLToWNow, Vector3 point, float deltatime)
+        {
+            //for what ever reason transforming (point - velOffset) seems to give slightly better result at the cost of 2 extra transformations??
+            Vector3 velOffset = point - (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point);
+            return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(velOffset)) - velOffset) / deltatime;
+
+            //The one below is faster and in theory it should be more accurate but it aint???
+            //return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point) / deltatime;
+
+            //Debug.DrawLine(point, point + pVel, Color.red, 0.1f);
+        }
+
+        public static void ClampMagnitude(ref Vector3 vector, float maxLength)
+        {
+            float num = vector.sqrMagnitude;
+            if (num > maxLength * maxLength)
+            {
+                float num2 = (float)Math.Sqrt(num);
+                vector.x = (vector.x / num2) * maxLength;
+                vector.y = (vector.y / num2) * maxLength;
+                vector.z = (vector.z / num2) * maxLength;
+            }
+        }
+
+        public static Vector3 RotatePointAroundPivot(Vector3 point, Vector3 pivot, Quaternion rotation)
+        {
+            // Translate the point so that the pivot becomes the origin
+            Vector3 offset = point - pivot;
+
+            // Apply the rotation to the offset
+            Vector3 rotatedOffset = rotation * offset;
+
+            // Translate the rotated point back to its original position
+            Vector3 rotatedPoint = rotatedOffset + pivot;
+
+            return rotatedPoint;
         }
 
         public static Vector3 GetMedianPosition(Vector3[] positions)

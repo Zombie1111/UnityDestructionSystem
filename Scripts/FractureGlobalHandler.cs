@@ -1,3 +1,5 @@
+using g3;
+using OpenCover.Framework.Model;
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
@@ -26,7 +28,10 @@ namespace Zombie1111_uDestruction
         {
             public Rigidbody rb;
             public float mass;
-            public bool wantToRemove;
+            /// <summary>
+            /// 0 = remove, 1 = add+reset, 2 = add+update
+            /// </summary>
+            public byte updateStatus;
         }
 
         [System.Serializable]
@@ -128,20 +133,40 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Call to remove a rigidbody that you added with OnAddOrUpdateRigidbody(), should always be called before you destroy a rigidbody component
+        /// Call to remove a rigidbody that you added with OnAddOrUpdateRb(), should always be called before you destroy a rigidbody component
         /// </summary>
         /// <param name="rbToRemove">The rigidbody </param>
         public void OnRemoveRigidbody(Rigidbody rbToRemove)
         {
             int rbId = rbToRemove.GetInstanceID();
-            if (jGRV_rbToSet.TryAdd(rbId, new() { wantToRemove = true }) == false)
+            if (jGRV_rbToSet.TryAdd(rbId, new() { updateStatus = 0 }) == false)
             {
-                jGRV_rbToSet[rbId].wantToRemove = true;
+                jGRV_rbToSet[rbId].updateStatus = 0;
             }
         }
 
         /// <summary>
-        /// All rigidbodies that should be able to damage a destructable object must be added through this function
+        /// Makes sure the rigidbody is added to the destruction system and resets its properties,
+        /// call if you have teleported the rigidbody
+        /// </summary>
+        /// <param name="mass">The mass the rigidbody has for the destruction system</param>
+        public void OnAddOrResetRb(Rigidbody rbToAddOrReset, float mass)
+        {
+            int rbId = rbToAddOrReset.GetInstanceID();
+            if (jGRV_rbToSet.TryAdd(rbId, new()
+            {
+                mass = mass,
+                rb = rbToAddOrReset,
+                updateStatus = 1 }) == false)
+            {
+                if (jGRV_rbToSet[rbId].updateStatus == 2) jGRV_rbToSet[rbId].updateStatus = 1;
+                jGRV_rbToSet[rbId].mass = mass;
+            }
+        }
+
+        /// <summary>
+        /// Makes sure the rigidbody is added to the destruction system and updates its properties,
+        /// call if you have modified the rigidbody mass
         /// </summary>
         /// <param name="mass">The mass the rigidbody has for the destruction system</param>
         public void OnAddOrUpdateRb(Rigidbody rbToAddOrUpdate, float mass)
@@ -151,10 +176,10 @@ namespace Zombie1111_uDestruction
             {
                 mass = mass,
                 rb = rbToAddOrUpdate,
-                wantToRemove = false }) == false)
+                updateStatus = 2
+            }) == false)
             {
                 jGRV_rbToSet[rbId].mass = mass;
-                jGRV_rbToSet[rbId].wantToRemove = false;
             }
         }
 
@@ -171,8 +196,8 @@ namespace Zombie1111_uDestruction
                 if (jGRV_rbTrans[rbInstancIdToJgrvIndex[rbId]].transform != null
                     && jGRV_rbTrans[rbInstancIdToJgrvIndex[rbId]].transform.TryGetComponent<Rigidbody>(out _) == true) continue;
 
-                if (jGRV_rbToSet.TryAdd(rbId, new() { wantToRemove = true }) == false)
-                    jGRV_rbToSet[rbId].wantToRemove = true;
+                if (jGRV_rbToSet.TryAdd(rbId, new() { updateStatus = 0 }) == false)
+                    jGRV_rbToSet[rbId].updateStatus = 0;
             }
 
             //start job again
@@ -267,6 +292,17 @@ namespace Zombie1111_uDestruction
 
         private void Update()
         {
+            //debug keys
+            if (Input.GetKeyDown(KeyCode.U) == true)
+            {
+                Rigidbody[] bodies = GameObject.FindObjectsByType<Rigidbody>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                foreach (Rigidbody rb in bodies)
+                {
+                    OnAddOrUpdateRb(rb, rb.mass);
+                    //rigidbodiesInstanceId.TryAdd(rb.GetInstanceID(), rb);
+                }
+            }
+
 #pragma warning disable IDE0079
 #pragma warning disable 0162
             //sync fixedTimestep with fps
@@ -353,21 +389,62 @@ namespace Zombie1111_uDestruction
                
                 foreach (int rbId in jGRV_rbToSet.Keys)
                 {
-                    bool wantRemove = jGRV_rbToSet[rbId].wantToRemove;
-                    Transform rbTrans = wantRemove == false ? jGRV_rbToSet[rbId].rb.transform : null;
-
-                    if (wantRemove == false && rbInstancIdToJgrvIndex.TryGetValue(rbId, out int jIndex) == true)
+                    byte uStatus = jGRV_rbToSet[rbId].updateStatus;
+                    Transform rbTrans;
+                    if (uStatus > 0)
                     {
-                        //update
-                        jGRV_rb_mass[jIndex] = jGRV_rbToSet[rbId].mass;
-                        var posD = jGRV_job.rb_posData[jIndex];
-                        posD.rb_position = rbTrans.position;
-                        posD.rb_velocity = Vector3.zero;
-                        posD.rb_angel = rbTrans.rotation;
-                        posD.rb_angularVel = Vector3.zero;
-                        jGRV_job.rb_posData[jIndex] = posD;
+                        if (jGRV_rbToSet[rbId].rb == null)
+                        {
+                            rbTrans = null;
+                            uStatus = 0;
+                        }
+                        else rbTrans = jGRV_rbToSet[rbId].rb.transform;
                     }
-                    else if (wantRemove == false)
+                    else rbTrans = null;
+
+                    if (rbInstancIdToJgrvIndex.TryGetValue(rbId, out int jIndex) == true)
+                    {
+                        if (uStatus > 0)
+                        {
+                            //update or reset
+                            jGRV_rb_mass[jIndex] = jGRV_rbToSet[rbId].mass;
+                            var posD = jGRV_job.rb_posData[jIndex];
+                            //posD.rb_centerW = jGRV_rbToSet[rbId].rb.worldCenterOfMass;
+                            //posD.rb_centerL = rbTrans.InverseTransformPoint(posD.rb_centerW);
+
+                            if (uStatus == 2)
+                            {
+                                jGRV_job.rb_posData[jIndex] = posD;
+                                continue;
+                            }
+
+                            //posD.rb_velocity = Vector3.zero;
+                            //posD.rb_rot = rbTrans.rotation;
+                            //posD.rb_rotVel = Quaternion.identity;
+                            posD.rbLToWNow = rbTrans.localToWorldMatrix;
+                            posD.rbWToLPrev = rbTrans.worldToLocalMatrix;
+                            jGRV_job.rb_posData[jIndex] = posD;
+                        }
+                        else
+                        {
+                            //remove
+                            jGRV_rbTrans.RemoveAtSwapBack(jIndex);
+                            jGRV_rb_mass.RemoveAtSwapBack(jIndex);
+                            jGRV_job.rb_posData.RemoveAtSwapBack(jIndex);
+                            rbInstancIdToJgrvIndex.Remove(rbId);
+                            int movedId = rbInstancIdToJgrvIndex.Count;
+
+                            foreach (var pair in rbInstancIdToJgrvIndex)
+                            {
+                                if (pair.Value != movedId) continue;
+                                movedId = pair.Key;
+                                break;
+                            }
+
+                            rbInstancIdToJgrvIndex[movedId] = jIndex;
+                        }
+                    }
+                    else if (uStatus > 0)
                     {
                         //add
                         if (jGRV_rbTrans.isCreated == false) jGRV_rbTrans = new(new Transform[1] { rbTrans });
@@ -375,31 +452,16 @@ namespace Zombie1111_uDestruction
                         jGRV_rb_mass.Add(jGRV_rbToSet[rbId].mass);
                         jGRV_job.rb_posData.Add(new()
                         {
-                            rb_position = rbTrans.position,
-                            rb_velocity = Vector3.zero,
-                            rb_angel = rbTrans.rotation,
-                            rb_angularVel = Vector3.zero,
-                        });
+                            rbLToWNow = rbTrans.localToWorldMatrix,
+                            rbWToLPrev = rbTrans.worldToLocalMatrix
+                            //rb_centerW = jGRV_rbToSet[rbId].rb.worldCenterOfMass,
+                            //rb_centerL = jGRV_rbToSet[rbId].rb.centerOfMass,
+                            //rb_velocity = Vector3.zero,
+                            //rb_rot = rbTrans.rotation,
+                            //rb_rotVel = Quaternion.identity
+                         });
 
                         rbInstancIdToJgrvIndex.Add(rbId, rbInstancIdToJgrvIndex.Count);
-                    }
-                    else if (rbInstancIdToJgrvIndex.TryGetValue(rbId, out jIndex) == true)
-                    {
-                        //remove
-                        jGRV_rbTrans.RemoveAtSwapBack(jIndex);
-                        jGRV_rb_mass.RemoveAtSwapBack(jIndex);
-                        jGRV_job.rb_posData.RemoveAtSwapBack(jIndex);
-                        rbInstancIdToJgrvIndex.Remove(rbId);
-                        int movedId = rbInstancIdToJgrvIndex.Count;
-
-                        foreach (var pair in rbInstancIdToJgrvIndex)
-                        {
-                            if (pair.Value != movedId) continue;
-                            movedId = pair.Key;
-                            break;
-                        }
-
-                        rbInstancIdToJgrvIndex[movedId] = jIndex;
                     }
                 }
 
@@ -416,21 +478,33 @@ namespace Zombie1111_uDestruction
 
             public struct RbPosData
             {
-                public Vector3 rb_velocity;
-                public Vector3 rb_position;
-                public Vector3 rb_angularVel;
-                public quaternion rb_angel;
+                public Matrix4x4 rbWToLPrev;
+                public Matrix4x4 rbLToWNow;
             }
 
             public void Execute(int index, TransformAccess transform)
             {
                 
-                //rb_centerWorld[index] = transform.localToWorldMatrix.MultiplyPoint(rb_centerLocal[index]);
                 RbPosData posD = rb_posData[index];
-                posD.rb_velocity = (transform.position - posD.rb_position) / deltaTime;
-                posD.rb_angularVel = FractureHelperFunc.GetAngularVelocity(posD.rb_angel, transform.rotation, deltaTime);
-                posD.rb_position = transform.position;
-                posD.rb_angel = transform.rotation;
+
+                posD.rbWToLPrev = posD.rbLToWNow.inverse;
+                posD.rbLToWNow = transform.localToWorldMatrix;
+
+                //Vector3 centerW = transform.localToWorldMatrix.MultiplyPoint(posD.rb_centerL);
+                //
+                //posD.rb_velocity = (centerW - posD.rb_centerW) / deltaTime;
+                ////posD.rb_angularVel = FractureHelperFunc.GetAngularVelocity(posD.rb_angel, transform.rotation, deltaTime);
+                //
+                //posD.rb_rotVel = Quaternion.Inverse(posD.rb_rot) * transform.rotation;
+                //
+                ////Vector3 axis;
+                ////float angle;
+                ////posD.rb_rotVel.ToAngleAxis(out angle, out axis);
+                ////angle /= deltaTime;
+                ////posD.rb_rotVel = Quaternion.AngleAxis(angle, axis);
+                //
+                //posD.rb_centerW = centerW;
+                //posD.rb_rot = transform.rotation;
                 rb_posData[index] = posD;
             }
         }
@@ -468,57 +542,113 @@ namespace Zombie1111_uDestruction
         {
             //wait for late fix update
             yield return new WaitForFixedUpdate();
-
+            fixedDeltatime = Time.fixedDeltaTime;//we wanna set this at the same time we set the job deltatime
             GetRbVelocities_start();
 
         }
 
+        private Dictionary<int, ImpPair> impIdToImpPair = new();
+        private float fixedDeltatime = 0.01f;
+
         private class ImpPair
         {
             public Vector3 impVel;
-            public float impForce;
-            public Rigidbody rbCausedImp;
-            public FractureThis fracThis;
-            public HashSet<int> pairIndexes;
+            public float impForceT;
+            public FractureThis impFrac;
             public List<ImpPoint> impPoints;
+            public Rigidbody sourceRb;
+            public HashSet<short> pairIndexes;
         }
 
         public class ImpPoint
         {
-            public int partIndex;
-            public Vector3 impPos;
+            public short partI;
+            public float force;
         }
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
         {
-            foreach (var pair in pairs)
+            ModifiableContactPair pair;
+            Vector3 rbDiffVel;
+            Vector3 rbA_vel;
+            Vector3 rbB_vel;
+
+            for (short pairI = 0; pairI < pairs.Length; pairI++)
             {
+                pair = pairs[pairI];
+
+                CalcImpPair(pair.colliderInstanceID, pair.bodyInstanceID, pair.otherColliderInstanceID, pair.otherBodyInstanceID, 0, pairI);
+                //CalcImpPair(pair.otherColliderInstanceID, pair.otherBodyInstanceID, pair.colliderInstanceID, pair.bodyInstanceID, 1, pairI);
+
+                ////debug
                 //for (int i = 0; i < pair.contactCount; i++)
                 //{
                 //    Vector3 pos = pair.GetPoint(i);
                 //    Debug.DrawLine(pos, pos + pair.GetNormal(i), Color.magenta, 1.0f);
                 //}
-                //
-                //if (rbInstancIdToJgrvIndex.TryGetValue(pair.bodyInstanceID, out int rbI) == true)
-                //{
-                //    Debug.Log("vel " + jGRV_job.rb_posData[rbI].rb_velocity.magnitude + " ang " + jGRV_job.rb_posData[rbI].rb_angularVel.magnitude + " rbI " + rbI);
-                //}
-                //
-                //if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out rbI) == true)
-                //{
-                //    Debug.Log("vel " + jGRV_job.rb_posData[rbI].rb_velocity.magnitude + " ang " + jGRV_job.rb_posData[rbI].rb_angularVel.magnitude + " rbI " + rbI);
-                //}
-                //
-                //if (partColsInstanceId.TryGetValue(pair.colliderInstanceID, out GlobalFracData partD) == true)
-                //{
-                //    Debug.Log("partI " + partD.partIndex);
-                //}
-                //
-                //if (partColsInstanceId.TryGetValue(pair.otherColliderInstanceID, out partD) == true)
-                //{
-                //    Debug.Log("partI " + partD.partIndex);
-                //}
+                
+                if (rbInstancIdToJgrvIndex.TryGetValue(pair.bodyInstanceID, out int rbI) == true)
+                {
+                    //Debug.Log("vel " + jGRV_job.rb_posData[rbI].rb_velocity.magnitude + " ang " + jGRV_job.rb_posData[rbI].rb_angularVel.magnitude + " rbI " + rbI);
+                    //debug get vel
+                    FractureHelperFunc.GetObjectVelocityAtPoint(
+                        jGRV_job.rb_posData[rbI].rbWToLPrev,
+                        jGRV_job.rb_posData[rbI].rbLToWNow,
+                        pair.GetPoint(0), fixedDeltatime
+                        );
+                }
+
+                if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out rbI) == true)
+                {
+                    //Debug.Log("vel " + jGRV_job.rb_posData[rbI].rb_velocity.magnitude + " ang " + jGRV_job.rb_posData[rbI].rb_angularVel.magnitude + " rbI " + rbI);
+                    FractureHelperFunc.GetObjectVelocityAtPoint(
+                         jGRV_job.rb_posData[rbI].rbWToLPrev,
+                         jGRV_job.rb_posData[rbI].rbLToWNow,
+                         pair.GetPoint(0), fixedDeltatime
+                         );
+                }
             }
+
+            void CalcImpPair(int colId, int rbId, int subColId, int subRbId, byte idOffset, short pairI)
+            {
+                Debug.Log(rbId + " " + subRbId);
+
+                //create a ImpPair for this pair
+                int pairKey = rbId + subRbId + idOffset;
+                if (impIdToImpPair.TryGetValue(pairKey, out ImpPair impPair) == false)
+                {
+                    ////When impPair does not already exist, check if this is valid imp and create new impPair
+                    ////get rigidbody velocity
+                    //if (rbInstancIdToJgrvIndex.TryGetValue(rbId, out int rbI) == true) rbA_vel = FractureHelperFunc.GetObjectVelocityAtPoint(
+                    //    jGRV_job.rb_posData[rbI].rb_centerW,
+                    //    jGRV_job.rb_posData[rbI].rb_velocity,
+                    //    jGRV_job.rb_posData[rbI].rb_angularVel,
+                    //    pair.GetPoint(0));
+                    //else rbA_vel = Vector3.zero;
+
+                    //if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out rbI) == true) rbB_vel = FractureHelperFunc.GetObjectVelocityAtPoint(
+                    //     jGRV_job.rb_posData[rbI].rb_centerW,
+                    //     jGRV_job.rb_posData[rbI].rb_velocity,
+                    //     jGRV_job.rb_posData[rbI].rb_angularVel,
+                    //     pair.GetPoint(0));
+                    //else rbB_vel = Vector3.zero;
+                    //
+                    //rbDiffVel = rbB_vel.sqrMagnitude > rbA_vel.sqrMagnitude ? (rbB_vel - rbA_vel) : (rbA_vel - rbB_vel);
+                }
+            }
+
+
+           
+            //
+            //if (partColsInstanceId.TryGetValue(pair.colliderInstanceID, out GlobalFracData partD) == true)
+            //{
+            //    Debug.Log("partI " + partD.partIndex);
+            //}
+            //
+            //if (partColsInstanceId.TryGetValue(pair.otherColliderInstanceID, out partD) == true)
+            //{
+            //    Debug.Log("partI " + partD.partIndex);
+            //}
         }
         #endregion CollisionHandling
     }

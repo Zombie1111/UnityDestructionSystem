@@ -5,7 +5,8 @@ using UnityEngine;
 namespace Zombie1111_uDestruction
 {
     /*
-        #################Scripting Define Symbols (ProjectSettings>Player>OtherSettings)################
+        #################Optional Scripting Define Symbols (ProjectSettings>Player>OtherSettings)################
+        #########################################################################################################
 
         FRAC_NO_WARNINGS //If defined, no warnings will be logged to console
         FRAC_NO_VERIFICATION //If defined, no verify saving before fracturing and no notices

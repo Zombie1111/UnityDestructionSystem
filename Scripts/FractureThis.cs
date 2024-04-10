@@ -3014,9 +3014,8 @@ namespace Zombie1111_uDestruction
             {
                 buf_structs_posLPrev.SetData(structs_posL);
                 if (des_deformedParts[des_deformedPartsIndex].Count > 0) gpuMeshRequest_do = true;
+                wantToApplyDeformation = false;
             }
-
-            wantToApplyDeformation = false;
         }
 
         private void UpdateGpuMeshReadback()

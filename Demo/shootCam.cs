@@ -80,7 +80,7 @@ namespace TrueTrace
                 rb.mass = 1.0f;
                 debugRb = rb;
                 globalF.OnAddOrUpdateRb(rb, 3.0f);
-                //newO.GetComponent<Collider>().hasModifiableContacts = true;
+                newO.GetComponent<Collider>().hasModifiableContacts = true;
                 newO.GetComponent<Collider>().sharedMaterial = phyMat;
                 gotCod = false;
             }
