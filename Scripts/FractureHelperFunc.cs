@@ -1546,8 +1546,6 @@ namespace Zombie1111_uDestruction
 
             //The one below is faster and in theory it should be more accurate but it aint???
             //return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point) / deltatime;
-
-            //Debug.DrawLine(point, point + pVel, Color.red, 0.1f);
         }
 
         public static void ClampMagnitude(ref Vector3 vector, float maxLength)
@@ -1829,9 +1827,10 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="col"></param>
         /// <param name="possLocal"></param>
-        public static void SetColliderFromFromPoints(Collider col, Vector3[] possLocal)
+        public static void SetColliderFromFromPoints(Collider col, Vector3[] possLocal, ref float newMaxExtent)
         {
             Transform colTrans = col.transform;
+            Vector3 extents;
 
             if (col is MeshCollider mCol)
             {
@@ -1840,13 +1839,15 @@ namespace Zombie1111_uDestruction
                 | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
                 | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
                 | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
+
+                extents = col.bounds.extents;
             }
             else if (col is BoxCollider bCol)
             {
                 bCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
                 possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
 
-                Vector3 extents = Vector3.one * 0.001f;
+                extents = Vector3.one * 0.001f;
                 float cDis;
                 Vector3 tPos = bCol.bounds.center;
                 Vector3 tFor = colTrans.forward;
@@ -1864,13 +1865,14 @@ namespace Zombie1111_uDestruction
                 }
 
                 bCol.size = extents * 2.0f;
+                extents = colTrans.TransformVector(extents);
             }
             else if (col is SphereCollider sCol)
             {
                 sCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
                 possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
 
-                Vector3 extents = Vector3.one * 0.001f;
+                extents = Vector3.one * 0.001f;
                 float cDis;
                 Vector3 tPos = sCol.bounds.center;
                 Vector3 tFor = colTrans.forward;
@@ -1889,13 +1891,14 @@ namespace Zombie1111_uDestruction
 
                 extents.Scale(colTrans.localToWorldMatrix.lossyScale);
                 sCol.radius = Mathf.Max(extents.x, extents.y, extents.z);
+                extents = colTrans.TransformVector(extents);
             }
             else if (col is CapsuleCollider cCol)
             {
                 cCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
                 possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
 
-                Vector3 extents = Vector3.one * 0.001f;
+                extents = Vector3.one * 0.001f;
                 float cDis;
                 Vector3 tPos = cCol.bounds.center;
                 Vector3 tFor = colTrans.forward;
@@ -1933,8 +1936,21 @@ namespace Zombie1111_uDestruction
                     cCol.height = extents.z * 2.0f;
                     cCol.radius = Mathf.Max(extents.x, extents.y);
                 }
+
+                extents = colTrans.TransformVector(extents);
+            }
+            else
+            {
+                Debug.LogError(col.GetType() + " colliders are currently not supported, please only use Mesh, Box, Sphere and Capsule colliders!");
+                return;
             }
 
+            //Update max extents
+            if (extents.x > newMaxExtent) newMaxExtent = extents.x;
+            if (extents.y > newMaxExtent) newMaxExtent = extents.y;
+            if (extents.z > newMaxExtent) newMaxExtent = extents.z;
+
+            //renable collider to fix bug??
             if (col.enabled == false) return;
             col.enabled = false;
             col.enabled = true;

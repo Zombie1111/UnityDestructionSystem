@@ -67,7 +67,6 @@ namespace Zombie1111_uDestruction
             phyPartsOptions = from.phyPartsOptions;
             insideMat_fallback = from.insideMat_fallback;
             insideMat_nameAddition = from.insideMat_nameAddition;
-            physicsMat = from.physicsMat;
         }
 #endif
 
@@ -99,7 +98,7 @@ namespace Zombie1111_uDestruction
         [Header("Material")]
         [SerializeField] private Material insideMat_fallback = null;
         [SerializeField] private string insideMat_nameAddition = "_inside";
-        [SerializeField] private PhysicMaterial physicsMat = null;
+        [SerializeField] private DefualtGroupOptions destructionMaterial = new();
 
         [Space(10)]
         [Header("Advanced")]
@@ -325,6 +324,7 @@ namespace Zombie1111_uDestruction
         {
             public OptPartPhysicsType partPhysicsType = OptPartPhysicsType.rigidbody_medium;
             public bool useGravity = true;
+            public float massMultiplier = 4.0f;
             public bool canRotate = true;
             public float drag = 0.0f;
             public float angularDrag = 0.05f;
@@ -682,6 +682,9 @@ namespace Zombie1111_uDestruction
             /// The total number of kinematic parts that uses this parent
             /// </summary>
             public int parentKinematic;
+
+            public float totalTransportCoEfficiency;
+            public float totalBendEfficiency;
         }
 
         [System.Serializable]
@@ -1066,9 +1069,23 @@ namespace Zombie1111_uDestruction
             public List<int> affectedGroupIndexes = new();
             public PhysicMaterial phyMat;
             public bool isKinematic = false;
-            public float mass;
-            public byte objLayerDefualt;
-            public byte objLayerBroken;
+            public float mass = 0.1f;
+            public byte objLayerDefualt = 0;
+            public byte objLayerBroken = 0;
+            public float transportCapacity = 100.0f;
+            public float transportCoEfficiency = 0.001f;
+            public float bendEfficiency = 0.05f;
+        }
+
+        [System.Serializable]
+        private class DefualtGroupOptions
+        {
+            public PhysicMaterial phyMat;
+            public float mass = 0.1f;
+            public byte objLayerBroken = 0;
+            public float transportCapacity = 100.0f;
+            public float transportCoEfficiency = 0.001f;
+            public float bendEfficiency = 0.05f;
         }
 
         /// <summary>
@@ -1080,7 +1097,14 @@ namespace Zombie1111_uDestruction
             groupDataDefualt = new()
             {
                 affectedGroupIndexes = null,
-                phyMat = physicsMat
+                phyMat = destructionMaterial.phyMat,
+                mass = destructionMaterial.mass,
+                objLayerBroken = destructionMaterial.objLayerBroken,
+                bendEfficiency = destructionMaterial.bendEfficiency,
+                transportCapacity = destructionMaterial.transportCapacity,
+                transportCoEfficiency = destructionMaterial.transportCoEfficiency,
+                isKinematic = false,
+                objLayerDefualt = (byte)gameObject.layer
             };
 
             //assign groupIntIdToGroupIndex with proper keys and values
@@ -1679,9 +1703,9 @@ namespace Zombie1111_uDestruction
 
             //get global data
             GroupIdData partGroupD;
-            if (fObj.meshW.bounds.extents.x > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.x;
-            if (fObj.meshW.bounds.extents.y > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.y;
-            if (fObj.meshW.bounds.extents.z > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.z;
+            //if (fObj.meshW.bounds.extents.x > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.x;
+            //if (fObj.meshW.bounds.extents.y > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.y;
+            //if (fObj.meshW.bounds.extents.z > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.z;
 
             //create fracPart and assign variabels
             FracPart newPart = new()
@@ -1860,7 +1884,7 @@ namespace Zombie1111_uDestruction
                 partGroupD = GetGroupIdDataFromIntId(newPart.groupIdInt);
 
                 //set part parent
-                structs_parentI.Add(-69420);
+                structs_parentI.Add(-6969);
                 if (newPartParentI <= 0 && nearPartIndexes.Count > 0) newPartParentI = structs_parentI[nearPartIndexes[0]];
                 if (newPartParentI < 0) newPartParentI = CreateNewParent(null);
                 SetPartParent(newPartI, newPartParentI);
@@ -1914,7 +1938,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Creates FracObjects from all fMeshesW and adds them to the destruction system
         /// </summary>
-        private void CreateAndAddFObjectsFromFMeshes(List<FracMesh> fMeshesW, int newPartsParentI = 0)
+        private void CreateAndAddFObjectsFromFMeshes(List<FracMesh> fMeshesW, short newPartsParentI = 0)
         {
             Dictionary<Material, Material> matToInsideMat = new();
             HashSet<Material> testedMats = new();
@@ -1940,21 +1964,24 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Sets the given parts parent to newParentI
         /// </summary>
-        private void SetPartParent(int partI, int newParentI)
+        private void SetPartParent(short partI, int newParentI)
         {
-            if (structs_parentI[partI] == newParentI) return;
+            int partParentI = structs_parentI[partI];
+            if (partParentI == newParentI) return;
 
             //get part groupData
             GroupIdData partGData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
 
             //remove part from previous parent
-            if (structs_parentI[partI] >= 0)
+            if (partParentI >= 0)
             {
-                allParents[structs_parentI[partI]].partIndexes.Remove(partI);
-                allParents[structs_parentI[partI]].parentMass -= partGData.mass * phyMainOptions.massMultiplier;
-                if (partsKinematicStatus.Contains(partI) == true) allParents[structs_parentI[partI]].parentKinematic--;
+                allParents[partParentI].partIndexes.Remove(partI);
+                allParents[partParentI].parentMass -= partGData.mass;
+                allParents[partParentI].totalBendEfficiency -= partGData.bendEfficiency;
+                allParents[partParentI].totalTransportCoEfficiency -= partGData.transportCoEfficiency;
+                if (partsKinematicStatus.Contains(partI) == true) allParents[partParentI].parentKinematic--;
 
-                MarkParentAsModified(structs_parentI[partI]);
+                MarkParentAsModified(partParentI);
             }
             else FromNoParentToParent();
 
@@ -1970,8 +1997,10 @@ namespace Zombie1111_uDestruction
             //if want to set parent
             allParts[partI].trans.SetParent(newParentI > 0 || partsDefualtData.Count == 0 ? allParents[newParentI].parentTrans : partsDefualtData[partI].defParent);
             allParents[newParentI].partIndexes.Add(partI);
-            allParents[newParentI].parentMass += partGData.mass * phyMainOptions.massMultiplier;
-            if (partsKinematicStatus.Contains(partI) == true) allParents[structs_parentI[partI]].parentKinematic++;
+            allParents[newParentI].parentMass += partGData.mass;
+            allParents[newParentI].totalBendEfficiency += partGData.bendEfficiency;
+            allParents[newParentI].totalTransportCoEfficiency += partGData.transportCoEfficiency;
+            if (partsKinematicStatus.Contains(partI) == true) allParents[newParentI].parentKinematic++;
             MarkParentAsModified(newParentI);
 
             void FromParentToNoParent()
@@ -1983,7 +2012,7 @@ namespace Zombie1111_uDestruction
                 //add and set rigidbody
                 Rigidbody newRb = allParts[partI].trans.gameObject.AddComponent<Rigidbody>();
 
-                newRb.mass = partGData.mass;
+                newRb.mass = partGData.mass * phyPartsOptions.massMultiplier;
                 newRb.interpolation = phyPartsOptions.interpolate;//Do we really need these properties to be configurable?
                 newRb.drag = phyPartsOptions.drag;
                 newRb.angularDrag = phyPartsOptions.angularDrag;
@@ -1998,26 +2027,26 @@ namespace Zombie1111_uDestruction
                 allParts[partI].trans.gameObject.layer = partGData.objLayerDefualt;
 
                 //remove rigidbody
-                if (structs_parentI[partI] == -1) Destroy(allParts[partI].col.attachedRigidbody);
+                //Destroy(allParts[partI].col.attachedRigidbody);
             }
         }
 
         /// <summary>
         /// Creates a new parent and returns its index (transToUse will be used as parent if it aint null)
         /// </summary>
-        public int CreateNewParent(Transform transToUse = null)
+        public short CreateNewParent(Transform transToUse = null)
         {
             //if empty&&valid parent exists, reuse it since we are not allowed to destroy unused parents.
-            int newParentI = -1;
+            short newParentI = -1;
 
             if (transToUse == null)
             {
-                for (int i = 1; i < allParents.Count; i++)
+                for (short parentI = 1; parentI < allParents.Count; parentI++)
                 {
-                    if (allParents[i].partIndexes.Count == 0 && allParents[i].parentTrans != null && allParents[i].parentTrans.parent == transform &&
-                        (allParents[i].parentRb != null || phyMainOptions.mainPhysicsType == OptMainPhysicsType.alwaysKinematic))
+                    if (allParents[parentI].partIndexes.Count == 0 && allParents[parentI].parentTrans != null && allParents[parentI].parentTrans.parent == transform &&
+                        (allParents[parentI].parentRb != null || phyMainOptions.mainPhysicsType == OptMainPhysicsType.alwaysKinematic))
                     {
-                        newParentI = i;
+                        newParentI = parentI;
                         allParents[newParentI].parentTrans.gameObject.SetActive(true);
                     }
                 }
@@ -2026,7 +2055,7 @@ namespace Zombie1111_uDestruction
             //if empty&&valid parent did not exist, create new parent object
             if (newParentI < 0)
             {
-                newParentI = allParents.Count;
+                newParentI = (short)allParents.Count;
                 Rigidbody parentRb = null;
 
                 if (transToUse == null)
@@ -2071,7 +2100,9 @@ namespace Zombie1111_uDestruction
             //update parent rigidbody
             if (allParents[parentI].parentRb != null)
             {
-                allParents[parentI].parentRb.mass = allParents[parentI].parentMass;
+                //allParents[parentI].parentRb.mass = allParents[parentI].parentMass * phyMainOptions.massMultiplier;
+                allParents[parentI].parentRb.mass = allParents[parentI].parentMass * phyPartsOptions.massMultiplier
+                    * (allParents[parentI].partIndexes.Count * phyMainOptions.massMultiplier >= 1.0f ? phyMainOptions.massMultiplier : 1.0f);
                 allParents[parentI].parentRb.isKinematic = allParents[parentI].parentKinematic > 0;
             }
         }
@@ -2185,7 +2216,7 @@ namespace Zombie1111_uDestruction
 
             FractureHelperFunc.SetColliderFromFromPoints(
                 newCol,
-                FractureHelperFunc.ConvertPositionsWithMatrix(partWVers, partTrans.worldToLocalMatrix));
+                FractureHelperFunc.ConvertPositionsWithMatrix(partWVers, partTrans.worldToLocalMatrix), ref partMaxExtent);
 
             newCol.sharedMaterial = phyMat;
             newCol.hasModifiableContacts = true; //This must always be true for all fracture colliders
@@ -2660,9 +2691,9 @@ namespace Zombie1111_uDestruction
             if (VerifyFracture() == false) return;
 
             //setup collider instanceid references
-            for (int i = 0; i < allParts.Count; i++)
+            for (short partI = 0; partI < allParts.Count; partI++)
             {
-                globalHandler.OnAddFracPart(this, i);
+                globalHandler.OnAddFracPart(this, partI);
             }
 
             //set parts colliders
@@ -2670,6 +2701,16 @@ namespace Zombie1111_uDestruction
             {
                 allParts[i].col.hasModifiableContacts = true;
             }
+
+            //loop all destruction materials to get lowest transportCapacity
+            lowestTransportCapacity = float.MaxValue;
+            for (int i = 0; i < groupDataOverrides.Count; i++)
+            {
+                if (groupDataOverrides[i].transportCapacity >= lowestTransportCapacity) continue;
+                lowestTransportCapacity = groupDataOverrides[i].transportCapacity;
+            }
+
+            if (groupDataDefualt.transportCapacity < lowestTransportCapacity) lowestTransportCapacity = groupDataDefualt.transportCapacity;
         }
 
         private void Update()
@@ -3054,7 +3095,7 @@ namespace Zombie1111_uDestruction
                     pI++;
                 }
 
-                FractureHelperFunc.SetColliderFromFromPoints(allParts[partI].col, partPossL);
+                FractureHelperFunc.SetColliderFromFromPoints(allParts[partI].col, partPossL, ref partMaxExtent);
             }
 
             if (gpuMeshRequest_do == true && des_deformedParts[oppositeI].Count == 0)
@@ -3084,9 +3125,13 @@ namespace Zombie1111_uDestruction
         public List<FracParent> allParents = new();
 
         /// <summary>
-        /// The structure used to compute destruction
+        /// Used to compute destruction, the position of the struct in its part localspace
         /// </summary>
         [System.NonSerialized] public List<Vector3> structs_posL = new();
+
+        /// <summary>
+        /// Used to compute destruction, the parent part X has
+        /// </summary>
         [System.NonSerialized] public List<int> structs_parentI = new();
 
         /// <summary>
@@ -3256,6 +3301,90 @@ namespace Zombie1111_uDestruction
 #endif
 
             return 0;
+        }
+
+        /// <summary>
+        /// Returns the rough force that partI can "consume" if X collided with partI at the given velocity.
+        /// In other words, rougly how much force partI can take before it either breaks or gets pushed away
+        /// </summary>
+        public float GuessMaxForceConsume(Vector3 velocity, short partI, float bouncyness = 0.0f)
+        {
+            int parentI = structs_parentI[partI];
+            GroupIdData gData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
+            float velSpeed = velocity.magnitude;
+            if (parentI < 0)
+            {
+                //if no parent, it cant break so it has infinit stenght
+                if (partsKinematicStatus.Contains(partI) == true) return float.MaxValue;
+
+                velSpeed *= gData.mass;
+                velSpeed += velSpeed * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
+                return velSpeed + (velSpeed * gData.transportCoEfficiency);
+            }
+
+            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - gData.mass);
+
+            float totalTransportCap = gData.transportCapacity * allParts[partI].neighbourStructs.Count;
+            if (impForce > totalTransportCap) impForce = totalTransportCap;
+
+            int parentPartCount = allParents[parentI].partIndexes.Count;
+            impForce += impForce * (allParents[parentI].totalBendEfficiency / parentPartCount);
+            impForce += velSpeed * gData.mass;
+            impForce += impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
+            return impForce + (impForce * (allParents[parentI].totalTransportCoEfficiency / parentPartCount));
+        }
+
+        /// <summary>
+        /// Returns the rough force that partI can apply to X if partI would collide with X at the given velocity
+        /// </summary>
+        public float GuessMaxForceApplied(Vector3 velocity, short partI, float bouncyness = 0.0f)
+        {
+            int parentI = structs_parentI[partI];
+            GroupIdData gData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
+            float velSpeed = velocity.magnitude;
+            if (parentI < 0)
+            {
+                //if no parent, it cant break so it has infinit stenght
+                if (partsKinematicStatus.Contains(partI) == true) return float.MaxValue;
+
+                velSpeed *= gData.mass;
+                velSpeed -= velSpeed * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
+                return velSpeed - (velSpeed * gData.transportCoEfficiency);
+            }
+
+            //float impForce = velSpeed * (allParents[parentI].parentMass - gData.mass);
+            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - gData.mass);
+
+            int parentPartCount = allParents[parentI].partIndexes.Count;
+            impForce -= impForce * (allParents[parentI].totalBendEfficiency / parentPartCount);
+
+            float totalTransportCap = gData.transportCapacity * allParts[partI].neighbourStructs.Count;
+            if (impForce > totalTransportCap) impForce = totalTransportCap;
+
+            impForce += velSpeed * gData.mass;
+            impForce -= impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
+            return impForce - (impForce * (allParents[parentI].totalTransportCoEfficiency / parentPartCount));
+        }
+
+        /// <summary>
+        /// The lowest TransportCapacity any part has
+        /// </summary>
+        private float lowestTransportCapacity = 0.0f;
+
+        /// <summary>
+        /// Returns true if applying the given force on partI is likely to cause any noticiable destruction on the object
+        /// </summary>
+        public bool GuessIfForceCanCauseBreaking(float force, int partI, float bouncyness = 0.0f)
+        {
+            int parentI = structs_parentI[partI];
+            int parentPartCount = allParents[parentI].partIndexes.Count;
+            force -= force * (allParents[parentI].totalBendEfficiency / parentPartCount);//Should bending count as breaking? Its currently not
+            force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
+            force -= force * (allParents[parentI].totalTransportCoEfficiency / parentPartCount);
+
+            //the reason why we use lowest and not partI Capacity is because partI may be made out of steel but its connected
+            //to the wall with glass, steel wont break but glass will. Computing that just takes too long so we pretend its always connected with glass
+            return force > lowestTransportCapacity * allParts[partI].neighbourStructs.Count;
         }
 
         #endregion HelperFunctions

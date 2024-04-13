@@ -38,7 +38,7 @@ namespace Zombie1111_uDestruction
         public class GlobalFracData
         {
             public FractureThis fracThis;
-            public int partIndex;
+            public short partIndex;
         }
 
         private void Awake()
@@ -76,7 +76,7 @@ namespace Zombie1111_uDestruction
                     if (handlers[i].jGRV_rbTrans[rI].transform == null
                         || handlers[i].jGRV_rbTrans[rI].transform.TryGetComponent(out Rigidbody rb) == false) continue;
 
-                    OnAddOrUpdateRb(rb, handlers[i].jGRV_rb_mass[rI]);//potential issue, if the rb hit something the same frame it wont cause any damage
+                    OnAddOrUpdateRb(rb, handlers[i].jGRV_rb_mass[rI].mass);//potential issue, if the rb hit something the same frame it wont cause any damage
                 }
 
                 foreach (var pair in handlers[i].jGRV_rbToSet)
@@ -100,7 +100,7 @@ namespace Zombie1111_uDestruction
 #pragma warning restore IDE0079
         }
 
-        public void OnAddFracPart(FractureThis frac, int partI)
+        public void OnAddFracPart(FractureThis frac, short partI)
         {
             partColsInstanceId.TryAdd(frac.allParts[partI].col.GetInstanceID(), new()
             {
@@ -328,11 +328,24 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private Dictionary<int, GlobalTransToSet> jGRV_rbToSet = new();
         private TransformAccessArray jGRV_rbTrans;
-        private List<float> jGRV_rb_mass;
+        /// <summary>
+        /// The mass of the body at the given index, if mass is negative the rigidbody is kinematic (Get abs for real mass)
+        /// </summary>
+        private List<GlobalRbData> jGRV_rb_mass;
         private JobHandle jGRV_handle;
         private GetRbVelocities_work jGRV_job;
         private Dictionary<int, int> rbInstancIdToJgrvIndex = new();
         private bool jGRV_jobIsActive = false;
+
+        private class GlobalRbData
+        {
+            public Rigidbody rb;
+
+            /// <summary>
+            /// The mass of the rigidbody as seen by the destruction system
+            /// </summary>
+            public float mass;
+        }
 
         private void OnDestroy()
         {
@@ -363,7 +376,6 @@ namespace Zombie1111_uDestruction
             if (jGRV_jobIsActive == true || jGRV_rbTrans.isCreated == false) return;
 
             //run the job
-            jGRV_job.deltaTime = Time.fixedDeltaTime;
             jGRV_handle = jGRV_job.Schedule(jGRV_rbTrans);
             jGRV_jobIsActive = true;
         }
@@ -407,7 +419,7 @@ namespace Zombie1111_uDestruction
                         if (uStatus > 0)
                         {
                             //update or reset
-                            jGRV_rb_mass[jIndex] = jGRV_rbToSet[rbId].mass;
+                            jGRV_rb_mass[jIndex].mass = jGRV_rbToSet[rbId].mass;
                             var posD = jGRV_job.rb_posData[jIndex];
                             //posD.rb_centerW = jGRV_rbToSet[rbId].rb.worldCenterOfMass;
                             //posD.rb_centerL = rbTrans.InverseTransformPoint(posD.rb_centerW);
@@ -449,7 +461,7 @@ namespace Zombie1111_uDestruction
                         //add
                         if (jGRV_rbTrans.isCreated == false) jGRV_rbTrans = new(new Transform[1] { rbTrans });
                         else jGRV_rbTrans.Add(rbTrans);
-                        jGRV_rb_mass.Add(jGRV_rbToSet[rbId].mass);
+                        jGRV_rb_mass.Add(new() { mass = jGRV_rbToSet[rbId].mass, rb = jGRV_rbToSet[rbId].rb });
                         jGRV_job.rb_posData.Add(new()
                         {
                             rbLToWNow = rbTrans.localToWorldMatrix,
@@ -474,7 +486,6 @@ namespace Zombie1111_uDestruction
         {
             [NativeDisableContainerSafetyRestriction]
             public NativeList<RbPosData> rb_posData;
-            public float deltaTime;
 
             public struct RbPosData
             {
@@ -484,28 +495,21 @@ namespace Zombie1111_uDestruction
 
             public void Execute(int index, TransformAccess transform)
             {
-                
                 RbPosData posD = rb_posData[index];
-
+                //InterpolateMatrix(ref posD.rbWToLPrev, posD.rbLToWNow.inverse, 0.4f);
+                //InterpolateMatrix(ref posD.rbLToWNow, transform.localToWorldMatrix, 0.4f);
                 posD.rbWToLPrev = posD.rbLToWNow.inverse;
                 posD.rbLToWNow = transform.localToWorldMatrix;
 
-                //Vector3 centerW = transform.localToWorldMatrix.MultiplyPoint(posD.rb_centerL);
-                //
-                //posD.rb_velocity = (centerW - posD.rb_centerW) / deltaTime;
-                ////posD.rb_angularVel = FractureHelperFunc.GetAngularVelocity(posD.rb_angel, transform.rotation, deltaTime);
-                //
-                //posD.rb_rotVel = Quaternion.Inverse(posD.rb_rot) * transform.rotation;
-                //
-                ////Vector3 axis;
-                ////float angle;
-                ////posD.rb_rotVel.ToAngleAxis(out angle, out axis);
-                ////angle /= deltaTime;
-                ////posD.rb_rotVel = Quaternion.AngleAxis(angle, axis);
-                //
-                //posD.rb_centerW = centerW;
-                //posD.rb_rot = transform.rotation;
                 rb_posData[index] = posD;
+
+                //void InterpolateMatrix(ref Matrix4x4 from, Matrix4x4 to, float t)
+                //{
+                //    for (int i = 0; i < 16; i++)
+                //    {
+                //        from[i] = Mathf.Lerp(from[i], to[i], t);
+                //    }
+                //}
             }
         }
 
@@ -531,6 +535,20 @@ namespace Zombie1111_uDestruction
 
         private void FixedUpdate()
         {
+            //update stored fixedDeltatime and ignore timers
+            fixedDeltatime = Time.fixedDeltaTime;
+            foreach (int impId in impIdsToIgnore.Keys)
+            {
+                impIdsToIgnore.TryGetValue(impId, out float ignoreTime);
+                if (ignoreTime <= 0.0f)
+                {
+                    impIdsToIgnore.TryRemove(impId, out _);
+                    continue;
+                }
+
+                impIdsToIgnore.TryUpdate(impId, ignoreTime - fixedDeltatime, ignoreTime);
+            }
+
             //end get rb velocities
             GetRbVelocities_end();
 
@@ -542,18 +560,17 @@ namespace Zombie1111_uDestruction
         {
             //wait for late fix update
             yield return new WaitForFixedUpdate();
-            fixedDeltatime = Time.fixedDeltaTime;//we wanna set this at the same time we set the job deltatime
             GetRbVelocities_start();
 
         }
 
-        private Dictionary<int, ImpPair> impIdToImpPair = new();
         private float fixedDeltatime = 0.01f;
+        private ConcurrentDictionary<int, float> impIdsToIgnore = new();
 
         private class ImpPair
         {
+            public float impForceTotal;
             public Vector3 impVel;
-            public float impForceT;
             public FractureThis impFrac;
             public List<ImpPoint> impPoints;
             public Rigidbody sourceRb;
@@ -568,87 +585,252 @@ namespace Zombie1111_uDestruction
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
         {
+            //foreach (var aaaa in pairs)
+            //{
+            //    for (int i = 0; i < aaaa.contactCount; i++)
+            //    {
+            //        Debug.DrawLine(aaaa.GetPoint(i) , aaaa.GetPoint(i) + aaaa.GetNormal(i), Color.blue, 0.5f);
+            //    }
+            //}
+
+            //variabels used durring calculations
+            Dictionary<int, ImpPair> impIdToImpPair = new();
             ModifiableContactPair pair;
-            Vector3 rbDiffVel;
+            Vector3 rbForceVel;
+            Vector3 rbA_forceVel;
+            Vector3 rbB_forceVel;
             Vector3 rbA_vel;
             Vector3 rbB_vel;
+            Vector3 impNormal;
+            Vector3 impPos;
+            float impFriction;
+            float impBouncyness;
 
-            for (short pairI = 0; pairI < pairs.Length; pairI++)
+            //get all different impacts applied to every destructable object
+            for (int pairI = 0; pairI < pairs.Length; pairI++)
             {
                 pair = pairs[pairI];
 
-                CalcImpPair(pair.colliderInstanceID, pair.bodyInstanceID, pair.otherColliderInstanceID, pair.otherBodyInstanceID, 0, pairI);
-                //CalcImpPair(pair.otherColliderInstanceID, pair.otherBodyInstanceID, pair.colliderInstanceID, pair.bodyInstanceID, 1, pairI);
-
-                ////debug
-                //for (int i = 0; i < pair.contactCount; i++)
-                //{
-                //    Vector3 pos = pair.GetPoint(i);
-                //    Debug.DrawLine(pos, pos + pair.GetNormal(i), Color.magenta, 1.0f);
-                //}
-                
-                if (rbInstancIdToJgrvIndex.TryGetValue(pair.bodyInstanceID, out int rbI) == true)
-                {
-                    //Debug.Log("vel " + jGRV_job.rb_posData[rbI].rb_velocity.magnitude + " ang " + jGRV_job.rb_posData[rbI].rb_angularVel.magnitude + " rbI " + rbI);
-                    //debug get vel
-                    FractureHelperFunc.GetObjectVelocityAtPoint(
-                        jGRV_job.rb_posData[rbI].rbWToLPrev,
-                        jGRV_job.rb_posData[rbI].rbLToWNow,
-                        pair.GetPoint(0), fixedDeltatime
-                        );
-                }
-
-                if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out rbI) == true)
-                {
-                    //Debug.Log("vel " + jGRV_job.rb_posData[rbI].rb_velocity.magnitude + " ang " + jGRV_job.rb_posData[rbI].rb_angularVel.magnitude + " rbI " + rbI);
-                    FractureHelperFunc.GetObjectVelocityAtPoint(
-                         jGRV_job.rb_posData[rbI].rbWToLPrev,
-                         jGRV_job.rb_posData[rbI].rbLToWNow,
-                         pair.GetPoint(0), fixedDeltatime
-                         );
-                }
+                CalcImpPair();             
             }
 
-            void CalcImpPair(int colId, int rbId, int subColId, int subRbId, byte idOffset, short pairI)
+            //compute impacts and notify destruction system about them
+            foreach (int impId in impIdToImpPair.Keys)
             {
-                Debug.Log(rbId + " " + subRbId);
+                //get impPair
+                ImpPair iPair = impIdToImpPair[impId];
 
-                //create a ImpPair for this pair
-                int pairKey = rbId + subRbId + idOffset;
-                if (impIdToImpPair.TryGetValue(pairKey, out ImpPair impPair) == false)
+                //normlize impact forces
+                float maxImp = float.MinValue;
+                int maxImpI = 0;
+
+                for (int i = 0; i < iPair.impPoints.Count; i++)
                 {
-                    ////When impPair does not already exist, check if this is valid imp and create new impPair
-                    ////get rigidbody velocity
-                    //if (rbInstancIdToJgrvIndex.TryGetValue(rbId, out int rbI) == true) rbA_vel = FractureHelperFunc.GetObjectVelocityAtPoint(
-                    //    jGRV_job.rb_posData[rbI].rb_centerW,
-                    //    jGRV_job.rb_posData[rbI].rb_velocity,
-                    //    jGRV_job.rb_posData[rbI].rb_angularVel,
-                    //    pair.GetPoint(0));
-                    //else rbA_vel = Vector3.zero;
+                    if (iPair.impPoints[i].force > maxImp)
+                    {
+                        maxImp = iPair.impPoints[i].force;
+                        maxImpI = i;
+                    }
 
-                    //if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out rbI) == true) rbB_vel = FractureHelperFunc.GetObjectVelocityAtPoint(
-                    //     jGRV_job.rb_posData[rbI].rb_centerW,
-                    //     jGRV_job.rb_posData[rbI].rb_velocity,
-                    //     jGRV_job.rb_posData[rbI].rb_angularVel,
-                    //     pair.GetPoint(0));
-                    //else rbB_vel = Vector3.zero;
-                    //
-                    //rbDiffVel = rbB_vel.sqrMagnitude > rbA_vel.sqrMagnitude ? (rbB_vel - rbA_vel) : (rbA_vel - rbB_vel);
+                    iPair.impPoints[i].force /= iPair.impForceTotal;
                 }
+
+                for (int i = 0; i < iPair.impPoints.Count; i++)
+                {
+                    iPair.impPoints[i].force *= maxImp;
+                }
+
+                //ignore contact if imp will most likely cause break
+                if (iPair.impFrac.GuessIfForceCanCauseBreaking(maxImp, iPair.impPoints[maxImpI].partI) == true)
+                {
+                    Debug.Log("Ignore " + maxImp);
+                    foreach (int pairI in iPair.pairIndexes)
+                    {
+                        for (int conI = 0; conI < pairs[pairI].contactCount; conI++)
+                        {
+                            pairs[pairI].IgnoreContact(conI);
+                        }
+                    }
+                }
+                else
+                {
+                    Debug.Log("Hit " + maxImp);
+
+                    //if imp most likely does not cause break, mark contacts between source and frac to be ignored the next few physics frames
+                    impIdsToIgnore.TryAdd(impId, 0.1f);
+                }
+
+                //notify destructable object about impact
             }
 
 
-           
-            //
-            //if (partColsInstanceId.TryGetValue(pair.colliderInstanceID, out GlobalFracData partD) == true)
-            //{
-            //    Debug.Log("partI " + partD.partIndex);
-            //}
-            //
-            //if (partColsInstanceId.TryGetValue(pair.otherColliderInstanceID, out partD) == true)
-            //{
-            //    Debug.Log("partI " + partD.partIndex);
-            //}
+            void CalcImpPair()
+            {
+                //get the destructable object we hit, or return if we did not hit one
+                if (partColsInstanceId.TryGetValue(pair.colliderInstanceID, out GlobalFracData fracD_a) == true
+                    && fracD_a.fracThis.structs_parentI[fracD_a.partIndex] < 0) fracD_a = null;
+
+                if (partColsInstanceId.TryGetValue(pair.otherColliderInstanceID, out GlobalFracData fracD_b) == true
+                                   && fracD_b.fracThis.structs_parentI[fracD_b.partIndex] < 0) fracD_b = null;
+
+                if (fracD_a == null && fracD_b == null) return;
+
+                for (int contI = 0; contI < pair.contactCount; contI++)
+                {
+                    //get pair conctact info
+                    impNormal = -pair.GetNormal(contI);
+                    impPos = pair.GetPoint(contI);
+                    impFriction = pair.GetDynamicFriction(contI);
+                    impBouncyness = pair.GetBounciness(contI);
+
+                    //Get rigidbody velocity
+                    rbA_vel = CalcRigidbodyVel(pair.bodyInstanceID, out int rbI_a, out float norrDiff);
+                    rbA_forceVel = rbA_vel * norrDiff;
+
+                    rbB_vel = CalcRigidbodyVel(pair.otherBodyInstanceID, out int rbI_b, out norrDiff);
+                    rbB_forceVel = rbB_vel * norrDiff;
+                    bool rbA_causedImp = false;
+                    bool rbB_causedImp = false;
+
+                    if (rbA_forceVel.sqrMagnitude > rbB_forceVel.sqrMagnitude)
+                    {
+                        rbForceVel = rbA_forceVel - rbB_forceVel;
+                        if (rbForceVel.sqrMagnitude < FracGlobalSettings.minimumImpactVelocity) continue;
+
+                        rbA_causedImp = true;
+                        if (rbB_vel.sqrMagnitude > FracGlobalSettings.minimumImpactVelocity && Vector3.Dot(rbA_vel.normalized, rbB_vel.normalized) < 0.0f)
+                        {
+                            rbB_causedImp = true;
+                        }
+                    }
+                    else
+                    {
+                        rbForceVel = rbB_forceVel - rbA_forceVel;
+                        if (rbForceVel.sqrMagnitude < FracGlobalSettings.minimumImpactVelocity) continue;
+
+                        rbB_causedImp = true;
+                        if (rbA_vel.sqrMagnitude > FracGlobalSettings.minimumImpactVelocity && Vector3.Dot(rbB_vel.normalized, rbA_vel.normalized) < 0.0f)
+                        {
+                            rbA_causedImp = true;
+                        }
+                    }
+
+                    //Get impact force and source
+                    //The force applied to X is the relative velocity between X and Y multiplied by the impact angle, mass and stenght(How easy it breaks+deform) of Y
+
+
+                    //If force applied aint strong enough to break the weakest material, dont ignore col
+                    //If X hit Y. Y get motion in X direction and X get motion in X opposite direction.
+                    //X hit Y if X has a higher velocity or X velocity is the opposite of Y velocity
+
+                    if (fracD_a != null)
+                    {
+                        float rbA_forceApplied = Mathf.Min(
+                            rbForceVel.magnitude * fracD_a.fracThis.allParents[fracD_a.fracThis.structs_parentI[fracD_a.partIndex]].parentMass,
+                            GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness));
+                        
+                        CalcImpContact(fracD_a, rbA_causedImp == true ? -rbA_vel : rbB_vel, rbA_forceApplied, rbI_b, 0);
+                    }
+
+                    if (fracD_b != null)
+                    {
+                        float rbB_forceApplied = Mathf.Min(
+                            rbForceVel.magnitude * fracD_b.fracThis.allParents[fracD_b.fracThis.structs_parentI[fracD_b.partIndex]].parentMass,
+                            GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness));
+
+                        CalcImpContact(fracD_b, rbB_causedImp == true ? -rbB_vel : rbA_vel, rbB_forceApplied, rbI_a, 1);
+                    }
+                }
+            }
+
+            Vector3 CalcRigidbodyVel(int bodyId, out int rbI, out float norDiff)
+            {
+                Vector3 rbVel;
+
+                if (rbInstancIdToJgrvIndex.TryGetValue(bodyId, out rbI) == true)
+                {
+                    rbVel = FractureHelperFunc.GetObjectVelocityAtPoint(
+                            jGRV_job.rb_posData[rbI].rbWToLPrev,
+                            jGRV_job.rb_posData[rbI].rbLToWNow,
+                            impPos, fixedDeltatime
+                            );
+
+                    norDiff = Vector3.Dot(impNormal, rbVel.normalized);
+                    //Normals are bad for fast moving objects (Unless using continues collision) This is because collision does
+                    //not happen until obj is inside frac causing it to use normals from the inside
+                    //may be worth looking into alternative method, at least option to change normal influense.
+                    //Maybe get a plane from all impact points and use plane normal?
+                    //Debug.DrawLine(impPos, impPos + impNormal, Color.blue,0.5f);
+
+                    if (norDiff < 0.0f)
+                    {
+                        //if (norDiff < -0.1f) norDiff = -69.0f;//make sure it stays <0.0f when adding friction
+                        //else norDiff = 0.0f;
+                        norDiff = 0.0f;
+                    }
+
+                    norDiff = Mathf.Clamp01(norDiff + (impFriction * norDiff));
+                }
+                else
+                {
+                    rbI = -1;
+                    norDiff = 0.0f;
+                    rbVel = Vector3.zero;
+                }
+
+                return rbVel;
+            }
+
+            void CalcImpContact(GlobalFracData fracD, Vector3 impactVel, float forceApplied, int otherRbI, byte idOffset)
+            {
+                //Ignore impact if too weak
+                if (forceApplied < FracGlobalSettings.minimumImpactForce) return;
+
+                //get or create impPair
+                int thisImpId = pair.bodyInstanceID + pair.otherBodyInstanceID + idOffset;
+                if (impIdsToIgnore.ContainsKey(thisImpId) == true) return;//return if imp should be ignored
+
+                Debug.DrawLine(impPos, impPos + impactVel, Color.red, 0.1f);
+                if (impIdToImpPair.TryGetValue(thisImpId, out ImpPair impPair) == false)
+                {
+                    impPair = new()
+                    {
+                        impForceTotal = 0.0f,
+                        impFrac = fracD.fracThis,
+                        impPoints = new(),
+                        pairIndexes = new(),
+                        impVel = Vector3.zero,
+                        sourceRb = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI].rb
+                    };
+                }
+
+                if (impPair.impVel.sqrMagnitude < impactVel.sqrMagnitude) impPair.impVel = impactVel;
+                impPair.impPoints.Add(new() { force = forceApplied, partI = fracD.partIndex });
+                impPair.impForceTotal += forceApplied;
+
+                impIdToImpPair[thisImpId] = impPair;
+            }
+
+            float GuessMaxForceConsume(Vector3 forceVel, GlobalFracData fracD_hit, int rbI_hit, float bouncyness)
+            {
+                if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceConsume(forceVel, fracD_hit.partIndex, bouncyness);
+
+                //if the opposite object is not destructable it has infinit stenght
+                if (rbI_hit < 0 || jGRV_rb_mass[rbI_hit].mass < 0.0f) return float.MaxValue;
+
+                float forceConsume = forceVel.magnitude * jGRV_rb_mass[rbI_hit].mass;
+                return forceConsume + (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
+            }
+
+            float GuessMaxForceApply(Vector3 forceVel, GlobalFracData fracD_hit, int rbI_hit, float bouncyness)
+            {
+                if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceApplied(forceVel, fracD_hit.partIndex, bouncyness);
+
+                //if the opposite object is not destructable it has infinit stenght
+                if (rbI_hit < 0) return float.MaxValue;
+                float forceConsume = forceVel.magnitude * Mathf.Abs(jGRV_rb_mass[rbI_hit].mass);
+                return forceConsume - (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
+            }
         }
         #endregion CollisionHandling
     }

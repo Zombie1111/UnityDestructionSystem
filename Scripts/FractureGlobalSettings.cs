@@ -18,5 +18,8 @@ namespace Zombie1111_uDestruction
         public const float worldScale = 1.0f;
         public const bool syncFixedTimestepWithFps = false;
         public const bool addAllActiveRigidbodiesOnLoad = true;
+        public const float minimumImpactForce = 5.0f;
+        public const float minimumImpactVelocity = 0.1f;
+        public const float bouncynessEnergyConsumption = 1.0f;
     }
 }
