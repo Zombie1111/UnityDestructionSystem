@@ -16,6 +16,10 @@ using UnityEngine.Jobs;
 using Unity.Burst;
 using UnityEngine.Rendering;
 using UnityEngine.UIElements;
+using System.Collections.Concurrent;
+using JetBrains.Annotations;
+using Unity.Collections.LowLevel.Unsafe;
+using System.Reflection;
 
 namespace Zombie1111_uDestruction
 {
@@ -128,7 +132,7 @@ namespace Zombie1111_uDestruction
 #if UNITY_EDITOR
         [Space(10)]
         [Header("Debug")]
-        [SerializeField][Tooltip("Only works at runtime")] private DebugMode debugMode = DebugMode.none;
+        [SerializeField][Tooltip("Does not work at runtime")] private DebugMode debugMode = DebugMode.none;
 
         private enum DebugMode
         {
@@ -141,8 +145,14 @@ namespace Zombie1111_uDestruction
         public Transform debugTrans;
         public Vector3 debugPos;
 
+        NativeList<int> debugLL;
+
         private void OnDrawGizmos()
         {
+            if (debugLL.IsCreated == false) debugLL = new NativeList<int>(Allocator.Persistent) { 23, 45, 42 };
+            debugLL.AsArray();
+            //Debug.Log(debugLL[0]);
+            debugLL.Dispose();
             //Do not run while playing
             if (Application.isPlaying == true) return;
 
@@ -164,14 +174,16 @@ namespace Zombie1111_uDestruction
             GlobalUpdate();
 
             if (fractureIsValid == false) return;
-            ComputeDestruction_end();
+            //ComputeDestruction_end();
             GetTransformData_start();
             GetTransformData_end(); //send skin+def to gpu happens inside this
-            ComputeDestruction_start();
+            //ComputeDestruction_start();
         }
 
         private void OnDrawGizmosSelected()
         {
+            if (Application.isPlaying == true) return;
+
             //draw selected group id
             if (visualizedGroupId < 0 || useGroupIds == false || fracRend != null)
             {
@@ -217,8 +229,8 @@ namespace Zombie1111_uDestruction
 
                 for (int structI = 0; structI < allParts.Count; structI++)
                 {
-                    sPos = allParts[structI].trans.localToWorldMatrix.MultiplyPoint(structs_posL[structI]);
-                    if (partsKinematicStatus.Contains(structI) == true)
+                    sPos = allParts[structI].trans.localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
+                    if (jCDW_job.kinematicPartIndexes.Contains(structI) == true)
                     {
                         if (prevWasKind == false)
                         {
@@ -237,7 +249,7 @@ namespace Zombie1111_uDestruction
 
                     foreach (int nStructI in allParts[structI].neighbourStructs)
                     {
-                        Gizmos.DrawLine(allParts[nStructI].trans.localToWorldMatrix.MultiplyPoint(structs_posL[nStructI]),
+                        Gizmos.DrawLine(allParts[nStructI].trans.localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[nStructI]),
                             sPos);
                         //Gizmos.DrawLine(allParts[structI].trans.position, allParts[nStructI].trans.position);
                     }
@@ -552,13 +564,16 @@ namespace Zombie1111_uDestruction
             allParts = new();
             allParents = new();
             partsDefualtData = new();
-            partsKinematicStatus = new();
             parentsThatNeedsUpdating = new();
-            structs_posL = new();
-            structs_parentI = new();
             desWeights = new();
             syncFR_modifiedPartsI = new();
             ClearUsedGpuAndCpuMemory();
+            jCDW_job = new()
+            {
+                structPosL = new NativeList<Vector3>(Allocator.Persistent),
+                partsParentI = new NativeList<int>(Allocator.Persistent),
+                kinematicPartIndexes = new NativeHashSet<int>(0, Allocator.Persistent)
+            };
 
             if (didChangeAnything == true) EditorUtility.SetDirty(objToUse);
             if (doSave == false) return didChangeAnything;
@@ -1393,16 +1408,17 @@ namespace Zombie1111_uDestruction
                     fracFilter.sharedMesh = mesh;
 
                     //sync structs pos and parents
-                    buf_structs_parentI = new ComputeBuffer(structs_parentI.Count,
+                    buf_structs_parentI = new ComputeBuffer(jCDW_job.partsParentI.Length,
                         sizeof(int));
-                    buf_structs_posL = new ComputeBuffer(structs_posL.Count,
+                    buf_structs_posL = new ComputeBuffer(jCDW_job.structPosL.Length,
                         sizeof(float) * 3);
-                    buf_structs_posLPrev = new ComputeBuffer(structs_posL.Count,
+                    buf_structs_posLPrev = new ComputeBuffer(jCDW_job.structPosL.Length,
                         sizeof(float) * 3);
 
-                    buf_structs_parentI.SetData(structs_parentI);
-                    buf_structs_posL.SetData(structs_posL);
-                    buf_structs_posLPrev.SetData(structs_posL);
+                    buf_structs_parentI.SetData(jCDW_job.partsParentI.AsArray());
+                    //buf_structs_parentI.SetData(jCDW_job.partsParentI.ToArray());
+                    buf_structs_posL.SetData(jCDW_job.structPosL.AsArray());
+                    buf_structs_posLPrev.SetData(jCDW_job.structPosL.AsArray());
                     computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "structs_parentI", buf_structs_parentI);
                     computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "structs_posL", buf_structs_posL);
                     computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "structs_posLPrev", buf_structs_posLPrev);
@@ -1722,8 +1738,8 @@ namespace Zombie1111_uDestruction
             newPart.trans.name = newPart.trans.name.Replace("unusedPart", newPartI.ToString());
 
             //make sure everything is valid
-            if (newPartI != structs_posL.Count)
-                Debug.LogError(transform.name + " destructionStructure or parts is invalid! (part = " + newPartI + " struct = " + structs_posL.Count + ")");
+            if (newPartI != jCDW_job.structPosL.Length)
+                Debug.LogError(transform.name + " destructionStructure or parts is invalid! (part = " + newPartI + " struct = " + jCDW_job.structPosL.Length + ")");
 
 
             allParts.Add(newPart);
@@ -1884,8 +1900,8 @@ namespace Zombie1111_uDestruction
                 partGroupD = GetGroupIdDataFromIntId(newPart.groupIdInt);
 
                 //set part parent
-                structs_parentI.Add(-6969);
-                if (newPartParentI <= 0 && nearPartIndexes.Count > 0) newPartParentI = structs_parentI[nearPartIndexes[0]];
+                jCDW_job.partsParentI.Add(-6969);
+                if (newPartParentI <= 0 && nearPartIndexes.Count > 0) newPartParentI = jCDW_job.partsParentI[nearPartIndexes[0]];
                 if (newPartParentI < 0) newPartParentI = CreateNewParent(null);
                 SetPartParent(newPartI, newPartParentI);
 
@@ -1893,12 +1909,12 @@ namespace Zombie1111_uDestruction
                 if (partIsKin == true || partGroupD.isKinematic == true) SetPartKinematicStatus(newPartI, true);
 
                 //get what nearPartIndexes is actually valid neighbours and create structure for the new part
-                structs_posL.Add(allParts[newPartI].trans.worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)));
+                jCDW_job.structPosL.Add(allParts[newPartI].trans.worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)));
 
                 foreach (short nearPartI in nearPartIndexes)
                 {
                     //ignore if this neighbour part is invalid
-                    if (structs_parentI[newPartI] != structs_parentI[nearPartI]
+                    if (jCDW_job.partsParentI[newPartI] != jCDW_job.partsParentI[nearPartI]
                         || FractureHelperFunc.Gd_isPartLinkedWithPart(newPart, allParts[nearPartI]) == false) continue;
 
                     //add neighbours to newPart struct and add newPart to neighbours
@@ -1917,14 +1933,14 @@ namespace Zombie1111_uDestruction
         public void SetPartKinematicStatus(int partI, bool newKinematicStatus)
         {
             //return if already has the given kinematicStatus
-            if (partsKinematicStatus.Contains(partI) == newKinematicStatus) return;
+            if (jCDW_job.kinematicPartIndexes.Contains(partI) == newKinematicStatus) return;
 
             //add/remove from kinematic parts list
-            if (newKinematicStatus == true) partsKinematicStatus.Add(partI);
-            else partsKinematicStatus.Remove(partI);
+            if (newKinematicStatus == true) jCDW_job.kinematicPartIndexes.Add(partI);
+            else jCDW_job.kinematicPartIndexes.Remove(partI);
 
             //update the parent the part uses
-            int parentI = structs_parentI[partI];
+            int parentI = jCDW_job.partsParentI[partI];
 
             if (parentI >= 0)
             {
@@ -1966,7 +1982,7 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private void SetPartParent(short partI, int newParentI)
         {
-            int partParentI = structs_parentI[partI];
+            int partParentI = jCDW_job.partsParentI[partI];
             if (partParentI == newParentI) return;
 
             //get part groupData
@@ -1979,13 +1995,13 @@ namespace Zombie1111_uDestruction
                 allParents[partParentI].parentMass -= partGData.mass;
                 allParents[partParentI].totalBendEfficiency -= partGData.bendEfficiency;
                 allParents[partParentI].totalTransportCoEfficiency -= partGData.transportCoEfficiency;
-                if (partsKinematicStatus.Contains(partI) == true) allParents[partParentI].parentKinematic--;
+                if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[partParentI].parentKinematic--;
 
                 MarkParentAsModified(partParentI);
             }
             else FromNoParentToParent();
 
-            structs_parentI[partI] = newParentI;
+            jCDW_job.partsParentI[partI] = newParentI;
 
             //if want to remove parent
             if (newParentI < 0)
@@ -2000,7 +2016,7 @@ namespace Zombie1111_uDestruction
             allParents[newParentI].parentMass += partGData.mass;
             allParents[newParentI].totalBendEfficiency += partGData.bendEfficiency;
             allParents[newParentI].totalTransportCoEfficiency += partGData.transportCoEfficiency;
-            if (partsKinematicStatus.Contains(partI) == true) allParents[newParentI].parentKinematic++;
+            if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[newParentI].parentKinematic++;
             MarkParentAsModified(newParentI);
 
             void FromParentToNoParent()
@@ -2117,7 +2133,7 @@ namespace Zombie1111_uDestruction
 
         private Vector3 GetStructWorldPosition(int structI)
         {
-            return allParts[structI].trans.localToWorldMatrix.MultiplyPoint(structs_posL[structI]);
+            return allParts[structI].trans.localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
         }
 
         /// <summary>
@@ -2711,6 +2727,12 @@ namespace Zombie1111_uDestruction
             }
 
             if (groupDataDefualt.transportCapacity < lowestTransportCapacity) lowestTransportCapacity = groupDataDefualt.transportCapacity;
+
+            //setup compute destruction
+            jCDW_job.desSource = new NativeArray<DestructionSource>(0, Allocator.Persistent);
+            destructionSources = new();
+            destructionBodies = new();
+            destructionPairs = new();
         }
 
         private void Update()
@@ -2762,7 +2784,8 @@ namespace Zombie1111_uDestruction
             if (parentsThatNeedsUpdating.Count > 0)
             {
                 foreach (int parentI in parentsThatNeedsUpdating) UpdateParentData(parentI);
-                if (gpuIsReady == true) buf_structs_parentI.SetData(structs_parentI);
+                if (gpuIsReady == true) buf_structs_parentI.SetData(jCDW_job.partsParentI.AsArray());
+                //if (gpuIsReady == true) buf_structs_parentI.SetData(jCDW_job.partsParentI.ToArray());
                 parentsThatNeedsUpdating.Clear();
             }
 
@@ -2830,6 +2853,13 @@ namespace Zombie1111_uDestruction
             if (jGTD_job.fracBonesLToW.IsCreated == true) jGTD_job.fracBonesLToW.Dispose();
             if (jGTD_job.fracBonesPosW.IsCreated == true) jGTD_job.fracBonesPosW.Dispose();
             if (jGTD_job.fracBonesLocValue.IsCreated == true) jGTD_job.fracBonesLocValue.Dispose();
+
+            //disepose computeDestruction job
+            ComputeDestruction_end();//Make sure the job aint running
+            if (jCDW_job.structPosL.IsCreated == true) jCDW_job.structPosL.Dispose();
+            if (jCDW_job.partsParentI.IsCreated == true) jCDW_job.partsParentI.Dispose();
+            if (jCDW_job.kinematicPartIndexes.IsCreated == true) jCDW_job.kinematicPartIndexes.Dispose();
+            if (jCDW_job.desSource.IsCreated == true) jCDW_job.desSource.Dispose();
         }
 
         private int cpKernelId_ComputeSkinDef = -1;
@@ -2986,6 +3016,7 @@ namespace Zombie1111_uDestruction
         private byte des_deformedPartsIndex = 0;
         private AsyncGPUReadbackRequest gpuMeshRequest;
         private List<Vector3> gpuMeshVertexData = new();
+        private List<Rigidbody> jCDW_bodies = new();
 
         private struct GpuMeshVertex
         {
@@ -2997,63 +3028,143 @@ namespace Zombie1111_uDestruction
         /// Set to true to request gpuMesh as soon as possible
         /// </summary>
         private bool gpuMeshRequest_do = false;
+        private bool jCDW_jobIsActive = false;
 
         private void ComputeDestruction_start()
         {
+#if UNITY_EDITOR
+            if (Application.isPlaying == false)
+            {
+                Debug.LogError("Computing destruction while in editmode is not supported");
+                return;
+            }
+#endif
+
+            if (jCDW_jobIsActive == true) return;
+
+            //set job destruction sources
+            int desSLenght = jCDW_job.desSource.Length;
+            int desOCount = destructionSources.Count;
+            if (desSLenght < desOCount)
+            {
+                if (jCDW_job.desSource.IsCreated == true) jCDW_job.desSource.Dispose();
+                desSLenght = desOCount;
+                jCDW_job.desSource = new NativeArray<DestructionSource>(desSLenght, Allocator.Persistent);
+                FractureHelperFunc.SetListLenght(ref jCDW_bodies, desSLenght);
+            }
             
+            int[] deskeys = destructionSources.Keys.ToArray();
+            
+            for (int i = 0; i < desSLenght; i++)
+            {
+                //dispose previous impPoints to prevent memory leak
+                if (i >= desOCount)
+                {
+                    var source = jCDW_job.desSource[i];
+                    source.impForceTotal = -1;
+                    jCDW_job.desSource[i] = source;
+                    jCDW_bodies[i] = null;
+                }
+                else
+                {
+                    jCDW_job.desSource[i] = destructionSources[deskeys[i]];
+                    jCDW_bodies[i] = destructionBodies[deskeys[i]];
+                }
+            }
+
+            destructionSources.Clear();
+            destructionBodies.Clear();
+
+            //run the job
+            jCDW_jobIsActive = true;
+            //Debug.Log(jCDW_job.partsParentI[0]);
+            jCDW_handle = jCDW_job.Schedule();
         }
 
         private void ComputeDestruction_end()
         {
-            //debug
-            int bestI = 0;
-            float bestD = float.MaxValue;
-            float cDis;
-            Vector3 tPos = debugTrans.position;
+            if (jCDW_jobIsActive == false) return;
 
-            for (int i = 0; i < structs_posL.Count; i++)
+            //complete the job
+            jCDW_jobIsActive = false;
+            jCDW_handle.Complete();
+            FixReadIssue(jCDW_job.partsParentI[0]);//This somehow fixes a weird bug. Dont believe me? Try removing it and you get errors when trying to destroy objects
+            static void FixReadIssue(int someth)
             {
-                cDis = Vector3.Distance(GetStructWorldPosition(i), tPos);
 
-                if (cDis < bestD)
+            }
+            //Debug.Log(jCDW_job.partsParentI[0]);
+            ////debug
+            //int bestI = 0;
+            //float bestD = float.MaxValue;
+            //float cDis;
+            //Vector3 tPos = debugTrans.position;
+            //
+            //for (int i = 0; i < jCDW_job.structPosL.Length; i++)
+            //{
+            //    cDis = Vector3.Distance(GetStructWorldPosition(i), tPos);
+            //
+            //    if (cDis < bestD)
+            //    {
+            //        bestD = cDis;
+            //        bestI = i;
+            //    }
+            //}
+            //
+            //Vector3 toMove = tPos - debugPos;
+            //if (toMove.sqrMagnitude < 0.0000001f) return;
+            //debugPos = tPos;
+            //
+            //jCDW_job.structPosL[bestI] += allParts[bestI].trans.InverseTransformDirection(toMove);
+            //
+            //wantToApplyDeformation = true;
+            //foreach (int pI in allParts[bestI].neighbourStructs)
+            //{
+            //    //Debug.Log("Added " + pI + " " + des_deformedParts[des_deformedPartsIndex].Count);
+            //    des_deformedParts[des_deformedPartsIndex].Add((short)pI);
+            //}
+            //
+            ////Debug.Log("Added " + bestI + " " + des_deformedParts[des_deformedPartsIndex].Count);
+            //des_deformedParts[des_deformedPartsIndex].Add((short)bestI);
+            //
+            ////debug end
+        }
+
+        public ComputeDestruction_work jCDW_job;
+        private JobHandle jCDW_handle;
+
+        public struct ComputeDestruction_work : IJob
+        {
+            //solve destruction
+            public NativeList<Vector3> structPosL;
+            public NativeList<int> partsParentI;
+            public NativeHashSet<int> kinematicPartIndexes;
+            public NativeArray<DestructionSource> desSource;
+
+            public unsafe void Execute()
+            {
+
+                for (int sourceI = 0; sourceI < desSource.Length; sourceI++)
                 {
-                    bestD = cDis;
-                    bestI = i;
+                    NativeArray<DestructionPoint> desPoints = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<DestructionPoint>(
+                                        desSource[sourceI].desPoints_ptr, desSource[sourceI].desPoints_lenght, Allocator.Persistent);
                 }
             }
-
-            Vector3 toMove = tPos - debugPos;
-            if (toMove.sqrMagnitude < 0.0000001f) return;
-            debugPos = tPos;
-
-            structs_posL[bestI] += allParts[bestI].trans.InverseTransformDirection(toMove);
-
-            wantToApplyDeformation = true;
-            foreach (int pI in allParts[bestI].neighbourStructs)
-            {
-                //Debug.Log("Added " + pI + " " + des_deformedParts[des_deformedPartsIndex].Count);
-                des_deformedParts[des_deformedPartsIndex].Add((short)pI);
-            }
-
-            //Debug.Log("Added " + bestI + " " + des_deformedParts[des_deformedPartsIndex].Count);
-            des_deformedParts[des_deformedPartsIndex].Add((short)bestI);
-
-            //debug end
         }
 
         private void ApplySkinAndDef()
         {
             //return if not ready
             if (gpuIsReady == false) return;
-            
+
             //compute skinning and deformation on gpu
-            if (wantToApplyDeformation == true) buf_structs_posL.SetData(structs_posL);
+            if (wantToApplyDeformation == true) buf_structs_posL.SetData(jCDW_job.structPosL.AsArray());
             computeDestructionSolver.SetMatrix("fracRendWToL", fracRend.worldToLocalMatrix);
             computeDestructionSolver.Dispatch(cpKernelId_ComputeSkinDef, fracRendDividedVerCount, 1, 1);
 
             if (wantToApplyDeformation == true)
             {
-                buf_structs_posLPrev.SetData(structs_posL);
+                buf_structs_posLPrev.SetData(jCDW_job.structPosL.AsArray());//We could also always store it as array and resize it when needed, depends on how fast AsArray() is
                 if (des_deformedParts[des_deformedPartsIndex].Count > 0) gpuMeshRequest_do = true;
                 wantToApplyDeformation = false;
             }
@@ -3107,6 +3218,95 @@ namespace Zombie1111_uDestruction
             }
         }
 
+        /// <summary>
+        /// The rb that caused the impact, null if caused by self or misc, always contains the same keys as destructionSources
+        /// </summary>
+        private ConcurrentDictionary<int, Rigidbody> destructionBodies;
+        private ConcurrentDictionary<int, NativeArray<DestructionPoint>> destructionPairs;
+        private ConcurrentDictionary<int, DestructionSource> destructionSources;
+
+        public unsafe struct DestructionSource
+        {
+            /// <summary>
+            /// The velocity that can be applied at most to parts that breaks and their parent, the opposite of this should be applied to rbSource(If any)
+            /// </summary>
+            public Vector3 impVel;
+
+            /// <summary>
+            /// The total force applied to this object (Should be equal to all impPoints_force added togehter)
+            /// </summary>
+            public float impForceTotal;
+
+            public void* desPoints_ptr;
+            public int desPoints_lenght;
+        }
+
+        public struct DestructionPoint
+        {
+            public float force;
+            public int partI;
+        }
+
+        /// <summary>
+        /// Applies force as damage to the object the next physics frame
+        /// </summary>
+        /// <param name="impactPoints">The nativeArray must have a Persistent allocator, it will be disposed by the destruction system. DO NOT DISPOSE IT ANYWHERE ELSE</param>
+        /// <param name="sourceRb">The rb that caused the impact, null if caused by self or misc</param>
+        /// <param name="impactId">Used to identify different impact sources, if == 0 a unique id will be given</param>
+        /// <param name="canOverwrite">If impactId already exists, true == overwrite existing source, false == merge with existing source</param>
+        public unsafe void RegisterImpact(DestructionSource impactData, NativeArray<DestructionPoint> impactPoints, Rigidbody sourceRb, int impactId = 0, bool canOverwrite = false)
+        {
+            impactData.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impactPoints);
+            impactData.desPoints_lenght = impactPoints.Length;
+
+            if (impactId == 0) impactId = destructionSources.Count;
+            if (destructionSources.TryAdd(impactId, impactData) == false)
+            {
+                if (canOverwrite == true) destructionSources.TryUpdate(impactId, impactData, impactData);
+                else
+                {
+                    //merge the sources if cant overwrite
+                    destructionSources.TryGetValue(impactId, out DestructionSource impD);
+                    destructionPairs.TryGetValue(impactId, out NativeArray<DestructionPoint> impP);
+
+                    int bCount = impactPoints.Length + impP.Length;
+                    impP.ResizeArray(bCount);
+
+                    int offset = impP.Length - bCount;
+                    impactPoints.CopyTo(impP.GetSubArray(offset, bCount));
+
+
+                    float tempTotalForce = impD.impForceTotal + impactData.impForceTotal;
+
+                    if (impactData.impForceTotal > impD.impForceTotal)
+                    {
+                        impD.impForceTotal = impactData.impForceTotal;
+                        impD.impVel = impactData.impVel;
+                        destructionBodies.TryUpdate(impactId, sourceRb, sourceRb);
+                        //impD.sourceRb = impactData.sourceRb;//Should always be the same but we update it anyways just in case
+                    }
+
+                    for (int i = 0; i < impP.Length; i++)
+                    {
+                        DestructionPoint desP = impP[i];
+                        desP.force /= tempTotalForce;
+                        desP.force *= impD.impForceTotal;
+                        impP[i] = desP;
+                    }
+
+                    impD.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impP);//We must update the pointer since we created a new instance
+                    impD.desPoints_lenght = impP.Length;
+                    destructionSources.TryUpdate(impactId, impD, impD);
+                    destructionPairs.TryUpdate(impactId, impP, impP);
+                }
+            }
+            else
+            {
+                destructionPairs.TryAdd(impactId, impactPoints);//In theory we dont need to store impactPoints anywhere, since its Persistant and we dispose it by a pointer
+                destructionBodies.TryAdd(impactId, sourceRb);
+            }
+        }
+
         #endregion ComputeDestruction
 
 
@@ -3127,12 +3327,12 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Used to compute destruction, the position of the struct in its part localspace
         /// </summary>
-        [System.NonSerialized] public List<Vector3> structs_posL = new();
+        //[System.NonSerialized] public NativeList<Vector3> structs_posL = new();
 
         /// <summary>
         /// Used to compute destruction, the parent part X has
         /// </summary>
-        [System.NonSerialized] public List<int> structs_parentI = new();
+        //[System.NonSerialized] public NativeList<int> structs_parentI = new();
 
         /// <summary>
         /// Contains the index of all parents that should be updated the next frame
@@ -3147,7 +3347,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Contains all part indexes that is always kinematic (Kinematic overlap or kinematic groupData)
         /// </summary>
-        [System.NonSerialized] public HashSet<int> partsKinematicStatus = new();
+        //[System.NonSerialized] public NativeHashSet<int> partsKinematicStatus = new();
 
         /// <summary>
         /// The global handler, must always exists if it is fractured
@@ -3309,13 +3509,13 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public float GuessMaxForceConsume(Vector3 velocity, short partI, float bouncyness = 0.0f)
         {
-            int parentI = structs_parentI[partI];
+            int parentI = jCDW_job.partsParentI[partI];
             GroupIdData gData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
             float velSpeed = velocity.magnitude;
             if (parentI < 0)
             {
                 //if no parent, it cant break so it has infinit stenght
-                if (partsKinematicStatus.Contains(partI) == true) return float.MaxValue;
+                if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) return float.MaxValue;
 
                 velSpeed *= gData.mass;
                 velSpeed += velSpeed * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
@@ -3339,13 +3539,13 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public float GuessMaxForceApplied(Vector3 velocity, short partI, float bouncyness = 0.0f)
         {
-            int parentI = structs_parentI[partI];
+            int parentI = jCDW_job.partsParentI[partI];
             GroupIdData gData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
             float velSpeed = velocity.magnitude;
             if (parentI < 0)
             {
                 //if no parent, it cant break so it has infinit stenght
-                if (partsKinematicStatus.Contains(partI) == true) return float.MaxValue;
+                if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) return float.MaxValue;
 
                 velSpeed *= gData.mass;
                 velSpeed -= velSpeed * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
@@ -3376,7 +3576,7 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public bool GuessIfForceCanCauseBreaking(float force, int partI, float bouncyness = 0.0f)
         {
-            int parentI = structs_parentI[partI];
+            int parentI = jCDW_job.partsParentI[partI];
             int parentPartCount = allParents[parentI].partIndexes.Count;
             force -= force * (allParents[parentI].totalBendEfficiency / parentPartCount);//Should bending count as breaking? Its currently not
             force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;

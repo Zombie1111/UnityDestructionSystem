@@ -4,6 +4,9 @@ using UnityEngine;
 using JetBrains.Annotations;
 using Unity.VisualScripting.FullSerializer;
 using System.Linq;
+using Unity.Collections;
+
+
 
 
 
@@ -178,11 +181,26 @@ namespace Zombie1111_uDestruction
 
             //save the data
             fracSavedData.id += 1;
-            fracSavedData.saved_kinematicPartsStatus = saveFrom.partsKinematicStatus.ToList();
+            fracSavedData.saved_kinematicPartsStatus = new();
+            foreach (int partI in saveFrom.jCDW_job.kinematicPartIndexes)
+            {
+                fracSavedData.saved_kinematicPartsStatus.Add(partI);
+            }
+
             fracSavedData.saved_allParts = saveFrom.allParts.ToArray();
             fracSavedData.saved_rendVertexCount = saveFrom.fracFilter.sharedMesh.vertexCount;
-            fracSavedData.saved_structs_posL = saveFrom.structs_posL.ToList();
-            fracSavedData.saved_structs_parentI = saveFrom.structs_parentI.ToList();
+            fracSavedData.saved_structs_posL = new();
+            foreach (Vector3 pos in saveFrom.jCDW_job.structPosL)
+            {
+                fracSavedData.saved_structs_posL.Add(pos);
+            }
+
+            fracSavedData.saved_structs_parentI = new();
+            foreach (int parentI in saveFrom.jCDW_job.partsParentI)
+            {
+                fracSavedData.saved_structs_parentI.Add(parentI);
+            }
+
             fracSavedData.saved_desWeights = saveFrom.desWeights.ToList();
             fracSavedData.saved_fracWeightsI = saveFrom.fr_fracWeightsI.ToList();
             fracSavedData.saved_fr_verToPartI = saveFrom.fr_verToPartI.ToList();
@@ -251,9 +269,17 @@ namespace Zombie1111_uDestruction
             }
 
             //Apply saved data to the provided FractureThis instance
-            loadTo.partsKinematicStatus = fracSavedData.saved_kinematicPartsStatus.ToHashSet();
-            loadTo.structs_posL = fracSavedData.saved_structs_posL.ToList();
-            loadTo.structs_parentI = fracSavedData.saved_structs_parentI.ToList();
+            loadTo.jCDW_job = new()
+            {
+                structPosL = fracSavedData.saved_structs_posL.ToNativeList(Allocator.Persistent),
+                partsParentI = fracSavedData.saved_structs_parentI.ToNativeList(Allocator.Persistent),
+                kinematicPartIndexes = new(0, Allocator.Persistent)
+            };
+            foreach (int partI in fracSavedData.saved_kinematicPartsStatus)
+            {
+                loadTo.jCDW_job.kinematicPartIndexes.Add(partI);
+            }
+
             loadTo.allParts = fracSavedData.saved_allParts.ToList();
             loadTo.desWeights = fracSavedData.saved_desWeights.ToList();
             loadTo.fr_fracWeightsI = fracSavedData.saved_fracWeightsI.ToList();
