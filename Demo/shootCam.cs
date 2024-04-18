@@ -74,7 +74,7 @@ namespace TrueTrace
                 newO.transform.localScale *= 0.2f;
                 newO.transform.position = plPos;
                 Rigidbody rb = newO.AddComponent<Rigidbody>();
-                rb.collisionDetectionMode = CollisionDetectionMode.Discrete;
+                rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 rb.velocity = plDir * 20.0f;
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
                 rb.mass = 1.0f;

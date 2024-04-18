@@ -20,9 +20,12 @@ using System.Collections.Concurrent;
 using JetBrains.Annotations;
 using Unity.Collections.LowLevel.Unsafe;
 using System.Reflection;
+using UnityEditor.Compilation;
+using UnityEngine.SceneManagement;
 
 namespace Zombie1111_uDestruction
 {
+    [ExecuteInEditMode]
     public class FractureThis : MonoBehaviour
     {
 
@@ -33,6 +36,13 @@ namespace Zombie1111_uDestruction
         [CustomEditor(typeof(FractureThis))]
         public class YourScriptEditor : Editor
         {
+            private static readonly string[] noFracSpecial = new string[]
+            {
+                "m_Script", "debugMode", "ogData", "saved_allPartsCol", "saved_fracId", "shouldBeFractured", "partMaxExtent", "fracFilter",
+                "fracRend", "fr_bones", "partBoneOffset", "isRealSkinnedM", "allParents", "partsDefualtData", "globalHandler", "fracPrefabType"
+               
+            };
+
             public override void OnInspectorGUI()
             {
                 serializedObject.Update();
@@ -42,20 +52,47 @@ namespace Zombie1111_uDestruction
                 EditorGUILayout.Space();
 
 
-                if (GUILayout.Button("Generate Fracture"))
+                if (yourScript.fractureIsValid == true)
                 {
-                    yourScript.Gen_fractureObject();
+                    if (yourScript.fracPrefabType == 0)
+                    {
+                        //regenerate does not work for prefabs since it does not realize that the fracture has been regenerated, too lazy to actually fix
+                        if (GUILayout.Button("Regenerate Fracture"))
+                        {
+                            yourScript.Gen_fractureObject();
+                        }
+                    }
+
+                    if (GUILayout.Button("Remove Fracture"))
+                    {
+                        yourScript.Gen_removeFracture();
+                    }
+
+                    EditorGUILayout.Space();
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("debugMode"), true);
+                    EditorGUILayout.HelpBox("Properties cannot be edited while fractured", MessageType.Warning);
+
+                    GUI.enabled = false;
+                    DrawPropertiesExcluding(serializedObject, new string[] { "m_Script", "debugMode" });
+                    GUI.enabled = true;
+                }
+                else
+                {
+                    if (GUILayout.Button("Generate Fracture"))
+                    {
+                        yourScript.Gen_fractureObject();
+                    }
+
+                    DrawPropertiesExcluding(serializedObject, noFracSpecial);
+                    GUI.enabled = false;
+                    for (int i = 1; i < noFracSpecial.Length; i++)
+                    {
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty(noFracSpecial[i]), true);
+                    }
+                    GUI.enabled = true;
                 }
 
-                if (GUILayout.Button("Remove Fracture"))
-                {
-                    yourScript.Gen_removeFracture();
-                }
-
-                EditorGUILayout.Space();
-
-                DrawPropertiesExcluding(serializedObject, "generateNavMesh", "stopGenerating");
-
+                //Apply changes
                 serializedObject.ApplyModifiedProperties();
             }
         }
@@ -89,7 +126,7 @@ namespace Zombie1111_uDestruction
         [Space(10)]
         [Header("Physics")]
         [SerializeField] private ColliderType colliderType = ColliderType.mesh;
-        [SerializeField] private OptPhysicsMain phyMainOptions = new();
+        public OptPhysicsMain phyMainOptions = new();
         [SerializeField] private OptPhysicsParts phyPartsOptions = new();
 
         [Space(10)]
@@ -102,7 +139,7 @@ namespace Zombie1111_uDestruction
         [Header("Material")]
         [SerializeField] private Material insideMat_fallback = null;
         [SerializeField] private string insideMat_nameAddition = "_inside";
-        [SerializeField] private DefualtGroupOptions destructionMaterial = new();
+        [SerializeField] private DefualtDesMatOptions defualtDestructionMaterial = new();
 
         [Space(10)]
         [Header("Advanced")]
@@ -112,9 +149,9 @@ namespace Zombie1111_uDestruction
         [SerializeField] private int visualizedGroupId = -1;
 #endif
         /// <summary>
-        /// Contains all groups that has overrides
+        /// Contains all destruction materials, 0 is always defualt, > 0 is for groupIds that has overrides
         /// </summary>
-        [SerializeField] private List<GroupIdData> groupDataOverrides = new();
+        [SerializeField] private List<DestructionMaterial> DestructionMaterials = new();
 
         [System.Serializable]
         public class FracVolume
@@ -147,42 +184,11 @@ namespace Zombie1111_uDestruction
 
         NativeList<int> debugLL;
 
-        private void OnDrawGizmos()
+        [System.NonSerialized] public bool eOnly_ignoreNextDraw = true;
+
+        private unsafe void OnDrawGizmosSelected()
         {
-            if (debugLL.IsCreated == false) debugLL = new NativeList<int>(Allocator.Persistent) { 23, 45, 42 };
-            debugLL.AsArray();
-            //Debug.Log(debugLL[0]);
-            debugLL.Dispose();
-            //Do not run while playing
-            if (Application.isPlaying == true) return;
-
-            //delete saveAsset if temp and globalHandler is null
-            if (globalHandler == null && saveAsset != null && AssetDatabase.GetAssetPath(saveAsset).Contains("TempFracSaveAssets") == true)
-            {
-                AssetDatabase.DeleteAsset(AssetDatabase.GetAssetPath(saveAsset));
-            }
-
-            //verify that fracRend reference the correct object
-            if (fracRend != null && fracRend.transform != transform)
-            {
-                Debug.LogError(transform.name + " fracture does not reference the correct object and will be removed (Has the script been copied?)");
-                Gen_removeFracture(false, false, false);
-                return;
-            }
-
-            //update fracture
-            GlobalUpdate();
-
-            if (fractureIsValid == false) return;
-            //ComputeDestruction_end();
-            GetTransformData_start();
-            GetTransformData_end(); //send skin+def to gpu happens inside this
-            //ComputeDestruction_start();
-        }
-
-        private void OnDrawGizmosSelected()
-        {
-            if (Application.isPlaying == true) return;
+            if (Application.isPlaying == true || eOnly_ignoreNextDraw == true) return;
 
             //draw selected group id
             if (visualizedGroupId < 0 || useGroupIds == false || fracRend != null)
@@ -221,7 +227,7 @@ namespace Zombie1111_uDestruction
         skipDrawGroups:
 
             //visualize fracture structure
-            if (debugMode == DebugMode.showStructure)
+            if (debugMode == DebugMode.showStructure && fractureIsValid == true && jCDW_job.structPosL.IsCreated == true)
             {
                 Gizmos.color = Color.red;
                 Vector3 sPos;
@@ -229,7 +235,7 @@ namespace Zombie1111_uDestruction
 
                 for (int structI = 0; structI < allParts.Count; structI++)
                 {
-                    sPos = allParts[structI].trans.localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
+                    sPos = fr_bones[structI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
                     if (jCDW_job.kinematicPartIndexes.Contains(structI) == true)
                     {
                         if (prevWasKind == false)
@@ -247,10 +253,12 @@ namespace Zombie1111_uDestruction
                         }
                     }
 
-                    foreach (int nStructI in allParts[structI].neighbourStructs)
+                    //foreach (int nStructI in allParts[structI].neighbourStructs)
+                    FracStruct fStruct = jCDW_job.fStructs[structI];
+                    for (byte neI = 0; neI < fStruct.neighbourPartI_lenght; neI++)
                     {
-                        Gizmos.DrawLine(allParts[nStructI].trans.localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[nStructI]),
-                            sPos);
+                        short nStructI = fStruct.neighbourPartI[neI];
+                        Gizmos.DrawLine(fr_bones[nStructI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[nStructI]), sPos);
                         //Gizmos.DrawLine(allParts[structI].trans.position, allParts[nStructI].trans.position);
                     }
                 }
@@ -319,7 +327,7 @@ namespace Zombie1111_uDestruction
         }
 
         [System.Serializable]
-        private class OptPhysicsMain
+        public class OptPhysicsMain
         {
             public OptMainPhysicsType mainPhysicsType = OptMainPhysicsType.overlappingIsKinematic;
             public bool useGravity = true;
@@ -337,7 +345,6 @@ namespace Zombie1111_uDestruction
             public OptPartPhysicsType partPhysicsType = OptPartPhysicsType.rigidbody_medium;
             public bool useGravity = true;
             public float massMultiplier = 4.0f;
-            public bool canRotate = true;
             public float drag = 0.0f;
             public float angularDrag = 0.05f;
             public RigidbodyInterpolation interpolate = RigidbodyInterpolation.Interpolate;
@@ -361,7 +368,7 @@ namespace Zombie1111_uDestruction
             verySimple
         }
 
-        private enum OptMainPhysicsType
+        public enum OptMainPhysicsType
         {
             overlappingIsKinematic,
             orginalIsKinematic,
@@ -381,8 +388,9 @@ namespace Zombie1111_uDestruction
         [Space(100)]
         [Header("#DONT TOUCH#")]
         [SerializeField] private OrginalObjData ogData = null;
-        public Collider[] saved_allPartsCol = new Collider[0];
+        public List<Collider> saved_allPartsCol = new();
         public int saved_fracId = -1;
+        [SerializeField] private bool shouldBeFractured = false;
 
         /// <summary>
         /// The biggest extent any part has in worldspace, does not include deformation (part.meshW.bounds.extents.XYZ)
@@ -417,6 +425,9 @@ namespace Zombie1111_uDestruction
             public Transform rootBone;
         }
 
+        /// <summary>
+        /// Saves or load data from/to save asset, return true if successful
+        /// </summary>
         private bool SaveOrLoadAsset(bool doSave)
         {
             if (saveAsset == null)
@@ -433,6 +444,7 @@ namespace Zombie1111_uDestruction
 
                 //save scene (Since the user agreed to saving before fracturing we can just save without asking)
 #if UNITY_EDITOR
+                if (globalHandler != null) globalHandler.Eonly_HasFracBeenCloned(this, true);
                 if (Application.isPlaying == false) EditorSceneManager.SaveOpenScenes();
 #endif
                 return true;
@@ -470,7 +482,6 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 #endif
-
             GameObject objToUse = gameObject;
             bool didChangeAnything = false;
             if (doSave == true) goto SkipLoadingOg;
@@ -559,8 +570,11 @@ namespace Zombie1111_uDestruction
                 DestroyImmediate(allParents[i].parentTrans.gameObject);
             }
 
+            //set debug mode to none, since debugMode can freeze if huge fracture its safer to have it always defualt to none to prevent "softlock"
+            debugMode = DebugMode.none;
+
             //clear saved variabels
-            saved_allPartsCol = new Collider[0];
+            saved_allPartsCol = new();
             allParts = new();
             allParents = new();
             partsDefualtData = new();
@@ -572,9 +586,21 @@ namespace Zombie1111_uDestruction
             {
                 structPosL = new NativeList<Vector3>(Allocator.Persistent),
                 partsParentI = new NativeList<int>(Allocator.Persistent),
-                kinematicPartIndexes = new NativeHashSet<int>(0, Allocator.Persistent)
+                kinematicPartIndexes = new NativeHashSet<int>(0, Allocator.Persistent),
+                fStructs = new NativeList<FracStruct>(Allocator.Persistent)
             };
 
+            //remove defualt desMaterial override
+            if (DestructionMaterials != null && DestructionMaterials.Count > 0
+                && (DestructionMaterials[0].affectedGroupIndexes == null || DestructionMaterials[0].affectedGroupIndexes.Count == 0)
+                && DestructionMaterials[0].desProps.transportCapacity == defualtDestructionMaterial.transportCapacity
+                && DestructionMaterials[0].objLayerBroken == defualtDestructionMaterial.objLayerBroken
+                && DestructionMaterials[0].desProps.bendEfficiency == defualtDestructionMaterial.bendEfficiency)
+            {
+                DestructionMaterials.RemoveAt(0);
+            }
+
+            //return if dont save og
             if (didChangeAnything == true) EditorUtility.SetDirty(objToUse);
             if (doSave == false) return didChangeAnything;
 
@@ -746,12 +772,23 @@ namespace Zombie1111_uDestruction
         }
 
         [System.Serializable]
+        public unsafe struct FracStruct
+        {
+            /// <summary>
+            /// The destruction material index this part uses
+            /// </summary>
+            public int desMatI;
+            public byte neighbourPartI_lenght;
+            public fixed short neighbourPartI[16];
+        }
+
+        [System.Serializable]
         public class FracPart
         {
             /// <summary>
             /// The part collider
             /// </summary>
-            public Collider col;
+            //public Collider col;
 
             /// <summary>
             /// The groupIdInt the part has, used to get what groupData the part uses
@@ -771,7 +808,7 @@ namespace Zombie1111_uDestruction
             /// <summary>
             /// The part trans
             /// </summary>
-            public Transform trans;
+            //public Transform trans;
 
             /// <summary>
             /// The vertex indexes in fracRend.sharedmesh this part uses
@@ -781,7 +818,7 @@ namespace Zombie1111_uDestruction
             /// <summary>
             /// The index of all other structs this struct is connected with
             /// </summary>
-            public List<short> neighbourStructs;
+            //public List<short> neighbourStructs;
         }
 
         [System.Serializable]
@@ -798,23 +835,54 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private bool VerifyFracture()
         {
+#if UNITY_EDITOR
+            //if prefab, overrides on this script MUST be reverted
+            if (GetFracturePrefabType() == 1)
+            {
+                string prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(gameObject);
+                PrefabUtility.RevertObjectOverride(this, InteractionMode.AutomatedAction);
+            }
+#endif
+
             fractureIsValid = false;
 
             if (fracRend == null || fracFilter == null) return false;
             if (globalHandler == null && VerifyGlobalHandler(true) == false) return false;
             if (SaveOrLoadAsset(false) == false)
             {
+                RemoveCorrupt();
                 return false;
             }
 
             if (fr_verticesL == null || fr_verticesL.Count == 0 || fr_bones == null || fr_bones.Count == 0)
             {
                 Debug.LogError(transform.name + " destruction does not have any bones or vertics");
+                RemoveCorrupt();
                 return false;
             }
 
+#if UNITY_EDITOR
+            if (Application.isPlaying == false && globalHandler != null && globalHandler.Eonly_HasFracBeenCloned(this, false) == true)
+            {
+                Debug.LogError(transform.name + " was copied while the source was fractured, please use a prefab or avoid copying fractured objects");
+                RemoveCorrupt();
+                return false;
+            }
+#endif
+
             fractureIsValid = true;
             return true;
+
+            void RemoveCorrupt()
+            {
+#if UNITY_EDITOR
+                if (Application.isPlaying == false)
+                {
+                    Gen_removeFracture(false, false, false);
+                    Debug.LogError("Removing " + transform.name + " fracture because it has become corrupt");
+                }
+#endif
+            }
         }
 
         /// <summary>
@@ -826,16 +894,16 @@ namespace Zombie1111_uDestruction
             FractureGlobalHandler[] handlers = GameObject.FindObjectsOfType<FractureGlobalHandler>(true);
             if (handlers == null || handlers.Length < 1 || handlers[0].isActiveAndEnabled == false)
             {
-                if (canLogError == true) Debug.LogError("There is no active FractureGlobalHandler script in this scene, make sure a active Gameobject has the script attatch to it");
+                if (canLogError == true) Debug.LogError("There is no active FractureGlobalHandler script in " + gameObject.scene.name + " (Scene), make sure a active Gameobject has the script attatch to it");
                 return false;
             }
             else if (handlers.Length > 1)
             {
-                if (canLogError == true) Debug.LogError("There are more than one FractureGlobalHandler script in this scene, please remove all but one and refracture all objects");
+                if (canLogError == true) Debug.LogError("There are more than one FractureGlobalHandler script in " + gameObject.scene.name + " (Scene), please remove all but one and refracture all objects");
                 return false;
             }
 
-            if (handlers[0].gameObject.scene != gameObject.scene) return false;
+            if (handlers[0].gameObject.scene != gameObject.scene) return GetFracturePrefabType() == 2;
 
             globalHandler = handlers[0];
             return true;
@@ -895,6 +963,7 @@ namespace Zombie1111_uDestruction
             //remove the fracture and save the scene
             bool didRemoveAny = Gen_loadAndMaybeSaveOgData(false);
 #if UNITY_EDITOR
+            shouldBeFractured = false;
             if (allowSave == true && Application.isPlaying == false && didRemoveAny == true) EditorSceneManager.SaveOpenScenes();
 #endif
 
@@ -935,12 +1004,18 @@ namespace Zombie1111_uDestruction
 
             bool Execute()
             {
+                //get prefab type
+                fracPrefabType = GetFracturePrefabType();
+
                 //make sure we can save the scene later, save scene
                 if (askForSavePermission == true && Gen_askIfCanSave(false) == false) return false;
 
                 //verify if we can continue with fracturing here or on prefab
                 if (UpdateProgressBar("Verifying objects") == false) return CancelFracturing();
                 if (Gen_checkIfContinueWithFrac(out bool didFracOther, isPrefabAsset) == false) return didFracOther;
+
+                //get prefab type
+                fracPrefabType = GetFracturePrefabType();
 
                 //restore orginal data
                 Gen_loadAndMaybeSaveOgData(false);
@@ -971,6 +1046,9 @@ namespace Zombie1111_uDestruction
                 CreateAndAddFObjectsFromFMeshes(partMeshesW);
 
                 //save to save asset
+#if UNITY_EDITOR
+                shouldBeFractured = true;
+#endif
                 if (UpdateProgressBar("Saving") == false) return CancelFracturing();
                 SaveOrLoadAsset(true);
 
@@ -1071,7 +1149,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// The group data to use for stuff that does not have overrides
         /// </summary>
-        private GroupIdData groupDataDefualt = new();
+        //private GroupIdData groupDataDefualt = new();
 
         /// <summary>
         /// Contains all group ids that exists in the meshes to fracture, only assigned durring fracturing
@@ -1079,21 +1157,33 @@ namespace Zombie1111_uDestruction
         private List<float>[] md_verGroupIds = new List<float>[0];
 
         [System.Serializable]
-        public class GroupIdData
+        public class DestructionMaterial
         {
             public List<int> affectedGroupIndexes = new();
             public PhysicMaterial phyMat;
             public bool isKinematic = false;
-            public float mass = 0.1f;
             public byte objLayerDefualt = 0;
             public byte objLayerBroken = 0;
-            public float transportCapacity = 100.0f;
-            public float transportCoEfficiency = 0.001f;
-            public float bendEfficiency = 0.05f;
+            public DesProperties desProps = new()
+            {
+                mass = 0.1f,
+                transportCapacity = 100.0f,
+                transportCoEfficiency = 0.001f,
+                bendEfficiency = 0.05f
+            };
+
+            [System.Serializable]
+            public struct DesProperties
+            {
+                public float mass;
+                public float transportCapacity;
+                public float transportCoEfficiency;
+                public float bendEfficiency;
+            }
         }
 
         [System.Serializable]
-        private class DefualtGroupOptions
+        private class DefualtDesMatOptions
         {
             public PhysicMaterial phyMat;
             public float mass = 0.1f;
@@ -1109,29 +1199,37 @@ namespace Zombie1111_uDestruction
         private void SetupGroupData()
         {
             //set defualt group data
-            groupDataDefualt = new()
+            DestructionMaterial defualtGData = new()
             {
                 affectedGroupIndexes = null,
-                phyMat = destructionMaterial.phyMat,
-                mass = destructionMaterial.mass,
-                objLayerBroken = destructionMaterial.objLayerBroken,
-                bendEfficiency = destructionMaterial.bendEfficiency,
-                transportCapacity = destructionMaterial.transportCapacity,
-                transportCoEfficiency = destructionMaterial.transportCoEfficiency,
+                phyMat = defualtDestructionMaterial.phyMat,
+                objLayerBroken = defualtDestructionMaterial.objLayerBroken,
                 isKinematic = false,
-                objLayerDefualt = (byte)gameObject.layer
+                objLayerDefualt = (byte)gameObject.layer,
+                desProps = new()
+                {
+                    mass = defualtDestructionMaterial.mass,
+                    bendEfficiency = defualtDestructionMaterial.bendEfficiency,
+                    transportCapacity = defualtDestructionMaterial.transportCapacity,
+                    transportCoEfficiency = defualtDestructionMaterial.transportCoEfficiency
+                }
+                
             };
+
+            DestructionMaterials.Insert(0, defualtGData);
 
             //assign groupIntIdToGroupIndex with proper keys and values
             groupIntIdToGroupIndex.Clear();
 
-            for (int i = 0; i < groupDataOverrides.Count; i++)
+            for (int overrideI = 1; overrideI < DestructionMaterials.Count; overrideI++)
             {
-                foreach (int groupI in groupDataOverrides[i].affectedGroupIndexes)
+                if (DestructionMaterials[overrideI].affectedGroupIndexes == null) continue;
+
+                foreach (int groupI in DestructionMaterials[overrideI].affectedGroupIndexes)
                 {
                     if (groupI < 0 || groupI >= md_verGroupIds.Length) continue;
 
-                    groupIntIdToGroupIndex.Add(FractureHelperFunc.Gd_getIntIdFromId(md_verGroupIds[groupI]), i);
+                    groupIntIdToGroupIndex.Add(FractureHelperFunc.Gd_getIntIdFromId(md_verGroupIds[groupI]), overrideI);
                 }
             }
         }
@@ -1224,7 +1322,7 @@ namespace Zombie1111_uDestruction
                             || defualtParentTrans == transform) break;
                         defualtParentTrans = defualtParentTrans.parent;
                     }
-
+                  
                     if (loopCount != 0) Debug.LogWarning(mainFracSource.sRend.transform.name + " cant be used as base parent because it does not have a uniform lossy scale, " + defualtParentTrans.name + " will be used as base parent instead!");
                 }
             }
@@ -1332,7 +1430,8 @@ namespace Zombie1111_uDestruction
                 //load compute shaders
                 if (computeDestructionSolver == null || cpKernelId_ComputeSkinDef < 0)
                 {
-                    computeDestructionSolver = Resources.Load<ComputeShader>("ComputeDestructionSolver");
+
+                    computeDestructionSolver = Instantiate(Resources.Load<ComputeShader>("ComputeDestructionSolver"));
                     if (computeDestructionSolver == null)
                     {
                         Debug.LogError("Expected destructionSolver compute shader to exist at path 'UltimateFracture/Resources/ComputeDestructionSolver.compute', have you deleted it?");
@@ -1349,7 +1448,7 @@ namespace Zombie1111_uDestruction
                     buf_meshData = new ComputeBuffer(fr_verticesL.Count,
                         (sizeof(float) * 6) + (sizeof(int) * 2));
 
-                    List <MeshData> newMD = new();
+                    List<MeshData> newMD = new();
                     for (int i = 0; i < fr_verticesL.Count; i++)
                     {
                         newMD.Add(new MeshData()
@@ -1445,8 +1544,6 @@ namespace Zombie1111_uDestruction
                 //UpdateFracWorldSpaceMesh(true);//Could be made much faster by only updating the vertices for the modified parts
                 //Vector3[] frWVers = fracWorldSpaceMesh.vertices;
 
-                Debug_toggleTimer();
-
                 HashSet<int> usedVers = new();
                 List<List<int>> actuallPartVers = new();
                 List<int> actuallPartVers_partI = new();
@@ -1478,8 +1575,8 @@ namespace Zombie1111_uDestruction
                             {
                                 if (usedVers.Add(vII) == false)
                                 {
-                                    Debug.LogError("How the fuck, " + vII + " " + ((skinnedVerticsW[vII] - skinnedVerticsW[vI]).sqrMagnitude < worldScaleDis) + " " +
-                                        + vI + " " + partI + " " + newVersIFracWE[vII].GetHashCode() + " " + newVersIFracWE[vI].GetHashCode());
+                                    //Debug.LogError("How the fuck, " + vII + " " + ((skinnedVerticsW[vII] - skinnedVerticsW[vI]).sqrMagnitude < worldScaleDis) + " " +
+                                    //    +vI + " " + partI + " " + newVersIFracWE[vII].GetHashCode() + " " + newVersIFracWE[vI].GetHashCode());
 
                                     FractureHelperFunc.Debug_drawBox(skinnedVerticsW[vI], 0.1f, Color.magenta, 10.0f);
                                     FractureHelperFunc.Debug_drawBox(skinnedVerticsW[vII], 0.1f, Color.red, 10.0f);
@@ -1512,8 +1609,11 @@ namespace Zombie1111_uDestruction
                     int vI = actuallPartVers[i][0];
                     int requiredFracWeI = -1;
 
-                    foreach (int nearPart in allParts[actuallPartVers_partI[i]].neighbourStructs)
+                    FracStruct fStruct = jCDW_job.fStructs[actuallPartVers_partI[i]];
+                    //foreach (int nearPart in allParts[actuallPartVers_partI[i]].neighbourStructs)
+                    for (byte neI = 0; neI < fStruct.neighbourPartI_lenght; neI++)
                     {
+                        short nearPart = fStruct.neighbourPartI[neI];
                         if (skinnedVerParts.Add(nearPart) == true) SkinPartVertics(nearPart);
 
                         foreach (int nearVI in allParts[nearPart].partMeshVerts)
@@ -1585,10 +1685,6 @@ namespace Zombie1111_uDestruction
                     }
                 }
 
-                Debug.Log(desWeights.Count + " " + fr_fracWeightsI.Count + " t " + debugTotal);
-
-                Debug_toggleTimer();
-
                 FracWeight CreateFracWeightFromPartAndV(int partI, int vI)
                 {
                     //reset weights
@@ -1600,9 +1696,11 @@ namespace Zombie1111_uDestruction
                     //add weights from each nearby struct (Get weights from distance to ver from struct)
                     AddWeightFromStruct(partI);
 
-                    foreach (int nearPI in allParts[partI].neighbourStructs)
+                    FracStruct fStruct = jCDW_job.fStructs[partI];
+                    //foreach (int nearPI in allParts[partI].neighbourStructs)
+                    for (byte neI = 0; neI < fStruct.neighbourPartI_lenght; neI++)
                     {
-                        AddWeightFromStruct(nearPI);
+                        AddWeightFromStruct(fStruct.neighbourPartI[neI]);
                     }
 
                     //Nomilize weights so total weight = 1.0f
@@ -1642,7 +1740,7 @@ namespace Zombie1111_uDestruction
             pTrans.gameObject.tag = fMesh.sourceM.sRend.gameObject.tag;
             pTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(fMesh.meshW.vertices);
             fObj.meshW = fMesh.meshW;
-            fObj.col = Gen_createPartCollider(pTrans, fObj.meshW, GetGroupIdDataFromIntId(FractureHelperFunc.Gd_getIntIdFromId(fMesh.groupId)).phyMat);
+            fObj.col = Gen_createPartCollider(pTrans, fObj.meshW, GetDesMatFromIntId(FractureHelperFunc.Gd_getIntIdFromId(fMesh.groupId)).phyMat);
 
             //get inside vers before we modify fObj.mesh
             HashSet<int> insideVers = FractureHelperFunc.GetAllVersInSubMesh(fObj.meshW, 1);
@@ -1696,10 +1794,17 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns the groupData for the given intId (Use FractureHelperFunc.Gd_getIntIdFromId() to get intId)
         /// </summary>
-        private GroupIdData GetGroupIdDataFromIntId(int intId)
+        private DestructionMaterial GetDesMatFromIntId(int intId)
         {
-            if (groupIntIdToGroupIndex.TryGetValue(intId, out int groupI) == true) return groupDataOverrides[groupI];
-            return groupDataDefualt;
+            if (groupIntIdToGroupIndex.TryGetValue(intId, out int groupI) == true) return DestructionMaterials[groupI];
+            //return groupDataDefualt;
+            return DestructionMaterials[0];
+        }
+
+        private int GetDesMatIndexFromIntId(int intId)
+        {
+            if (groupIntIdToGroupIndex.TryGetValue(intId, out int groupI) == true) return groupI;
+            return 0;
         }
 
         /// <summary>
@@ -1718,7 +1823,7 @@ namespace Zombie1111_uDestruction
             }
 
             //get global data
-            GroupIdData partGroupD;
+            DestructionMaterial partGroupD;
             //if (fObj.meshW.bounds.extents.x > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.x;
             //if (fObj.meshW.bounds.extents.y > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.y;
             //if (fObj.meshW.bounds.extents.z > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.z;
@@ -1728,30 +1833,49 @@ namespace Zombie1111_uDestruction
             {
                 groupId = fObj.groupId,
                 groupLinks = fObj.groupLinks,
-                col = fObj.col,
-                trans = fObj.col.transform,
+                //col = fObj.col,
+                //trans = fObj.col.transform,
                 partMeshVerts = new(),
-                neighbourStructs = new()
+                //neighbourStructs = new()
             };
 
+            Transform newTrans = fObj.col.transform;
             short newPartI = (short)allParts.Count;
-            newPart.trans.name = newPart.trans.name.Replace("unusedPart", newPartI.ToString());
+            newTrans.name = newTrans.name.Replace("unusedPart", newPartI.ToString());
 
             //make sure everything is valid
             if (newPartI != jCDW_job.structPosL.Length)
                 Debug.LogError(transform.name + " destructionStructure or parts is invalid! (part = " + newPartI + " struct = " + jCDW_job.structPosL.Length + ")");
 
+            //Make sure the gameobject is in the same scene as source
+            if (gameObject.scene != fObj.col.gameObject.scene)
+            {
+#if UNITY_EDITOR
+                if (Application.isPlaying == false) EditorSceneManager.MoveGameObjectToScene(fObj.col.gameObject, gameObject.scene);
+                else
+#endif    
+                    SceneManager.MoveGameObjectToScene(fObj.col.gameObject, gameObject.scene);
+            }
 
             allParts.Add(newPart);
+            fr_bones.Add(newTrans);
+            saved_allPartsCol.Add(fObj.col);
 
-            //create fracStruct
+            //create new fracStruct, the fracStruct will be added to jCDW_job.fStructs later in SetPartNeighboursAndConnections();
+            FracStruct newStruct = new()
+            {
+                desMatI = 0,
+                neighbourPartI_lenght = 0
+            };
+
+            //get part connection
             int partMainNeighbour = -1;
-
             SetPartNeighboursAndConnections();
+
 
             //add part mesh
             Matrix4x4 rendWtoL = fracRend.transform.worldToLocalMatrix;
-            int newBoneI = fr_bones.Count;
+            int newBoneI = fr_bones.Count - 1;
             int partVerCount = fObj.meshW.vertexCount;
             int newVerOffset = fr_verticesL.Count;
             int newVerEndI = newVerOffset + partVerCount;
@@ -1760,8 +1884,7 @@ namespace Zombie1111_uDestruction
             {
                 newPart.partMeshVerts.Add(nvI);
             }
-            
-            fr_bones.Add(fObj.col.transform);
+
             fr_bindPoses.Add(fObj.col.transform.worldToLocalMatrix * fracRend.transform.localToWorldMatrix);
             fr_verticesL.AddRange(FractureHelperFunc.ConvertPositionsWithMatrix(fObj.meshW.vertices, rendWtoL));
             fr_normalsL.AddRange(FractureHelperFunc.ConvertDirectionsWithMatrix(fObj.meshW.normals, rendWtoL));
@@ -1843,61 +1966,17 @@ namespace Zombie1111_uDestruction
                 globalHandler.OnAddFracPart(this, newPartI);
             return true;
 
-            void SetPartNeighboursAndConnections()
+            unsafe void SetPartNeighboursAndConnections()
             {
-                //do box overlaps to get all nearby colliders
-                PhysicsScene phyScene = fObj.col.gameObject.scene.GetPhysicsScene();
-                Collider[] lapCols = new Collider[20];
-
-                int lapCount = phyScene.OverlapBox(fObj.col.bounds.center,
-                            fObj.col.bounds.extents * 1.05f,
-                            lapCols,
-                            Quaternion.identity,
-                            Physics.AllLayers,
-                            QueryTriggerInteraction.Ignore);
-
-                //Get nearby parts and kinematic objects from nearby colliders
-                bool partIsKin = false;
-                List<short> nearPartIndexes = new();
-
-                for (int i = 0; i < lapCount; i++)
-                {
-                    if (lapCols[i] == fObj.col) continue;
-
-                    if (generationQuality == GenerationQuality.high)
-                    {
-                        if (Physics.ComputePenetration(//Accurate overlaps (It will still depend on collider type,
-                                                       //is that fine or do I need to use the actuall meshes to get overlaps for parts?)
-                            fObj.col,
-                            Vector3.MoveTowards(fObj.col.transform.position,
-                            lapCols[i].transform.position, FracGlobalSettings.worldScale * 0.001f),
-                            fObj.col.transform.rotation,
-                            lapCols[i],
-                            lapCols[i].transform.position,
-                            lapCols[i].transform.rotation,
-                            out _, out _) == false) continue;
-                    }
-
-                    short partI = TryGetPartIndexFromTrans(lapCols[i].transform);
-
-                    if (partI < 0)
-                    {
-                        //near col is not a part
-                        if (phyMainOptions.mainPhysicsType != OptMainPhysicsType.overlappingIsKinematic || partIsKin == true) continue;
-
-                        partIsKin = lapCols[i].attachedRigidbody == null || lapCols[i].attachedRigidbody.isKinematic == true;
-
-                        continue;
-                    }
-
-                    //near col is part
-                    nearPartIndexes.Add(partI);
-                }
+                //Get all nearby colliders
+                bool partIsKin = GetNearbyFracColliders(fObj.col, generationQuality, out List<short> nearPartIndexes, false);
 
                 //get the groupData the part should use
                 if (newPart.groupId == null && nearPartIndexes.Count > 0) newPart.groupId = allParts[nearPartIndexes[0]].groupId;
                 newPart.groupIdInt = FractureHelperFunc.Gd_getIntIdFromId(newPart.groupId);
-                partGroupD = GetGroupIdDataFromIntId(newPart.groupIdInt);
+                newStruct.desMatI = GetDesMatIndexFromIntId(newPart.groupIdInt);
+                jCDW_job.fStructs.Add(newStruct);
+                partGroupD = GetDesMatFromIntId(newPart.groupIdInt);
 
                 //set part parent
                 jCDW_job.partsParentI.Add(-6969);
@@ -1906,10 +1985,11 @@ namespace Zombie1111_uDestruction
                 SetPartParent(newPartI, newPartParentI);
 
                 //add part to kinematic list if needed
-                if (partIsKin == true || partGroupD.isKinematic == true) SetPartKinematicStatus(newPartI, true);
+                if ((partIsKin == true && (FracGlobalSettings.recalculateKinematicPartsOnLoad == 0 || (FracGlobalSettings.recalculateKinematicPartsOnLoad == 1 && GetFracturePrefabType() == 0))) 
+                    || partGroupD.isKinematic == true) SetPartKinematicStatus(newPartI, true);
 
                 //get what nearPartIndexes is actually valid neighbours and create structure for the new part
-                jCDW_job.structPosL.Add(allParts[newPartI].trans.worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)));
+                jCDW_job.structPosL.Add(fr_bones[newPartI + partBoneOffset].worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)));
 
                 foreach (short nearPartI in nearPartIndexes)
                 {
@@ -1918,9 +1998,17 @@ namespace Zombie1111_uDestruction
                         || FractureHelperFunc.Gd_isPartLinkedWithPart(newPart, allParts[nearPartI]) == false) continue;
 
                     //add neighbours to newPart struct and add newPart to neighbours
-                    allParts[nearPartI].neighbourStructs.Add(newPartI);
-                    //allParts[newPartI].neighbourStructs.Add(newPartI);
-                    allParts[newPartI].neighbourStructs.Add(nearPartI);
+                    FracStruct fStruct = jCDW_job.fStructs[nearPartI];
+                    fStruct.neighbourPartI[fStruct.neighbourPartI_lenght] = newPartI;
+                    fStruct.neighbourPartI_lenght++;
+                    jCDW_job.fStructs[nearPartI] = fStruct;
+                    //allParts[nearPartI].neighbourStructs.Add(newPartI);
+
+                    fStruct = jCDW_job.fStructs[newPartI];
+                    fStruct.neighbourPartI[fStruct.neighbourPartI_lenght] = nearPartI;
+                    fStruct.neighbourPartI_lenght++;
+                    jCDW_job.fStructs[newPartI] = fStruct;
+                    //allParts[newPartI].neighbourStructs.Add(nearPartI);
 
                     partMainNeighbour = nearPartI;
                 }
@@ -1978,7 +2066,7 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Sets the given parts parent to newParentI
+        /// Sets the given parts parent to newParentI, if -1 the part will become lose
         /// </summary>
         private void SetPartParent(short partI, int newParentI)
         {
@@ -1986,15 +2074,16 @@ namespace Zombie1111_uDestruction
             if (partParentI == newParentI) return;
 
             //get part groupData
-            GroupIdData partGData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
+            int partBoneI = partI + partBoneOffset;
+            DestructionMaterial partDesMat = GetDesMatFromIntId(allParts[partI].groupIdInt);
 
             //remove part from previous parent
             if (partParentI >= 0)
             {
                 allParents[partParentI].partIndexes.Remove(partI);
-                allParents[partParentI].parentMass -= partGData.mass;
-                allParents[partParentI].totalBendEfficiency -= partGData.bendEfficiency;
-                allParents[partParentI].totalTransportCoEfficiency -= partGData.transportCoEfficiency;
+                allParents[partParentI].parentMass -= partDesMat.desProps.mass;
+                allParents[partParentI].totalBendEfficiency -= partDesMat.desProps.bendEfficiency;
+                allParents[partParentI].totalTransportCoEfficiency -= partDesMat.desProps.transportCoEfficiency;
                 if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[partParentI].parentKinematic--;
 
                 MarkParentAsModified(partParentI);
@@ -2010,29 +2099,30 @@ namespace Zombie1111_uDestruction
                 return;
             }
 
-            //if want to set parent
-            allParts[partI].trans.SetParent(newParentI > 0 || partsDefualtData.Count == 0 ? allParents[newParentI].parentTrans : partsDefualtData[partI].defParent);
+            //if want to change parent
+            fr_bones[partBoneI].SetParent(newParentI > 0 || partsDefualtData.Count == 0 ? allParents[newParentI].parentTrans : partsDefualtData[partI].defParent);
             allParents[newParentI].partIndexes.Add(partI);
-            allParents[newParentI].parentMass += partGData.mass;
-            allParents[newParentI].totalBendEfficiency += partGData.bendEfficiency;
-            allParents[newParentI].totalTransportCoEfficiency += partGData.transportCoEfficiency;
+            allParents[newParentI].parentMass += partDesMat.desProps.mass;
+            allParents[newParentI].totalBendEfficiency += partDesMat.desProps.bendEfficiency;
+            allParents[newParentI].totalTransportCoEfficiency += partDesMat.desProps.transportCoEfficiency;
             if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[newParentI].parentKinematic++;
             MarkParentAsModified(newParentI);
 
             void FromParentToNoParent()
             {
                 //set transform
-                allParts[partI].trans.SetParent(transform);
-                allParts[partI].trans.gameObject.layer = partGData.objLayerBroken;
+                fr_bones[partBoneI].SetParent(transform);
+                fr_bones[partBoneI].gameObject.layer = partDesMat.objLayerBroken;
+                saved_allPartsCol[partI].hasModifiableContacts = false;
 
+                //set physics
                 //add and set rigidbody
-                Rigidbody newRb = allParts[partI].trans.gameObject.AddComponent<Rigidbody>();
+                Rigidbody newRb = fr_bones[partBoneI].gameObject.AddComponent<Rigidbody>();
 
-                newRb.mass = partGData.mass * phyPartsOptions.massMultiplier;
+                newRb.mass = partDesMat.desProps.mass * phyPartsOptions.massMultiplier;
                 newRb.interpolation = phyPartsOptions.interpolate;//Do we really need these properties to be configurable?
                 newRb.drag = phyPartsOptions.drag;
                 newRb.angularDrag = phyPartsOptions.angularDrag;
-                newRb.freezeRotation = phyPartsOptions.canRotate;
                 newRb.useGravity = phyPartsOptions.useGravity;
             }
 
@@ -2040,7 +2130,8 @@ namespace Zombie1111_uDestruction
             {
                 //note that this also runs once for newly created objects
                 //set transform
-                allParts[partI].trans.gameObject.layer = partGData.objLayerDefualt;
+                fr_bones[partBoneI].gameObject.layer = partDesMat.objLayerDefualt;
+                saved_allPartsCol[partI].hasModifiableContacts = true;
 
                 //remove rigidbody
                 //Destroy(allParts[partI].col.attachedRigidbody);
@@ -2113,6 +2204,14 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private void UpdateParentData(int parentI)
         {
+
+            //disable parent if no children, we cant destroy it since that would mean I will have to update every single parent index
+            if (allParents[parentI].partIndexes.Count == 0)
+            {
+                allParents[parentI].parentTrans.gameObject.SetActive(false);
+                return;//why bother updating other stuff if its disabled
+            }
+
             //update parent rigidbody
             if (allParents[parentI].parentRb != null)
             {
@@ -2128,12 +2227,12 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private Vector3 GetPartWorldPosition(int partI)
         {
-            return allParts[partI].trans.position;
+            return fr_bones[partI + partBoneOffset].position;
         }
 
         private Vector3 GetStructWorldPosition(int structI)
         {
-            return allParts[structI].trans.localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
+            return fr_bones[structI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
         }
 
         /// <summary>
@@ -2147,7 +2246,7 @@ namespace Zombie1111_uDestruction
             eOnly_isPrefabAsset = isPrefabAsset;
 
             //if prefab instance, fracture on the prefab asset
-            if (GetFracturePrefabType() == 1)
+            if (fracPrefabType == 1)
             {
                 didFracOther = true;
                 bool didFindFrac = false;
@@ -2684,7 +2783,7 @@ namespace Zombie1111_uDestruction
             return splittedMeshes;
         }
 
-#endregion GenerateFractureSystem
+        #endregion GenerateFractureSystem
 
 
 
@@ -2697,12 +2796,16 @@ namespace Zombie1111_uDestruction
         public bool isRealSkinnedM;
 
         /// <summary>
-        /// This is true if the destructionSystem is valid and running (Runtime only)
+        /// This is true if the destructionSystem is valid and running
         /// </summary>
         [System.NonSerialized] public bool fractureIsValid = false;
 
-        private void Awake()
+        private void Start()
         {
+#if UNITY_EDITOR
+            if (Application.isPlaying == false) return;
+#endif
+
             //verify fracture
             if (VerifyFracture() == false) return;
 
@@ -2715,21 +2818,22 @@ namespace Zombie1111_uDestruction
             //set parts colliders
             for (int i = 0; i < allParts.Count; i++)
             {
-                allParts[i].col.hasModifiableContacts = true;
+                saved_allPartsCol[i].hasModifiableContacts = true;
             }
 
             //loop all destruction materials to get lowest transportCapacity
             lowestTransportCapacity = float.MaxValue;
-            for (int i = 0; i < groupDataOverrides.Count; i++)
+            for (int i = 0; i < DestructionMaterials.Count; i++)
             {
-                if (groupDataOverrides[i].transportCapacity >= lowestTransportCapacity) continue;
-                lowestTransportCapacity = groupDataOverrides[i].transportCapacity;
+                if (DestructionMaterials[i].desProps.transportCapacity >= lowestTransportCapacity) continue;
+                lowestTransportCapacity = DestructionMaterials[i].desProps.transportCapacity;
             }
 
-            if (groupDataDefualt.transportCapacity < lowestTransportCapacity) lowestTransportCapacity = groupDataDefualt.transportCapacity;
+            //if (groupDataDefualt.transportCapacity < lowestTransportCapacity) lowestTransportCapacity = groupDataDefualt.transportCapacity;
 
             //setup compute destruction
             jCDW_job.desSource = new NativeArray<DestructionSource>(0, Allocator.Persistent);
+            jCDW_job.desProps = DestructionMaterials.Select(desMat => desMat.desProps).ToList().ToNativeArray(Allocator.Persistent);
             destructionSources = new();
             destructionBodies = new();
             destructionPairs = new();
@@ -2737,7 +2841,68 @@ namespace Zombie1111_uDestruction
 
         private void Update()
         {
+#if UNITY_EDITOR
+            if (Application.isPlaying == false)
+            {
+                if (eOnly_ignoreNextDraw == true)
+                {
+                    eOnly_ignoreNextDraw = false;
+                    return;
+                }
+
+                EditorUpdate();
+            }
+#endif
             GlobalUpdate();
+
+#if UNITY_EDITOR
+            void EditorUpdate()
+            {
+                if (debugLL.IsCreated == false) debugLL = new NativeList<int>(Allocator.Persistent) { 23, 45, 42 };
+                debugLL.AsArray();
+                //Debug.Log(debugLL[0]);
+                debugLL.Dispose();
+
+                //delete saveAsset if temp and globalHandler is null
+                if (globalHandler == null && saveAsset != null && AssetDatabase.GetAssetPath(saveAsset).Contains("TempFracSaveAssets") == true)
+                {
+                    AssetDatabase.DeleteAsset(AssetDatabase.GetAssetPath(saveAsset));
+                }
+
+                //verify that fracRend reference the correct object
+                if (fracRend != null && fracRend.transform != transform)
+                {
+                    Debug.LogError(transform.name + " fracture does not reference the correct objects and will be removed (Has the script been copied?)");
+                    Gen_removeFracture(false, false, false);
+                    return;
+                }
+
+                //verify if generate status does not match
+                //if (shouldBeFractured != fractureIsValid || (allParts != null && allParts.Count > 0 && allParts[0].trans == null)
+                if (shouldBeFractured != fractureIsValid
+                    || (saveAsset != null && saved_fracId >= 0 && saveAsset.fracSavedData.id != saved_fracId))
+                {
+                    shouldBeFractured = VerifyFracture();
+                }
+
+                //update fracture
+                GlobalUpdate();
+                GlobalUpdate_fixed();
+
+                if (fractureIsValid == false) return;
+
+                //make sure compute shader aint null
+                if (computeDestructionSolver == null)
+                {
+                    SyncFracRendData();
+                }
+
+                //get transform data
+                GetTransformData_start();
+                GetTransformData_end(); //send skin+def to gpu happens inside this
+                                        //ComputeDestruction_start();
+            }
+#endif
         }
 
         private void FixedUpdate()
@@ -2745,9 +2910,10 @@ namespace Zombie1111_uDestruction
             if (fractureIsValid == false) return;
 
             ComputeDestruction_end();
+            GlobalUpdate_fixed();
             GetTransformData_start();
 
-            //run late fixedUpdate later
+            //run late fixedUpdate later 
             StartCoroutine(LateFixedUpdate());
         }
 
@@ -2760,20 +2926,39 @@ namespace Zombie1111_uDestruction
             ComputeDestruction_start();
         }
 
-        private void OnDisable()
+        private void OnDestroy()
         {
             //Clear memory, should we really do it here? If the user just temporarly disabled it we would need to reallocolate everything again
             ClearUsedGpuAndCpuMemory();
         }
 
+
         /// <summary>
-        /// Runs once every frame at runtime and in editor
+        /// Runs on drawGizmos in editor and on Update at runtime
         /// </summary>
         private void GlobalUpdate()
         {
             //return if fracture is invalid
-            if (fractureIsValid == false && VerifyFracture() == false) return;
+            //if (fractureIsValid == false && VerifyFracture() == false) return;
+            if (fractureIsValid != shouldBeFractured && VerifyFracture() != shouldBeFractured) return;
+            if (fractureIsValid == false) return;
 
+            //if (allParts[0].trans != saved_allPartsCol[0].transform)
+            //{
+            //    Debug.Log("No " + transform.parent.name);
+            //    fractureIsValid = false;
+            //    VerifyFracture();
+            //}
+
+            //sync part colliders with deformed mesh
+            if (des_deformedParts[1 - des_deformedPartsIndex].Count > 0 || gpuMeshRequest_do == true) UpdateGpuMeshReadback();
+        }
+
+        /// <summary>
+        /// Runs on drawGizmos in editor and on fixedUpdate at runtime
+        /// </summary>
+        private void GlobalUpdate_fixed()
+        {
             //sync with gpu, wantToSyncFracRendData is set to false inside SyncFracRendData()
             if (wantToSyncFracRendData == true)
             {
@@ -2785,12 +2970,8 @@ namespace Zombie1111_uDestruction
             {
                 foreach (int parentI in parentsThatNeedsUpdating) UpdateParentData(parentI);
                 if (gpuIsReady == true) buf_structs_parentI.SetData(jCDW_job.partsParentI.AsArray());
-                //if (gpuIsReady == true) buf_structs_parentI.SetData(jCDW_job.partsParentI.ToArray());
                 parentsThatNeedsUpdating.Clear();
             }
-
-            //sync part colliders with deformed mesh
-            if (des_deformedParts[1 - des_deformedPartsIndex].Count > 0 || gpuMeshRequest_do == true) UpdateGpuMeshReadback();
         }
 
         /// <summary>
@@ -2798,7 +2979,6 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public void ClearUsedGpuAndCpuMemory()
         {
-            Debug.Log("clear mem");
             //fracture is never valid when disposing
             fractureIsValid = false;
             gpuIsReady = false;
@@ -2846,6 +3026,12 @@ namespace Zombie1111_uDestruction
                 buf_structs_posLPrev.Dispose();
             }
 
+            if (buf_verNors != null)
+            {
+                buf_verNors.Release();
+                buf_verNors.Dispose();
+            }
+
             //dispose getTransformData job
             GetTransformData_end();//Make sure the job aint running
             if (jGTD_hasMoved.IsCreated == true) jGTD_hasMoved.Dispose();
@@ -2860,11 +3046,14 @@ namespace Zombie1111_uDestruction
             if (jCDW_job.partsParentI.IsCreated == true) jCDW_job.partsParentI.Dispose();
             if (jCDW_job.kinematicPartIndexes.IsCreated == true) jCDW_job.kinematicPartIndexes.Dispose();
             if (jCDW_job.desSource.IsCreated == true) jCDW_job.desSource.Dispose();
+            if (jCDW_job.fStructs.IsCreated == true) jCDW_job.fStructs.Dispose();
+            if (jCDW_job.desProps.IsCreated == true) jCDW_job.desProps.Dispose();
+            if (jCDW_job.bonesLToW.IsCreated == true) jCDW_job.bonesLToW.Dispose();
         }
 
         private int cpKernelId_ComputeSkinDef = -1;
         private int cpKernelId_ApplySkinDef = -1;
-        [SerializeField] private ComputeShader computeDestructionSolver;
+        private ComputeShader computeDestructionSolver;
 
         #endregion MainUpdateFunctions
 
@@ -2879,7 +3068,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// The matrix each fracRend bone had the previous frame (localToWorld)(Is multiplied with bindposes)(Threaded, written to on mainthread in GetTransformData_end())
         /// </summary>
-        private NativeArray<Matrix4x4> allFracBonesLToW;
+        //private NativeArray<Matrix4x4> jCDW_job.bonesLToW;
         private JobHandle jGTD_handle;
         private GetTransformData_work jGTD_job;
         private NativeQueue<short> jGTD_hasMoved;
@@ -2890,8 +3079,8 @@ namespace Zombie1111_uDestruction
         {
             if (jGTD_jobIsActive == true) return;
             if (jGTD_fracBoneTrans.isCreated == false || jGTD_fracBoneTrans.length != fr_bones.Count
-                || allFracBonesLToW == null || allFracBonesLToW.Length != fr_bones.Count || jGTD_hasMoved.IsCreated == false) GetTransformData_setup();
-
+                || jCDW_job.bonesLToW == null || jCDW_job.bonesLToW.Length != fr_bones.Count || jGTD_hasMoved.IsCreated == false) GetTransformData_setup();
+            
             //Run the job
             jGTD_handle = jGTD_job.Schedule(jGTD_fracBoneTrans);
             jGTD_jobIsActive = true;
@@ -2900,7 +3089,7 @@ namespace Zombie1111_uDestruction
             {
                 //Assign variabels used in GetTransformData job
                 if (jGTD_fracBoneTrans.isCreated == false) jGTD_fracBoneTrans = new(fr_bones.ToArray());
-                allFracBonesLToW = new NativeArray<Matrix4x4>(jGTD_fracBoneTrans.length, Allocator.Persistent);
+                jCDW_job.bonesLToW = new NativeArray<Matrix4x4>(jGTD_fracBoneTrans.length, Allocator.Persistent);
                 buf_allFracBonesLToW = new ComputeBuffer(jGTD_fracBoneTrans.length, 16 * sizeof(float));
 
                 if (jGTD_hasMoved.IsCreated == false) jGTD_hasMoved = new NativeQueue<short>(Allocator.Persistent);
@@ -2920,7 +3109,7 @@ namespace Zombie1111_uDestruction
 
         private void GetTransformData_end()
         {
-            if (jGTD_jobIsActive == false ) return;
+            if (jGTD_jobIsActive == false) return;
 
             //finish the job
             jGTD_jobIsActive = false;
@@ -2940,14 +3129,14 @@ namespace Zombie1111_uDestruction
             {
                 //When a bone has moved
                 //Copy updated localToWorld matrixes to allFracBonesLToW and gpu
-                while (jGTD_hasMoved.TryDequeue(out short item) == true)
+                while (jGTD_hasMoved.TryDequeue(out short boneI) == true)
                 {
-                    allFracBonesLToW[item] = jGTD_job.fracBonesLToW[item] * fr_bindPoses[item];
+                    jCDW_job.bonesLToW[boneI] = jGTD_job.fracBonesLToW[boneI] * fr_bindPoses[boneI];
                 }
 
                 jGTD_hasMoved.Clear();
 
-                buf_allFracBonesLToW.SetData(allFracBonesLToW);
+                buf_allFracBonesLToW.SetData(jCDW_job.bonesLToW);
 
                 //Update fracRend bounds
                 if (fracRend == null) return;
@@ -3052,9 +3241,9 @@ namespace Zombie1111_uDestruction
                 jCDW_job.desSource = new NativeArray<DestructionSource>(desSLenght, Allocator.Persistent);
                 FractureHelperFunc.SetListLenght(ref jCDW_bodies, desSLenght);
             }
-            
+
             int[] deskeys = destructionSources.Keys.ToArray();
-            
+
             for (int i = 0; i < desSLenght; i++)
             {
                 //dispose previous impPoints to prevent memory leak
@@ -3074,6 +3263,7 @@ namespace Zombie1111_uDestruction
 
             destructionSources.Clear();
             destructionBodies.Clear();
+            destructionPairs.Clear();//The nativeArrays will be disposed later by the worker
 
             //run the job
             jCDW_jobIsActive = true;
@@ -3093,61 +3283,40 @@ namespace Zombie1111_uDestruction
             {
 
             }
-            //Debug.Log(jCDW_job.partsParentI[0]);
-            ////debug
-            //int bestI = 0;
-            //float bestD = float.MaxValue;
-            //float cDis;
-            //Vector3 tPos = debugTrans.position;
-            //
-            //for (int i = 0; i < jCDW_job.structPosL.Length; i++)
-            //{
-            //    cDis = Vector3.Distance(GetStructWorldPosition(i), tPos);
-            //
-            //    if (cDis < bestD)
-            //    {
-            //        bestD = cDis;
-            //        bestI = i;
-            //    }
-            //}
-            //
-            //Vector3 toMove = tPos - debugPos;
-            //if (toMove.sqrMagnitude < 0.0000001f) return;
-            //debugPos = tPos;
-            //
-            //jCDW_job.structPosL[bestI] += allParts[bestI].trans.InverseTransformDirection(toMove);
-            //
-            //wantToApplyDeformation = true;
-            //foreach (int pI in allParts[bestI].neighbourStructs)
-            //{
-            //    //Debug.Log("Added " + pI + " " + des_deformedParts[des_deformedPartsIndex].Count);
-            //    des_deformedParts[des_deformedPartsIndex].Add((short)pI);
-            //}
-            //
-            ////Debug.Log("Added " + bestI + " " + des_deformedParts[des_deformedPartsIndex].Count);
-            //des_deformedParts[des_deformedPartsIndex].Add((short)bestI);
-            //
-            ////debug end
+
+            FixReadIssueOther(jCDW_job.fStructs[0]);
+            static void FixReadIssueOther(FracStruct somertyh)
+            {
+
+            }
         }
 
         public ComputeDestruction_work jCDW_job;
         private JobHandle jCDW_handle;
 
+        [BurstCompile]
         public struct ComputeDestruction_work : IJob
         {
             //solve destruction
             public NativeList<Vector3> structPosL;
             public NativeList<int> partsParentI;
             public NativeHashSet<int> kinematicPartIndexes;
-            public NativeArray<DestructionSource> desSource;
+            public NativeArray<DestructionSource> desSource;    
+            public NativeList<FracStruct> fStructs;
+            public NativeArray<DestructionMaterial.DesProperties> desProps;
 
+            /// <summary>
+            /// The local to world matrix for every bone (Parts bones + skinned bones), skinned bones are first
+            /// </summary>
+            public NativeArray<Matrix4x4> bonesLToW;
             public unsafe void Execute()
             {
-
                 for (int sourceI = 0; sourceI < desSource.Length; sourceI++)
                 {
                     NativeArray<DestructionPoint> desPoints = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<DestructionPoint>(
-                                        desSource[sourceI].desPoints_ptr, desSource[sourceI].desPoints_lenght, Allocator.Persistent);
+                                        desSource[sourceI].desPoints_ptr, desSource[sourceI].desPoints_lenght, Allocator.Temp);
+
+                    //desPoints.Dispose();//Since we used Allocator.Persistent, this will now be the owner of the data and disposing it will also dispose the source?
                 }
             }
         }
@@ -3197,7 +3366,7 @@ namespace Zombie1111_uDestruction
                 short partI = des_deformedParts[oppositeI].FirstOrDefault();
                 des_deformedParts[oppositeI].Remove(partI);
 
-                Matrix4x4 rendLToPartL = fracRend.localToWorldMatrix * allParts[partI].trans.worldToLocalMatrix;
+                Matrix4x4 rendLToPartL = fracRend.localToWorldMatrix * fr_bones[partI + partBoneOffset].worldToLocalMatrix;
                 Vector3[] partPossL = new Vector3[allParts[partI].partMeshVerts.Count];
                 short pI = 0;
                 foreach (int vI in allParts[partI].partMeshVerts)
@@ -3206,7 +3375,7 @@ namespace Zombie1111_uDestruction
                     pI++;
                 }
 
-                FractureHelperFunc.SetColliderFromFromPoints(allParts[partI].col, partPossL, ref partMaxExtent);
+                FractureHelperFunc.SetColliderFromFromPoints(saved_allPartsCol[partI], partPossL, ref partMaxExtent);
             }
 
             if (gpuMeshRequest_do == true && des_deformedParts[oppositeI].Count == 0)
@@ -3252,7 +3421,7 @@ namespace Zombie1111_uDestruction
         /// </summary>
         /// <param name="impactPoints">The nativeArray must have a Persistent allocator, it will be disposed by the destruction system. DO NOT DISPOSE IT ANYWHERE ELSE</param>
         /// <param name="sourceRb">The rb that caused the impact, null if caused by self or misc</param>
-        /// <param name="impactId">Used to identify different impact sources, if == 0 a unique id will be given</param>
+        /// <param name="impactId">Used to identify different impact sources, if == 0 a unique id will be generated</param>
         /// <param name="canOverwrite">If impactId already exists, true == overwrite existing source, false == merge with existing source</param>
         public unsafe void RegisterImpact(DestructionSource impactData, NativeArray<DestructionPoint> impactPoints, Rigidbody sourceRb, int impactId = 0, bool canOverwrite = false)
         {
@@ -3282,8 +3451,7 @@ namespace Zombie1111_uDestruction
                     {
                         impD.impForceTotal = impactData.impForceTotal;
                         impD.impVel = impactData.impVel;
-                        destructionBodies.TryUpdate(impactId, sourceRb, sourceRb);
-                        //impD.sourceRb = impactData.sourceRb;//Should always be the same but we update it anyways just in case
+                        destructionBodies.TryUpdate(impactId, sourceRb, sourceRb);//Should always be the same but we update it anyways just in case
                     }
 
                     for (int i = 0; i < impP.Length; i++)
@@ -3377,6 +3545,65 @@ namespace Zombie1111_uDestruction
 
         #region HelperFunctions
 
+        /// <summary>
+        /// Returns true if a nearby kinematic collider exists, nearPartIndexes will contain the index of all nearby parts unless justWantKinematic is true
+        /// </summary>
+        /// <param name="centerCol">All colliders that are overlaping with this one count as nearby</param>
+        public bool GetNearbyFracColliders(Collider centerCol, GenerationQuality checkQuality, out List<short> nearPartIndexes, bool justWantKinematic = false)
+        {
+            //do box overlaps to get all nearby colliders
+            PhysicsScene phyScene = centerCol.gameObject.scene.GetPhysicsScene();
+            Collider[] lapCols = new Collider[20];
+
+            int lapCount = phyScene.OverlapBox(centerCol.bounds.center,
+                        centerCol.bounds.extents * 1.05f,
+                        lapCols,
+                        Quaternion.identity,
+                        Physics.AllLayers,
+                        QueryTriggerInteraction.Ignore);
+
+            //Get nearby parts and kinematic objects from nearby colliders
+            bool partIsKin = false;
+            nearPartIndexes = new();
+
+            for (int i = 0; i < lapCount; i++)
+            {
+                if (lapCols[i] == centerCol) continue;
+
+                if (checkQuality == GenerationQuality.high)
+                {
+                    if (Physics.ComputePenetration(//Accurate overlaps (It will still depend on collider type, 
+                                                   //is that fine or do I need to use the actuall meshes to get overlaps for parts?)
+                        centerCol,
+                        Vector3.MoveTowards(centerCol.transform.position,
+                        lapCols[i].transform.position, FracGlobalSettings.worldScale * 0.001f),
+                        centerCol.transform.rotation,
+                        lapCols[i],
+                        lapCols[i].transform.position,
+                        lapCols[i].transform.rotation,
+                        out _, out _) == false) continue;
+                }
+
+                short partI = TryGetPartIndexFromTrans(lapCols[i].transform);
+
+                if (partI < 0)
+                {
+                    //near col is not a part, get if its kinematic
+                    if (partIsKin == true) continue;
+
+                    partIsKin = lapCols[i].attachedRigidbody == null || lapCols[i].attachedRigidbody.isKinematic == true;
+                    if (partIsKin == true && justWantKinematic == true) return true;
+
+                    continue;
+                }
+
+                //near col is part
+                nearPartIndexes.Add(partI);
+            }
+
+            return partIsKin;
+        }
+
 #if UNITY_EDITOR
         //debug stopwatch
         private System.Diagnostics.Stopwatch stopwatch = new();
@@ -3400,9 +3627,9 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public short TryGetPartIndexFromTrans(Transform trans)
         {
-            for (short i = 0; i < allParts.Count; i++)
+            for (short partI = 0; partI < saved_allPartsCol.Count; partI++)
             {
-                if (allParts[i].trans == trans) return i;
+                if (fr_bones[partI + partBoneOffset] == trans) return partI;
             }
 
             return -1;
@@ -3434,12 +3661,11 @@ namespace Zombie1111_uDestruction
             foreach (int vI in allParts[partI].partMeshVerts)
             {
                 //Storing all mBake_vms in a array and only updating them when a bone has moved may be worth it??
-                //mBake_weight = useSkin == true ? fr_boneWeightsSkin[vI] : fr_boneWeights[vI];
                 mBake_weight = fr_boneWeightsCurrent[vI];
-                mBake_bm0 = allFracBonesLToW[mBake_weight.boneIndex0];
-                mBake_bm1 = allFracBonesLToW[mBake_weight.boneIndex1];
-                mBake_bm2 = allFracBonesLToW[mBake_weight.boneIndex2];
-                mBake_bm3 = allFracBonesLToW[mBake_weight.boneIndex3];
+                mBake_bm0 = jCDW_job.bonesLToW[mBake_weight.boneIndex0];
+                mBake_bm1 = jCDW_job.bonesLToW[mBake_weight.boneIndex1];
+                mBake_bm2 = jCDW_job.bonesLToW[mBake_weight.boneIndex2];
+                mBake_bm3 = jCDW_job.bonesLToW[mBake_weight.boneIndex3];
 
                 mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
                 mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;
@@ -3487,9 +3713,13 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// The prefab type it had when the fracture was generated (0 if no prefab, 1 if prefab instance, 2 if prefab asset)
+        /// </summary>
+        public byte fracPrefabType = 0;
+
+        /// <summary>
         /// Returns 0 if no prefab, 1 if prefab instance, 2 if prefab asset (Will always return 0 at runtime)
         /// </summary>
-        /// <returns></returns>
         public byte GetFracturePrefabType()
         {
 #if UNITY_EDITOR
@@ -3510,26 +3740,27 @@ namespace Zombie1111_uDestruction
         public float GuessMaxForceConsume(Vector3 velocity, short partI, float bouncyness = 0.0f)
         {
             int parentI = jCDW_job.partsParentI[partI];
-            GroupIdData gData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
+            DestructionMaterial desMat = GetDesMatFromIntId(allParts[partI].groupIdInt);
             float velSpeed = velocity.magnitude;
             if (parentI < 0)
             {
                 //if no parent, it cant break so it has infinit stenght
                 if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) return float.MaxValue;
 
-                velSpeed *= gData.mass;
+                velSpeed *= desMat.desProps.mass;
                 velSpeed += velSpeed * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
-                return velSpeed + (velSpeed * gData.transportCoEfficiency);
+                return velSpeed + (velSpeed * desMat.desProps.transportCoEfficiency);
             }
 
-            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - gData.mass);
+            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - desMat.desProps.mass);
 
-            float totalTransportCap = gData.transportCapacity * allParts[partI].neighbourStructs.Count;
+            float totalTransportCap = desMat.desProps.transportCapacity * jCDW_job.fStructs[partI].neighbourPartI_lenght;
+            //float totalTransportCap = gData.transportCapacity * allParts[partI].neighbourStructs.Count;
             if (impForce > totalTransportCap) impForce = totalTransportCap;
 
             int parentPartCount = allParents[parentI].partIndexes.Count;
             impForce += impForce * (allParents[parentI].totalBendEfficiency / parentPartCount);
-            impForce += velSpeed * gData.mass;
+            impForce += velSpeed * desMat.desProps.mass;
             impForce += impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
             return impForce + (impForce * (allParents[parentI].totalTransportCoEfficiency / parentPartCount));
         }
@@ -3540,28 +3771,29 @@ namespace Zombie1111_uDestruction
         public float GuessMaxForceApplied(Vector3 velocity, short partI, float bouncyness = 0.0f)
         {
             int parentI = jCDW_job.partsParentI[partI];
-            GroupIdData gData = GetGroupIdDataFromIntId(allParts[partI].groupIdInt);
+            DestructionMaterial desMat = GetDesMatFromIntId(allParts[partI].groupIdInt);
             float velSpeed = velocity.magnitude;
             if (parentI < 0)
             {
                 //if no parent, it cant break so it has infinit stenght
                 if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) return float.MaxValue;
 
-                velSpeed *= gData.mass;
+                velSpeed *= desMat.desProps.mass;
                 velSpeed -= velSpeed * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
-                return velSpeed - (velSpeed * gData.transportCoEfficiency);
+                return velSpeed - (velSpeed * desMat.desProps.transportCoEfficiency);
             }
 
             //float impForce = velSpeed * (allParents[parentI].parentMass - gData.mass);
-            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - gData.mass);
+            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - desMat.desProps.mass);
 
             int parentPartCount = allParents[parentI].partIndexes.Count;
             impForce -= impForce * (allParents[parentI].totalBendEfficiency / parentPartCount);
 
-            float totalTransportCap = gData.transportCapacity * allParts[partI].neighbourStructs.Count;
+            float totalTransportCap = desMat.desProps.transportCapacity * jCDW_job.fStructs[partI].neighbourPartI_lenght;
+            //float totalTransportCap = gData.transportCapacity * allParts[partI].neighbourStructs.Count;
             if (impForce > totalTransportCap) impForce = totalTransportCap;
 
-            impForce += velSpeed * gData.mass;
+            impForce += velSpeed * desMat.desProps.mass;
             impForce -= impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
             return impForce - (impForce * (allParents[parentI].totalTransportCoEfficiency / parentPartCount));
         }
@@ -3584,9 +3816,9 @@ namespace Zombie1111_uDestruction
 
             //the reason why we use lowest and not partI Capacity is because partI may be made out of steel but its connected
             //to the wall with glass, steel wont break but glass will. Computing that just takes too long so we pretend its always connected with glass
-            return force > lowestTransportCapacity * allParts[partI].neighbourStructs.Count;
+            return force > lowestTransportCapacity * jCDW_job.fStructs[partI].neighbourPartI_lenght;
+            //return force > lowestTransportCapacity * allParts[partI].neighbourStructs.Count;
         }
-
-        #endregion HelperFunctions
+#endregion HelperFunctions
     }
 }

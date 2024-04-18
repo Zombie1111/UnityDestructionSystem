@@ -65,6 +65,7 @@ namespace Zombie1111_uDestruction
             public List<FractureThis.FracWeight> saved_desWeights = new();
             public List<int> saved_fracWeightsI = new();
             public List<int> saved_fr_verToPartI = new();
+            public FractureThis.FracStruct[] saved_fracStructs = new FractureThis.FracStruct[0];
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
@@ -188,6 +189,12 @@ namespace Zombie1111_uDestruction
             }
 
             fracSavedData.saved_allParts = saveFrom.allParts.ToArray();
+            fracSavedData.saved_fracStructs = new FractureThis.FracStruct[saveFrom.jCDW_job.fStructs.Length];
+            for (int i = 0; i < fracSavedData.saved_fracStructs.Length; i++)
+            {
+                fracSavedData.saved_fracStructs[i] = saveFrom.jCDW_job.fStructs[i];
+            }
+
             fracSavedData.saved_rendVertexCount = saveFrom.fracFilter.sharedMesh.vertexCount;
             fracSavedData.saved_structs_posL = new();
             foreach (Vector3 pos in saveFrom.jCDW_job.structPosL)
@@ -206,20 +213,20 @@ namespace Zombie1111_uDestruction
             fracSavedData.saved_fr_verToPartI = saveFrom.fr_verToPartI.ToList();
 
             //save mesh stuff if prefab
-            if (saveFrom.GetFracturePrefabType() > 0)
+            if (saveFrom.fracPrefabType > 0)
             {
                 //save fracRend mesh
                 fracSavedData.saved_rendMesh.FromMesh(saveFrom.fracFilter.sharedMesh, true);
 
                 //if mesh colliders save the them too
-                if (saveFrom.allParts[0].col is MeshCollider)
+                if (saveFrom.saved_allPartsCol[0] is MeshCollider)
                 {
                     fracSavedData.sMesh_colsVers = new VecArray[saveFrom.allParts.Count];
                     for (int i = 0; i < saveFrom.allParts.Count; i += 1)
                     {
                         fracSavedData.sMesh_colsVers[i] = new()
                         {
-                            vectors = ((MeshCollider)saveFrom.allParts[i].col).sharedMesh.vertices
+                            vectors = ((MeshCollider)saveFrom.saved_allPartsCol[i]).sharedMesh.vertices
                         };
                     }
                 }
@@ -237,12 +244,12 @@ namespace Zombie1111_uDestruction
             fracSavedData.saved_rendMesh.sMesh_boneWeights = saveFrom.fr_boneWeightsSkin.ToArray();
             fracSavedData.saved_rendMesh.sMesh_bindposes = saveFrom.fr_bindPoses.ToArray();
 
-            //because ScriptableObject cannot save actual components we save it on FractureThis
-            saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Count];
-            for (int i = 0; i < saveFrom.allParts.Count; i += 1)
-            {
-                saveFrom.saved_allPartsCol[i] = saveFrom.allParts[i].col;
-            }
+            ////because ScriptableObject cannot save actual components we save it on FractureThis
+            //saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Count];
+            //for (int i = 0; i < saveFrom.allParts.Count; i += 1)
+            //{
+            //    saveFrom.saved_allPartsCol[i] = saveFrom.allParts[i].col;
+            //}
 
 #if UNITY_EDITOR
             EditorUtility.SetDirty(this);
@@ -260,7 +267,7 @@ namespace Zombie1111_uDestruction
         {
             //get if can load
             if (loadTo.saved_fracId != fracSavedData.id
-                || fracSavedData.saved_allParts.Length != loadTo.saved_allPartsCol.Length
+                || fracSavedData.saved_allParts.Length != loadTo.saved_allPartsCol.Count
                 || loadTo.fracRend == null
                 || loadTo.fracRend.transform != loadTo.transform
                 || (loadTo.fracFilter.sharedMesh != null && loadTo.fracFilter.sharedMesh.vertexCount != fracSavedData.saved_rendVertexCount))
@@ -269,27 +276,43 @@ namespace Zombie1111_uDestruction
             }
 
             //Apply saved data to the provided FractureThis instance
+            //Load compute destruction job
             loadTo.jCDW_job = new()
             {
                 structPosL = fracSavedData.saved_structs_posL.ToNativeList(Allocator.Persistent),
                 partsParentI = fracSavedData.saved_structs_parentI.ToNativeList(Allocator.Persistent),
-                kinematicPartIndexes = new(0, Allocator.Persistent)
+                kinematicPartIndexes = new(fracSavedData.saved_kinematicPartsStatus.Count, Allocator.Persistent),
+                fStructs = new(fracSavedData.saved_fracStructs.Length, Allocator.Persistent),
             };
+
+            //Load kinematic parts, and maybe recalculate kinematic parts depending on global setting
             foreach (int partI in fracSavedData.saved_kinematicPartsStatus)
             {
+                //We dont need to add with SetPartKinematicStatus() since it has also been saved with the parent
                 loadTo.jCDW_job.kinematicPartIndexes.Add(partI);
+            }
+
+            if (loadTo.phyMainOptions.mainPhysicsType == FractureThis.OptMainPhysicsType.overlappingIsKinematic
+                && (FracGlobalSettings.recalculateKinematicPartsOnLoad == 2 || (FracGlobalSettings.recalculateKinematicPartsOnLoad == 1 && loadTo.fracPrefabType > 0)))
+            {
+                int partCount = loadTo.saved_allPartsCol.Count;
+                for (int partI = 0; partI < partCount; partI++)
+                {
+                    if (loadTo.GetNearbyFracColliders(loadTo.saved_allPartsCol[partI], FractureThis.GenerationQuality.normal, out _, true) == false) continue;
+
+                    loadTo.SetPartKinematicStatus(partI, true);
+                }
+            }
+
+            //Load part structure
+            foreach (FractureThis.FracStruct fStruct in fracSavedData.saved_fracStructs)
+            {
+                loadTo.jCDW_job.fStructs.Add(fStruct);
             }
 
             loadTo.allParts = fracSavedData.saved_allParts.ToList();
             loadTo.desWeights = fracSavedData.saved_desWeights.ToList();
             loadTo.fr_fracWeightsI = fracSavedData.saved_fracWeightsI.ToList();
-
-            //Restore saved colliders to the allParts array
-            for (int i = 0; i < loadTo.allParts.Count; i++)
-            {
-                loadTo.allParts[i].col = loadTo.saved_allPartsCol[i];
-                loadTo.allParts[i].trans = loadTo.saved_allPartsCol[i].transform;
-            }
 
             //load fracRend mesh if was prefab
             if (fracSavedData.saved_rendMesh.IsValidMeshSaved() == true)
@@ -302,7 +325,7 @@ namespace Zombie1111_uDestruction
             {
                 for (int i = 0; i < loadTo.allParts.Count; i += 1)
                 {
-                    ((MeshCollider)loadTo.allParts[i].col).sharedMesh = new()
+                    ((MeshCollider)loadTo.saved_allPartsCol[i]).sharedMesh = new()
                     {
                         vertices = fracSavedData.sMesh_colsVers[i].vectors
                     };
@@ -325,7 +348,7 @@ namespace Zombie1111_uDestruction
             for (int sI = 0; sI < fracRendMesh.subMeshCount; sI++)
             {
                 loadTo.fr_subTris.Add(new());
-            
+
                 foreach (int vI in fracRendMesh.GetTriangles(sI))
                 {
                     loadTo.fr_subTris[sI].Add(vI);

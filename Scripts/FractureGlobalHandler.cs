@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http.Headers;
 using System.Reflection;
 using Unity.Burst;
 using Unity.Collections;
@@ -14,6 +15,8 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEditor;
+using UnityEditor.Compilation;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Jobs;
 
@@ -102,7 +105,7 @@ namespace Zombie1111_uDestruction
 
         public void OnAddFracPart(FractureThis frac, short partI)
         {
-            partColsInstanceId.TryAdd(frac.allParts[partI].col.GetInstanceID(), new()
+            partColsInstanceId.TryAdd(frac.saved_allPartsCol[partI].GetInstanceID(), new()
             {
                 fracThis = frac,
                 partIndex = partI
@@ -116,7 +119,7 @@ namespace Zombie1111_uDestruction
         {
             for (int i = 0; i < destroyedFrac.allParts.Count; i++)
             {
-                partColsInstanceId.TryRemove(destroyedFrac.allParts[i].col.GetInstanceID(), out _);
+                partColsInstanceId.TryRemove(destroyedFrac.saved_allPartsCol[i].GetInstanceID(), out _);
             }
         }
 
@@ -854,5 +857,78 @@ namespace Zombie1111_uDestruction
             }
         }
         #endregion CollisionHandling
+
+        #region EditorMemoryCleanup
+#if UNITY_EDITOR
+        [InitializeOnLoad]
+        public class EditorCleanup : UnityEditor.AssetModificationProcessor
+        {
+            static EditorCleanup()
+            {
+                CompilationPipeline.compilationFinished += OnCompilationFinished;
+                UnityEditor.EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            }
+
+            private static void OnCompilationFinished(object obj)
+            {
+                OnMemoryClear();
+            }
+
+            private static void OnPlayModeStateChanged(PlayModeStateChange state)
+            {
+                if (state == PlayModeStateChange.ExitingEditMode)
+                {
+                    OnMemoryClear();
+                }
+            }
+
+            private static void OnMemoryClear()
+            {
+                foreach (FractureThis frac in GameObject.FindObjectsOfType<FractureThis>(true))
+                {
+                    frac.eOnly_ignoreNextDraw = true;
+                    frac.ClearUsedGpuAndCpuMemory();
+                }
+            }
+        }
+
+        //debug stopwatch
+        private System.Diagnostics.Stopwatch stopwatch = new();
+
+        public void Debug_toggleTimer(string note = "")
+        {
+            if (stopwatch.IsRunning == false)
+            {
+                stopwatch.Restart();
+            }
+            else
+            {
+                stopwatch.Stop();
+                Debug.Log(note + " time: " + stopwatch.Elapsed.TotalMilliseconds + "ms");
+            }
+        }
+
+        //if been cloned
+        private Dictionary<int, FractureThis> eOnly_beenClonedStatus = new();
+
+        /// <summary>
+        /// Returns true if the given object has been cloned (Editor only)
+        /// </summary>
+        public bool Eonly_HasFracBeenCloned(FractureThis frac, bool saved = false)
+        {
+            if (saved == true)
+            {
+                eOnly_beenClonedStatus[frac.saveAsset.GetInstanceID()] = frac;
+                return true;
+            }
+
+            if (frac.saved_fracId < 0) return false;
+            int id = frac.saveAsset.GetInstanceID();
+            if (frac.GetFracturePrefabType() == 0 && eOnly_beenClonedStatus.TryGetValue(id, out FractureThis oFrac) == true && oFrac != frac && oFrac != null) return true;
+            eOnly_beenClonedStatus[id] = frac;
+            return false;
+        }
+#endif
+        #endregion EditorMemoryCleanup
     }
 }

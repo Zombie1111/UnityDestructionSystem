@@ -104,6 +104,7 @@ namespace Zombie1111_uDestruction
                 if (frac == null || frac.enabled == false || usedAssets.Add(frac.saveAsset) == false)
                 {
                     fracturedCount++;
+                    if (fracturedCount >= toFracture.Length) Debug.Log("Fracture Progress: " + fracturedCount + "/" + toFracture.Length + " (Done)");
                     continue;
                 }
 

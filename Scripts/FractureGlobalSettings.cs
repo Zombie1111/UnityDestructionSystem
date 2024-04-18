@@ -41,5 +41,10 @@ namespace Zombie1111_uDestruction
 
         //A higher value will cause the impact angle/normal to have less affect on the damage done by the impact, a value of 1 will cause it to have 0 affect
         public const float normalInfluenceReduction = 0.0f;
+
+        //If fracture.MainPhyiscsType == OverlappingIsKinematic, the overlapping colliders will always be calculated when fracturing.
+        //But it may be useful to also recalculate it when loading a fracture, recalculating will increase loading time!
+        //0 == never recalculate, 1 == only recalculate for prefab instances, 2 == always recalculate
+        public const byte recalculateKinematicPartsOnLoad = 1;
     }
 }
