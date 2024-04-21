@@ -10,6 +10,10 @@ using g3;
 using OpenCover.Framework.Model;
 using Unity.Collections;
 using Unity.VisualScripting;
+using System.Collections;
+using Unity.Collections.LowLevel.Unsafe;
+
+
 
 
 
@@ -205,12 +209,220 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// By using the add, set and remove functions to modify items.
+        /// You can have a type(indexValues) sorted by a weights(sortValues) and still access them by weight order or by index.
+        /// Reading is besically as fast as reading a single list, writing is slower but faster than writing and then using .sort() to sort the list.
+        /// All indexValues must be unique but you can have identical sortValues
+        /// </summary>
+        public struct NativeSortedIndexes
+        {
+            /// <summary>
+            /// [indexValue] = the sortValue that indexValue has
+            /// </summary>
+            public NativeHashMap<int, float> indexValueToSortValue;
+            
+            /// <summary>
+            /// [0] = the lowest sortValue that exists (The floats are always sorted from lowest to highest)
+            /// </summary>
+            public NativeList<float> sortIndexToSortValue;
+
+            /// <summary>
+            /// [0] = the indexValue that has the lowest sortValue (Sorted from lowest to highest sortValue, sorted by sortIndexToSortValue)
+            /// </summary>
+            public NativeList<int> sortIndexToIndexValue;
+
+            /// <summary>
+            /// Adds the sort-index pair and returns the sortIndex it was added to,
+            /// its highly recommended that you make sure indexValueToSortValue does not already contain the given indexValue!
+            /// </summary>
+            public int Add(float sortValue, int indexValue)
+            {
+                int sortIndex = GetNewSortIndex(sortValue);
+                
+                if (sortIndex >= sortIndexToSortValue.Length)
+                {
+                    sortIndexToSortValue.Add(sortValue);
+                    sortIndexToIndexValue.Add(indexValue);
+                }
+                else
+                {
+                    sortIndexToSortValue.InsertRangeWithBeginEnd(sortIndex, sortIndex + 1);
+                    sortIndexToSortValue[sortIndex] = sortValue;
+                    sortIndexToIndexValue.InsertRangeWithBeginEnd(sortIndex, sortIndex + 1);
+                    sortIndexToIndexValue[sortIndex] = indexValue;
+                }
+
+                indexValueToSortValue.Add(indexValue, sortValue);
+                return sortIndex;
+            }
+
+            /// <summary>
+            /// Sets the sortValue of the given indexValue or adds a new sort-index pair if indexValue does not exist
+            /// </summary>
+            public void SetOrAdd(float newSortValue, int indexValue)
+            {
+                int sortIndex = GetSortIndex(indexValue);
+                if (sortIndex < 0)
+                {
+                    //add
+                    Add(newSortValue, indexValue);
+                    return;
+                }
+
+                //set, just copy from SetAt()
+                int newSortIndex = GetNewSortIndex(newSortValue);
+
+                indexValueToSortValue[indexValue] = newSortValue;
+                if (newSortIndex == sortIndex)
+                {
+                    sortIndexToSortValue[sortIndex] = newSortValue;
+                    return;
+                }
+
+                sortIndexToSortValue.RemoveAt(sortIndex);
+                sortIndexToIndexValue.RemoveAt(sortIndex);
+
+                if (newSortIndex > sortIndex)
+                {
+                    // If moving to a higher index, the new index should be reduced by 1
+                    newSortIndex--;
+                }
+
+                if (newSortIndex >= sortIndexToSortValue.Length)
+                {
+                    sortIndexToSortValue.Add(newSortValue);
+                    sortIndexToIndexValue.Add(indexValue);
+                }
+                else
+                {
+                    sortIndexToSortValue.InsertRangeWithBeginEnd(newSortIndex, newSortIndex + 1);
+                    sortIndexToSortValue[newSortIndex] = newSortValue;
+                    sortIndexToIndexValue.InsertRangeWithBeginEnd(newSortIndex, newSortIndex + 1);
+                    sortIndexToIndexValue[newSortIndex] = indexValue;
+                }
+            }
+
+            /// <summary>
+            /// Sets the sortValue, will cause exception if indexValue or sortIndex does not exist
+            /// </summary>
+            public void SetAt(float newSortValue, int indexValue, int sortIndex)
+            {
+                int newSortIndex = GetNewSortIndex(newSortValue);
+
+                indexValueToSortValue[indexValue] = newSortValue;
+                if (newSortIndex == sortIndex)
+                {
+                    sortIndexToSortValue[sortIndex] = newSortValue;
+                    return;
+                }
+
+                sortIndexToSortValue.RemoveAt(sortIndex);
+                sortIndexToIndexValue.RemoveAt(sortIndex);
+
+                if (newSortIndex > sortIndex)
+                {
+                    // If moving to a higher index, the new index should be reduced by 1
+                    newSortIndex--;
+                }
+
+                if (newSortValue >= sortIndexToSortValue.Length)
+                {
+                    sortIndexToSortValue.Add(newSortValue);
+                    sortIndexToIndexValue.Add(indexValue);
+                }
+                else
+                {
+                    sortIndexToSortValue.InsertRangeWithBeginEnd(newSortIndex, newSortIndex + 1);
+                    sortIndexToSortValue[newSortIndex] = newSortValue;
+                    sortIndexToIndexValue.InsertRangeWithBeginEnd(newSortIndex, newSortIndex + 1);
+                    sortIndexToIndexValue[newSortIndex] = indexValue;
+                }
+            }
+
+            /// <summary>
+            /// Removes a sort-index pair that has the given indexValue
+            /// </summary>
+            public void Remove(int indexValue)
+            {
+                int sortIndex = GetSortIndex(indexValue);
+                if (sortIndex < 0)
+                {
+                    return;
+                }
+
+                sortIndexToSortValue.RemoveAt(sortIndex);
+                sortIndexToIndexValue.RemoveAt(sortIndex);
+                indexValueToSortValue.Remove(indexValue);
+            }
+
+            /// <summary>
+            /// Removes the sort-index pair, will cause exception if indexValue or sortIndex does not exist
+            /// </summary>
+            public void RemoveAt(int indexValue, int sortIndex)
+            {
+                sortIndexToSortValue.RemoveAt(sortIndex);
+                sortIndexToIndexValue.RemoveAt(sortIndex);
+                indexValueToSortValue.Remove(indexValue);
+            }
+
+            /// <summary>
+            /// Returns the sortIndex the given indexValue has, returns -1 if indexValue does not exist
+            /// </summary>
+            public readonly int GetSortIndex(int indexValue)
+            {
+                if (indexValueToSortValue.TryGetValue(indexValue, out float oldSortValue) == false)
+                {
+                    return -1;
+                }
+
+                //In theory we should be able to just search for indexValue in sortIndexToIndexValue directly but that caused issues when I tested it ealier??
+                int sortIndex = GetNewSortIndex(oldSortValue);
+                if (sortIndex > 0) sortIndex--;
+
+                while (sortIndex < sortIndexToIndexValue.Length)
+                {
+                    if (sortIndexToIndexValue[sortIndex] == indexValue)
+                    {
+                        return sortIndex;
+                    }
+
+                    sortIndex++;
+                }
+
+                Debug.LogError("Expected indexValue to be found, will pretend it does not exist! Since we know indexValueToSortValue contains indexValue," +
+                    " that means either BinarySearch or sortIndexToIndexValue is incorrect. Should we implement a fallback method?");
+                return -1;
+            }
+
+            /// <summary>
+            /// Returns the sortIndex sortValue should be added to, to maintain a sorted list
+            /// </summary>
+            public readonly int GetNewSortIndex(float sortValue)
+            {
+                int sortIndex = sortIndexToSortValue.BinarySearch(sortValue);
+                if (sortIndex < 0) return ~sortIndex; // Bitwise complement to get the insert position
+                return sortIndex;
+            }
+
+            public void Clear()
+            {
+                sortIndexToIndexValue.Clear();
+                sortIndexToSortValue.Clear();
+                indexValueToSortValue.Clear();
+            }
+
+            public NativeSortedIndexes(Allocator allocator, int initialCapacity = 4)
+            {
+                indexValueToSortValue = new NativeHashMap<int, float>(initialCapacity, allocator);
+                sortIndexToIndexValue = new NativeList<int>(initialCapacity, allocator);
+                sortIndexToSortValue = new NativeList<float>(initialCapacity, allocator);
+            }
+        }
+
+        /// <summary>
         /// Adds the float to the list (low to high) and returns the index the item was inserted at
         /// </summary>
-        /// <param name="list"></param>
-        /// <param name="item"></param>
-        /// <returns></returns>
-        public static int InsertSorted(List<float> list, float item)
+        public static int InsertSorted(ref List<float> list, float item)
         {
             int index = list.BinarySearch(item);
             if (index < 0)
@@ -219,6 +431,71 @@ namespace Zombie1111_uDestruction
             if (list.Count > 1 && index == 0) index = 1;
             list.Insert(index, item);
             return index;
+        }
+
+        /// <summary>
+        /// Moves the item at oldIndex to newIndex (removeAt->Insert)
+        /// </summary>
+        public static void MoveItem<T>(ref List<T> list, int oldIndex, int newIndex)
+        {
+            if (oldIndex == newIndex) return;
+            
+            T item = list[oldIndex];
+            list.RemoveAt(oldIndex);
+
+            if (newIndex > oldIndex)
+            {
+                // If moving to a higher index, the new index should be reduced by 1
+                newIndex--;
+            }
+
+            list.Insert(newIndex, item);
+        }
+
+        public static List<T> NativeListToList<T>(NativeList<T> nativeList) where T : unmanaged
+        {
+            // Create a new List<T> to hold the converted elements
+            List<T> list = new(nativeList.Length);
+
+            // Iterate through the NativeList and add each element to the List
+            for (int i = 0; i < nativeList.Length; i++)
+            {
+                list.Add(nativeList[i]);
+            }
+
+            // Return the converted List
+            return list;
+        }
+
+        public static Dictionary<TKey, TValue> NativeHashMapToDictorary<TKey, TValue>(NativeHashMap<TKey, TValue> nativeHashMap)
+       where TKey : unmanaged, System.IEquatable<TKey>
+       where TValue : unmanaged
+        {
+            // Create a new Dictionary<TKey, TValue> to hold the converted elements
+            Dictionary<TKey, TValue> dictionary = new(nativeHashMap.Count);
+
+            foreach (var pair in nativeHashMap)
+            {
+                dictionary.Add(pair.Key, pair.Value);
+            }
+
+            // Return the converted Dictionary
+            return dictionary;
+        }
+
+        public static List<T> NativeArrayToList<T>(NativeArray<T> nativeArray) where T : unmanaged
+        {
+            // Create a new List<T> to hold the converted elements
+            List<T> list = new(nativeArray.Length);
+
+            // Iterate through the NativeArray and add each element to the List
+            for (int i = 0; i < nativeArray.Length; i++)
+            {
+                list.Add(nativeArray[i]);
+            }
+
+            // Return the converted List
+            return list;
         }
 
         /// <summary>

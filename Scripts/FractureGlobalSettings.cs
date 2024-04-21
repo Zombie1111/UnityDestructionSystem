@@ -46,5 +46,8 @@ namespace Zombie1111_uDestruction
         //But it may be useful to also recalculate it when loading a fracture, recalculating will increase loading time!
         //0 == never recalculate, 1 == only recalculate for prefab instances, 2 == always recalculate
         public const byte recalculateKinematicPartsOnLoad = 1;
+
+        //How much weaker a material can be depending on the difference between force direction and structure direction.
+        public const float transDirInfluenceReduction = 0.5f;
     }
 }
