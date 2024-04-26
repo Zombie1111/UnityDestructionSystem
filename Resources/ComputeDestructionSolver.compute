@@ -1,11 +1,11 @@
-
+#include "ComputeGlobalSettings.cginc"
 
 
 struct FracWeight
 {
     int stWe_lenght;
-    int structsI[32];
-    float weights[32];
+    int structsI[maxDeformationBones];
+    float weights[maxDeformationBones];
 };
 
 struct BoneWeight
@@ -131,13 +131,5 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     //Write updated vertics and normals to mesh
     verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
     verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
-}
-
-#pragma kernel ApplySkinDef
-
-[numthreads(128, 1, 1)]
-void ApplySkinDef(uint3 id : SV_DispatchThreadID)
-{
-    
 }
 

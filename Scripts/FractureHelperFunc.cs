@@ -12,6 +12,7 @@ using Unity.Collections;
 using Unity.VisualScripting;
 using System.Collections;
 using Unity.Collections.LowLevel.Unsafe;
+using UnityEngine.Experimental.Rendering;
 
 
 
@@ -524,6 +525,15 @@ namespace Zombie1111_uDestruction
             }
         }
 
+        public static void SetWholeNativeArray<T>(ref NativeArray<T> nativeFA, T newValue) where T : unmanaged
+        {
+            int aCount = nativeFA.Length;
+            for (int i = 0; i < aCount; i++)
+            {
+                nativeFA[i] = newValue;
+            }
+        }
+
         /// <summary>
         /// Returns true if boundsA = boundsB (Size and position wize)
         /// </summary>
@@ -764,12 +774,13 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns 1 if dir2 point in the same direction as dir1, Returns -1 if dir2 point in the opposite direction as dir2
+        /// Returns 1 if dir2 point in the same direction as dir1, Returns -1 if dir2 point in the opposite direction as dir2. Always return 1 if dir1 or dir2 is zero
         /// </summary>
         /// <param name="dir1">Should be normalized</param>
         /// <param name="dir2">Should be normalized</param>
         public static float GetDirectionSimularity(Vector3 dir1, Vector3 dir2)
         {
+            if (dir1.sqrMagnitude < 0.00001f || dir2.sqrMagnitude < 0.00001f) return 1.0f;
             return Vector3.Dot(dir1, dir2);
         }
 
@@ -1364,21 +1375,22 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Converts normals and vertices of the given mesh into worldspace (Modifies the given mesh)
+        /// Transforms normals, vertices and mesh bounds of the given mesh by the given matrix
         /// </summary>
         public static void ConvertMeshWithMatrix(ref Mesh mesh, Matrix4x4 lTwMatrix)
         {
             //mesh.SetVertices(ConvertPositionsWithMatrix(mesh.vertices, lTwMatrix));
             mesh.SetVertices(ConvertPositionsWithMatrix(mesh.vertices, lTwMatrix));
             mesh.SetNormals(ConvertDirectionsWithMatrix(mesh.normals, lTwMatrix));
+            mesh.RecalculateBounds();
             //return mesh;
         }
 
         /// <summary>
         /// Returns a float for each mesh that is each mesh size compared to each other. All floats added = 1.0f
         /// </summary>
-        /// <param name="useMeshBounds">If true, Mesh.bounds is used to get scales (Faster but less accurate)</param>
-        public static List<float> GetPerMeshScale(Mesh[] meshes, bool useMeshBounds = false)
+        /// <param name="useMeshBounds">If true, Mesh.bounds is used to get scales (Much faster)</param>
+        public static List<float> GetPerMeshScale(Mesh[] meshes, bool useMeshBounds = true)
         {
             List<float> meshVolumes = new();
             float totalVolume = 0.0f;
@@ -2422,7 +2434,7 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        public static void Debug_drawBox(Vector3 position, float size, Color color, float duration = 0.1f)
+        public static void Debug_drawBox(Vector3 position, float size, Color color, float duration = 0.1f, bool doOcclusion = true)
         {
             Vector3 halfSize = 0.5f * size * Vector3.one;
 
@@ -2438,20 +2450,20 @@ namespace Zombie1111_uDestruction
             corners[7] = position + new Vector3(-halfSize.x, halfSize.y, halfSize.z);
 
             // Draw lines between corners to form the box
-            Debug.DrawLine(corners[0], corners[1], color, duration);
-            Debug.DrawLine(corners[1], corners[2], color, duration);
-            Debug.DrawLine(corners[2], corners[3], color, duration);
-            Debug.DrawLine(corners[3], corners[0], color, duration);
+            Debug.DrawLine(corners[0], corners[1], color, duration, doOcclusion);
+            Debug.DrawLine(corners[1], corners[2], color, duration, doOcclusion);
+            Debug.DrawLine(corners[2], corners[3], color, duration, doOcclusion);
+            Debug.DrawLine(corners[3], corners[0], color, duration, doOcclusion);
 
-            Debug.DrawLine(corners[4], corners[5], color, duration);
-            Debug.DrawLine(corners[5], corners[6], color, duration);
-            Debug.DrawLine(corners[6], corners[7], color, duration);
-            Debug.DrawLine(corners[7], corners[4], color, duration);
+            Debug.DrawLine(corners[4], corners[5], color, duration, doOcclusion);
+            Debug.DrawLine(corners[5], corners[6], color, duration, doOcclusion);
+            Debug.DrawLine(corners[6], corners[7], color, duration, doOcclusion);
+            Debug.DrawLine(corners[7], corners[4], color, duration, doOcclusion);
 
-            Debug.DrawLine(corners[0], corners[4], color, duration);
-            Debug.DrawLine(corners[1], corners[5], color, duration);
-            Debug.DrawLine(corners[2], corners[6], color, duration);
-            Debug.DrawLine(corners[3], corners[7], color, duration);
+            Debug.DrawLine(corners[0], corners[4], color, duration, doOcclusion);
+            Debug.DrawLine(corners[1], corners[5], color, duration, doOcclusion);
+            Debug.DrawLine(corners[2], corners[6], color, duration, doOcclusion);
+            Debug.DrawLine(corners[3], corners[7], color, duration, doOcclusion);
         }
 #endif
     }

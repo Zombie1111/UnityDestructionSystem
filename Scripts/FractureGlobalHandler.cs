@@ -660,7 +660,8 @@ namespace Zombie1111_uDestruction
                 iPair.impFrac.RegisterImpact(new()
                 {
                     impForceTotal = maxImp,
-                    impVel = iPair.impVel
+                    impVel = iPair.impVel,
+                    parentI = iPair.impFrac.jCDW_job.partsParentI[iPair.impPoints[maxImpI].partI]
                 }, iPair.impPoints.ToNativeArray(Allocator.Persistent), iPair.sourceRb, impId, false);
             }
 

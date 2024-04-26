@@ -717,7 +717,7 @@ namespace Zombie1111_uDestruction
             public float parentMass;
 
             /// <summary>
-            /// The total number of kinematic parts that uses this parent
+            /// If > 0 the parent is kinematic, usually also the total number of kinematic parts in this parent
             /// </summary>
             public int parentKinematic;
 
@@ -736,25 +736,26 @@ namespace Zombie1111_uDestruction
             /// <summary>
             /// The index of every struct in the weight
             /// </summary>
-            public fixed int structsI[32];
+            public fixed int structsI[FracGlobalSettings.maxDeformationBones];
 
             /// <summary>
             /// The weight of each structI (Total = 1.0f)
             /// </summary>
-            public fixed float weights[32];
+            public fixed float weights[FracGlobalSettings.maxDeformationBones];
 
             /// <summary>
-            /// Creates a new FracWeight and assigns it with the given lists. (The given lists lenght should be the same and less than 32 to avoid data loss)
+            /// Creates a new FracWeight and assigns it with the given lists. (The given lists lenght should be the same and less than FracGlobalSettings.maxDeformationBones to avoid data loss)
             /// </summary>
             public static FracWeight New(List<int> dStructsI, List<float> dWeights)
             {
                 FracWeight newWE = new()
                 {
-                    stWe_lenght = Mathf.Min(dStructsI.Count, dWeights.Count, 32)
+                    stWe_lenght = Mathf.Min(dStructsI.Count, dWeights.Count, FracGlobalSettings.maxDeformationBones)
                 };
 
 #if !FRAC_NO_WARNINGS
-                if (dStructsI.Count > 32 || dWeights.Count > 32) Debug.LogWarning("FracWeight cannot have more than 32 bones, data will be lost!");
+                if (dStructsI.Count > FracGlobalSettings.maxDeformationBones || dWeights.Count > FracGlobalSettings.maxDeformationBones)
+                    Debug.LogWarning("FracWeight cannot have more than " + FracGlobalSettings.maxDeformationBones + " bones, data will be lost!");
                 else if (dStructsI.Count != dWeights.Count) Debug.LogWarning("dStructsI and dWeights must have the same lenght, data will be lost!");
 #endif
 
@@ -776,7 +777,7 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public int desMatI;
             public byte neighbourPartI_lenght;
-            public fixed short neighbourPartI[16];
+            public fixed short neighbourPartI[FracGlobalSettings.maxPartNeighbourCount];
 
             /// <summary>
             /// The maximum transport capacity this part has ever consumed in % (Example, 0.9 means if it had gotten 10% more force it would have broken)
@@ -1106,6 +1107,9 @@ namespace Zombie1111_uDestruction
 
         public class FracSource
         {
+            /// <summary>
+            /// The mesh in worldSpace, dont forget to recalculate bounds after you transform mesh from local to world!
+            /// </summary>
             public Mesh meshW;
 
             /// <summary>
@@ -1449,7 +1453,6 @@ namespace Zombie1111_uDestruction
                     }
 
                     cpKernelId_ComputeSkinDef = computeDestructionSolver.FindKernel("ComputeSkinDef");
-                    cpKernelId_ApplySkinDef = computeDestructionSolver.FindKernel("ApplySkinDef");
                 }
 
                 //sync vertics, normals, verToPartI and fracWeightsI with gpu
@@ -1480,7 +1483,7 @@ namespace Zombie1111_uDestruction
                 {
                     //sync desWeights
                     buf_desWeights = new ComputeBuffer(desWeights.Count,
-                        (sizeof(int) * 32) + (sizeof(float) * 32) + sizeof(int));
+                        (sizeof(int) * FracGlobalSettings.maxDeformationBones) + (sizeof(float) * FracGlobalSettings.maxDeformationBones) + sizeof(int));
 
                     buf_desWeights.SetData(desWeights.ToArray());
                     computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "desWeights", buf_desWeights);
@@ -1710,6 +1713,10 @@ namespace Zombie1111_uDestruction
                     //foreach (int nearPI in allParts[partI].neighbourStructs)
                     for (byte neI = 0; neI < fStruct.neighbourPartI_lenght; neI++)
                     {
+                        if (fStruct.neighbourPartI[neI] < 0)
+                        {
+                            Debug.Log(partI);
+                        }
                         AddWeightFromStruct(fStruct.neighbourPartI[neI]);
                     }
 
@@ -2010,16 +2017,30 @@ namespace Zombie1111_uDestruction
 
                     //add neighbours to newPart struct and add newPart to neighbours
                     FracStruct fStruct = jCDW_job.fStructs[nearPartI];
+#if !FRAC_NO_WARNINGS
+                    if (fStruct.neighbourPartI_lenght >= FracGlobalSettings.maxPartNeighbourCount)
+                    {
+                        Debug.LogWarning("part index " + nearPartI + " cannot have more than " + FracGlobalSettings.maxPartNeighbourCount + " neighbours, data will be lost!");
+                        continue;
+                    }
+#endif
+
                     fStruct.neighbourPartI[fStruct.neighbourPartI_lenght] = newPartI;
                     fStruct.neighbourPartI_lenght++;
                     jCDW_job.fStructs[nearPartI] = fStruct;
-                    //allParts[nearPartI].neighbourStructs.Add(newPartI);
 
                     fStruct = jCDW_job.fStructs[newPartI];
+#if !FRAC_NO_WARNINGS
+                    if (fStruct.neighbourPartI_lenght >= FracGlobalSettings.maxPartNeighbourCount)
+                    {
+                        Debug.LogWarning("part index " + newPartI + " cannot have more than " + FracGlobalSettings.maxPartNeighbourCount + " neighbours, data will be lost!");
+                        continue;
+                    }
+#endif
+
                     fStruct.neighbourPartI[fStruct.neighbourPartI_lenght] = nearPartI;
                     fStruct.neighbourPartI_lenght++;
                     jCDW_job.fStructs[newPartI] = fStruct;
-                    //allParts[newPartI].neighbourStructs.Add(nearPartI);
 
                     partMainNeighbour = nearPartI;
                 }
@@ -2183,9 +2204,10 @@ namespace Zombie1111_uDestruction
                     transToUse.gameObject.tag = gameObject.tag;
                     transToUse.position = transform.position;//just to make orgin somewhat relevant
                     transToUse.SetParent(transform);
-                    if (phyMainOptions.mainPhysicsType != OptMainPhysicsType.alwaysKinematic) parentRb = transToUse.gameObject.AddComponent<Rigidbody>();
+                    if ((newParentI != 0 || phyMainOptions.mainPhysicsType != OptMainPhysicsType.orginalIsKinematic)
+                        && phyMainOptions.mainPhysicsType != OptMainPhysicsType.alwaysKinematic) parentRb = transToUse.gameObject.AddComponent<Rigidbody>();
                 }
-                else transToUse.GetComponent<Rigidbody>();
+                else parentRb = transToUse.GetComponent<Rigidbody>();
 
                 allParents.Add(new()
                 {
@@ -2222,6 +2244,10 @@ namespace Zombie1111_uDestruction
                 allParents[parentI].parentTrans.gameObject.SetActive(false);
                 return;//why bother updating other stuff if its disabled
             }
+
+            //if main parent should be kinematic make sure it always is
+            if (((phyMainOptions.mainPhysicsType == OptMainPhysicsType.orginalIsKinematic && parentI == 0)
+                || phyMainOptions.mainPhysicsType == OptMainPhysicsType.alwaysKinematic) && allParents[parentI].parentKinematic <= 0) allParents[parentI].parentKinematic = 1;
 
             //update parent rigidbody
             if (allParents[parentI].parentRb != null)
@@ -2637,7 +2663,7 @@ namespace Zombie1111_uDestruction
                 return null;
             }
 
-            //convert all meshes to world space
+            //transform all meshes to worldSpace
             HashSet<List<float>> newGroupIds = new();
             for (int i = 0; i < meshesToFrac.Count; i++)
             {
@@ -2794,7 +2820,7 @@ namespace Zombie1111_uDestruction
             return splittedMeshes;
         }
 
-        #endregion GenerateFractureSystem
+#endregion GenerateFractureSystem
 
 
 
@@ -2811,7 +2837,7 @@ namespace Zombie1111_uDestruction
         /// </summary>
         [System.NonSerialized] public bool fractureIsValid = false;
 
-        private void Start()
+        private unsafe void Start()
         {
 #if UNITY_EDITOR
             if (Application.isPlaying == false) return;
@@ -2843,7 +2869,7 @@ namespace Zombie1111_uDestruction
             //if (groupDataDefualt.transportCapacity < lowestTransportCapacity) lowestTransportCapacity = groupDataDefualt.transportCapacity;
 
             //setup compute destruction
-            jCDW_job.desSource = new NativeArray<DestructionSource>(0, Allocator.Persistent);
+            jCDW_job.desSources = new NativeArray<DestructionSource>(0, Allocator.Persistent);
             jCDW_job.desProps = DestructionMaterials.Select(desMat => desMat.desProps).ToList().ToNativeArray(Allocator.Persistent);
             jCDW_job.partBoneOffset = partBoneOffset;
             destructionSources = new();
@@ -3052,14 +3078,13 @@ namespace Zombie1111_uDestruction
             if (jCDW_job.structPosL.IsCreated == true) jCDW_job.structPosL.Dispose();
             if (jCDW_job.partsParentI.IsCreated == true) jCDW_job.partsParentI.Dispose();
             if (jCDW_job.kinematicPartIndexes.IsCreated == true) jCDW_job.kinematicPartIndexes.Dispose();
-            if (jCDW_job.desSource.IsCreated == true) jCDW_job.desSource.Dispose();
+            if (jCDW_job.desSources.IsCreated == true) jCDW_job.desSources.Dispose();
             if (jCDW_job.fStructs.IsCreated == true) jCDW_job.fStructs.Dispose();
             if (jCDW_job.desProps.IsCreated == true) jCDW_job.desProps.Dispose();
             if (jCDW_job.bonesLToW.IsCreated == true) jCDW_job.bonesLToW.Dispose();
         }
 
         private int cpKernelId_ComputeSkinDef = -1;
-        private int cpKernelId_ApplySkinDef = -1;
         private ComputeShader computeDestructionSolver;
 
         #endregion MainUpdateFunctions
@@ -3236,16 +3261,16 @@ namespace Zombie1111_uDestruction
             }
 #endif
 
-            if (jCDW_jobIsActive == true) return;
+            if (jCDW_jobIsActive == true || destructionSources.Count == 0) return;
 
             //set job destruction sources
-            int desSLenght = jCDW_job.desSource.Length;
+            int desSLenght = jCDW_job.desSources.Length;
             int desOCount = destructionSources.Count;
             if (desSLenght < desOCount)
             {
-                if (jCDW_job.desSource.IsCreated == true) jCDW_job.desSource.Dispose();
+                if (jCDW_job.desSources.IsCreated == true) jCDW_job.desSources.Dispose();
                 desSLenght = desOCount;
-                jCDW_job.desSource = new NativeArray<DestructionSource>(desSLenght, Allocator.Persistent);
+                jCDW_job.desSources = new NativeArray<DestructionSource>(desSLenght, Allocator.Persistent);
                 FractureHelperFunc.SetListLenght(ref jCDW_bodies, desSLenght);
             }
 
@@ -3256,14 +3281,14 @@ namespace Zombie1111_uDestruction
                 //dispose previous impPoints to prevent memory leak
                 if (i >= desOCount)
                 {
-                    var source = jCDW_job.desSource[i];
+                    var source = jCDW_job.desSources[i];
                     source.impForceTotal = -1;
-                    jCDW_job.desSource[i] = source;
+                    jCDW_job.desSources[i] = source;
                     jCDW_bodies[i] = null;
                 }
                 else
                 {
-                    jCDW_job.desSource[i] = destructionSources[deskeys[i]];
+                    jCDW_job.desSources[i] = destructionSources[deskeys[i]];
                     jCDW_bodies[i] = destructionBodies[deskeys[i]];
                 }
             }
@@ -3271,6 +3296,9 @@ namespace Zombie1111_uDestruction
             destructionSources.Clear();
             destructionBodies.Clear();
             destructionPairs.Clear();//The nativeArrays will be disposed later by the worker
+
+            //update bone matrixes
+            jCDW_job.bonesLToW_ = jGTD_job.fracBonesLToW.AsReadOnly();
 
             //run the job
             jCDW_jobIsActive = true;
@@ -3301,16 +3329,25 @@ namespace Zombie1111_uDestruction
         public ComputeDestruction_work jCDW_job;
         private JobHandle jCDW_handle;
 
-        [BurstCompile]
+        //[BurstCompile]
         public struct ComputeDestruction_work : IJob
         {
             //solve destruction
             public NativeList<Vector3> structPosL;
+
+            /// <summary>
+            /// The parent index each part has
+            /// </summary>
             public NativeList<int> partsParentI;
+
+            /// <summary>
+            /// Contains all part indexes that are kinematic
+            /// </summary>
             public NativeHashSet<int> kinematicPartIndexes;
-            public NativeArray<DestructionSource> desSource;    
+            public NativeArray<DestructionSource> desSources;    
             public NativeList<FracStruct> fStructs;
             public NativeArray<DestructionMaterial.DesProperties> desProps;
+            public NativeArray<Matrix4x4>.ReadOnly bonesLToW_;
 
             /// <summary>
             /// The local to world matrix for every bone (Parts bones + skinned bones), skinned bones are first
@@ -3320,80 +3357,187 @@ namespace Zombie1111_uDestruction
 
             public unsafe void Execute()
             {
+                //Since its useless and you cant access fields from localLocal functions, I have to assign it like this
+                var _desSources = desSources;
+                var _partsParentI = partsParentI;
+                var _fStructs = fStructs;
+                var _desProps = desProps;
                 int partCount = structPosL.Length;
+                var _KinParts = kinematicPartIndexes;
 
-                for (int sourceI = 0; sourceI < desSource.Length; sourceI++)
+                for (int i = 0; i < _desProps.Length; i++)
                 {
-                    NativeArray<float> forceTrans = new(partCount, Allocator.Temp);
-                    NativeArray<float> forceCap = new(partCount, Allocator.Temp);
-                    NativeArray<float> forceCons = new(partCount, Allocator.Temp);
+                    Debug.Log(_desProps[i].mass);
+                }
 
-                    float totForce = desSource[sourceI].impForceTotal;//The total force we have left to work with
-                    float totMass = 0.0f;//The total mass of all objects
-                    int partI;//Always the part index we are currently working with
-                    FracStruct fStruct;//Always the fracStruct we are currently working with
-                    
-                    NativeQueue<int> pToUpdate = new(Allocator.Temp);
+                //Allocate global used variabels
+                NativeArray<float> forceRes = new(partCount, Allocator.Temp); //The resistance each part can make to movement
+                NativeArray<float> forceTrans = new(partCount, Allocator.Temp); //How much force X has transported to its neighbours
+                NativeArray<float> forceCons = new(partCount, Allocator.Temp); //How much force that is currently applied to part X
+                NativeArray<Vector3> structsWPosOg = new(partCount, Allocator.Temp);
+                NativeArray<Vector3> structsWPos = new(partCount, Allocator.Temp);
+                NativeQueue<int> pToUpdate = new(Allocator.Temp); //Contains all part indexes that we should compute next
+                float totForce; //The total force we have left to work with
+                DestructionSource desSource; //The destruction source we are currently working with
+                NativeHashSet<int> partsThatWillBreak = new(8, Allocator.Temp);
+
+                //get all parts world position
+                structsWPos = new(partCount, Allocator.Temp);
+
+                for (int partI = 0; partI < partCount; partI++)
+                {
+                    structsWPos[partI] = bonesLToW_[partI + partBoneOffset].MultiplyPoint3x4(structPosL[partI]);
+                }
+
+                //Loop all sources and compute them
+                for (int sourceI = 0; sourceI < desSources.Length; sourceI++)
+                {
+                    CalcSource(sourceI);
+                }
+
+                unsafe void CalcSource(int sourceI)
+                {
+                    //get the source
+                    desSource = _desSources[sourceI];
+                    if (desSource.impForceTotal <= 0.0f) return;
+                    totForce = desSource.impForceTotal;
+                    pToUpdate.Clear();
+
+                    //reset nativeArrays
+                    FractureHelperFunc.SetWholeNativeArray(ref forceRes, 0.0f);//To prevent devision by zero
+                    FractureHelperFunc.SetWholeNativeArray(ref forceCons, 0.0f);//To prevent devision by zero
+                    FractureHelperFunc.SetWholeNativeArray(ref forceTrans, 0.0f);
 
                     //add impact forces to forceCons
                     NativeArray<DestructionPoint> desPoints = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<DestructionPoint>(
-                                        desSource[sourceI].desPoints_ptr, desSource[sourceI].desPoints_lenght, Allocator.Temp);
+                                        desSource.desPoints_ptr, desSource.desPoints_lenght, Allocator.Temp);
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                    NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref desPoints, AtomicSafetyHandle.GetTempMemoryHandle());
+#endif
+                    //get all impacts that has higher force than the highest impact force * 0.9f
+                    NativeArray<int> partDisOrder = new(partCount, Allocator.Temp);//Index 0 is a impact part
+                    NativeArray<int> partDisLayer = new(partCount, Allocator.Temp);//The layer each part has
+
+                    float maxForce = 0.0f;
+                    foreach (var point in desPoints)
+                    {
+                        if (point.force > maxForce) maxForce = point.force;
+                    }
+
+                    maxForce *= 0.9f;
+                    int nextOrderI = 0;
+                    int nextLayerI = 1;//We must start at 1 since defualt is 0 and we must know if it has been assigned
+                    DestructionPoint desPoint;
 
                     for (int impI = 0; impI < desPoints.Length; impI++)
                     {
-                        partI = desPoints[impI].partI;
-                        forceCons[partI] += desPoints[impI].force;
-
-                        fStruct = fStructs[partI];
-                        for (int nI = 0; nI < fStruct.neighbourPartI_lenght; nI++)
+                        desPoint = desPoints[impI];
+                        if (desPoint.force > maxForce)
                         {
-                            pToUpdate.Enqueue(fStruct.neighbourPartI[nI]);
+                            partDisOrder[nextOrderI] = desPoint.partI;
+                            nextOrderI++;
+
+                            partDisLayer[desPoint.partI] = nextLayerI;
                         }
                     }
 
-                    //get all parts world pos
-                    NativeArray<Vector3> structsWPos = new(partCount, Allocator.Temp);
-                    for (partI = 0; partI < partCount; partI++)
+                    desPoints.Max(point => point.force);
+
+                    //Get each part distance to any 90% impact
+                    int oI = 0;
+                    FracStruct fPart;
+
+                    while (oI < partCount)
                     {
-                        structsWPos[partI] = bonesLToW[partI + partBoneOffset].MultiplyPoint3x4(structPosL[partI]);
+                        int innerLoopStop = nextOrderI;
+                        nextLayerI++;
+
+                        while (oI < innerLoopStop)
+                        {
+
+                            fPart = _fStructs[partDisOrder[oI]];
+                            oI++;
+
+                            for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                            {
+                                int npI = fPart.neighbourPartI[nI];
+
+                                if (partDisLayer[npI] != 0 || _partsParentI[npI] != desSource.parentI) continue;
+                                partDisLayer[npI] = nextLayerI;
+                                partDisOrder[nextOrderI] = npI;
+                                nextOrderI++;
+                            }
+                        }
                     }
 
-                    //Loop until we have computed how much force was applied to each part
-                    DestructionMaterial.DesProperties desProp;//The desProperties for partI
+                    //get the mass each part would need to "push"
+                    int usedStartCount = Mathf.NextPowerOfTwo(partCount / nextLayerI);
+                    NativeHashSet<int> usedPI = new(partCount, Allocator.Temp);
+                    NativeList<int> usedTPI = new(usedStartCount, Allocator.Temp);
+                    NativeHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
+                    DestructionMaterial.DesProperties desProp;
 
-                    while (pToUpdate.TryDequeue(out partI) == true)
+                    for (oI = partCount - 1; oI >= 0; oI--)
                     {
-                        //get its fStruct
-                        fStruct = fStructs[partI];
-                        int parentI = partsParentI[partI];
-                        desProp = desProps[fStruct.desMatI];
+                        int partI = partDisOrder[oI];
+                       
+                        if (usedPI.Contains(partI) == true) continue;
 
-                        //Its forceCap is 0 if looping for first time, get its forceCap and more
-                        if (forceCap[partI] == 0.0f)
+                        int layerI = partDisLayer[partI];
+                        int npI;
+                        float resMass = 0.0f;
+                        float totTransCap = 0.0f;
+                        usedTPI.Clear();
+                        usedNPI.Clear();
+                        usedTPI.Add(partI);
+
+                        for (int uI = 0; uI < usedTPI.Length; uI++)
                         {
-                            float tempFCap = desProp.transportCapacity - (desProp.transportCapacity * fStruct.maxTransportUsed * desProp.transportMaxDamage);
+                            partI = usedTPI[uI];
+                            fPart = _fStructs[partI];
+                            desProp = _desProps[fPart.desMatI];
+                            resMass += desProp.mass;
+                            totTransCap += desProp.transportCapacity;
 
-                            for (int nI = 0; nI < fStruct.neighbourPartI_lenght; nI++)
+                            for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
                             {
-                                if (parentI != partsParentI[fStruct.neighbourPartI[nI]]) continue;
+                                npI = fPart.neighbourPartI[nI];
 
-                                forceCap[partI] += tempFCap * Mathf.Clamp01(FracGlobalSettings.transDirInfluenceReduction + Mathf.Abs(
-                                        Vector3.Dot(desSource[sourceI].impVel.normalized, (structsWPos[fStruct.neighbourPartI[nI]] - structsWPos[partI]).normalized)));
+                                if (partDisLayer[npI] < layerI) continue;
+                                if (partDisLayer[npI] > layerI)
+                                {
+                                    if (usedNPI.Add(npI) == false) continue;
+                                    resMass += forceRes[npI];
+                                    continue;
+                                }
+
+                                if (usedPI.Add(npI) == false) continue;
+                                usedTPI.Add(npI);
                             }
                         }
 
-                        //Force should spread in all directions. Angle will affect how much of the force should go to it. If A dot is 0.9 and B dot is -0.7
-                        //~85% of the force should go to A
+                        foreach (int pI in usedTPI)
+                        {
+                            forceRes[pI] = resMass * (_desProps[_fStructs[pI].desMatI].transportCapacity / totTransCap);
+                        }
                     }
 
+                    //####Debug draw values
+                    float maxValue = 0.0f;
+                    float avgValue = 0.0f;
+                    foreach (var value in forceRes)
+                    {
+                        avgValue += value;
+                        if (value > maxValue) maxValue = value;
+                    }
 
-                    //the goal is for the impact force to "disepear". This should be archived by taking force from the previous struct and adding it to the neighbours with lowest
-                    //total force. By doing this in a loop, none kinematic objects will eventually have an equal force spread out amoung all structs. Kinematic objects will never stop
-                    //until all force has been spead to the kinematic parts, since force added to kinematic parts will be going into the ground and "disepear".
-                    //If a part needs more force but all its connections has reached max transport capacity, those connections will break
-                    FractureHelperFunc.NativeSortedIndexes pDams = new(Allocator.Temp, Mathf.ClosestPowerOfTwo(partsParentI.Length / 2));
+                    avgValue /= partCount;
 
-                    //desPoints.Dispose();//Since we used Allocator.Persistent, this will now be the owner of the data and disposing it will also dispose the source?
+                    for (int i = 0; i < partCount; i++)
+                    {
+                        FractureHelperFunc.Debug_drawBox(structsWPos[i], 0.1f, new Color(forceRes[i] / avgValue, 0.0f, 0.0f), 0.1f, false);
+                    }
                 }
             }
         }
@@ -3474,7 +3618,7 @@ namespace Zombie1111_uDestruction
         public unsafe struct DestructionSource
         {
             /// <summary>
-            /// The velocity that can be applied at most to parts that breaks and their parent, the opposite of this should be applied to rbSource(If any)
+            /// The velocity that can be applied at most to parts that breaks and their parent, the opposite of this should be applied to rbSource(If any)(If == vector.zero, it will be like a chock wave)
             /// </summary>
             public Vector3 impVel;
 
@@ -3485,6 +3629,11 @@ namespace Zombie1111_uDestruction
 
             public void* desPoints_ptr;
             public int desPoints_lenght;
+
+            /// <summary>
+            /// The index of the parent all parts in this source has
+            /// </summary>
+            public int parentI;
         }
 
         public struct DestructionPoint
@@ -3515,11 +3664,9 @@ namespace Zombie1111_uDestruction
                     destructionSources.TryGetValue(impactId, out DestructionSource impD);
                     destructionPairs.TryGetValue(impactId, out NativeArray<DestructionPoint> impP);
 
-                    int bCount = impactPoints.Length + impP.Length;
-                    impP.ResizeArray(bCount);
-
-                    int offset = impP.Length - bCount;
-                    impactPoints.CopyTo(impP.GetSubArray(offset, bCount));
+                    int ogLenght = impP.Length;
+                    impP.ResizeArray(impP.Length + impactPoints.Length);
+                    impactPoints.CopyTo(impP.GetSubArray(ogLenght, impactPoints.Length));
 
 
                     float tempTotalForce = impD.impForceTotal + impactData.impForceTotal;
