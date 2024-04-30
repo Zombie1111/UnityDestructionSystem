@@ -592,7 +592,7 @@ namespace Zombie1111_uDestruction
                 && (DestructionMaterials[0].affectedGroupIndexes == null || DestructionMaterials[0].affectedGroupIndexes.Count == 0)
                 && DestructionMaterials[0].desProps.transportCapacity == defualtDestructionMaterial.transportCapacity
                 && DestructionMaterials[0].objLayerBroken == defualtDestructionMaterial.objLayerBroken
-                && DestructionMaterials[0].desProps.bendEfficiency == defualtDestructionMaterial.bendEfficiency)
+                && DestructionMaterials[0].desProps.stiffness == defualtDestructionMaterial.bendHardness)
             {
                 DestructionMaterials.RemoveAt(0);
             }
@@ -722,7 +722,7 @@ namespace Zombie1111_uDestruction
             public int parentKinematic;
 
             public float totalTransportCoEfficiency;
-            public float totalBendEfficiency;
+            public float totalStiffness;
         }
 
         [System.Serializable]
@@ -1175,7 +1175,8 @@ namespace Zombie1111_uDestruction
                 mass = 0.1f,
                 transportCapacity = 100.0f,
                 transportCoEfficiency = 0.001f,
-                bendEfficiency = 0.05f,
+                stiffness = 0.7f,
+                bendHardness = 0.2f,
                 transportMaxDamage = 0.5f
             };
 
@@ -1185,7 +1186,8 @@ namespace Zombie1111_uDestruction
                 public float mass;
                 public float transportCapacity;
                 public float transportCoEfficiency;
-                public float bendEfficiency;
+                public float stiffness;
+                public float bendHardness;
 
                 /// <summary>
                 /// How much less X can transport depending on how much force it has recieved at most. (actualTransportCapacity = transportCapacity - (maxForceRecieved * transportMaxDamage)) 
@@ -1202,7 +1204,8 @@ namespace Zombie1111_uDestruction
             public byte objLayerBroken = 0;
             public float transportCapacity = 100.0f;
             public float transportCoEfficiency = 0.001f;
-            public float bendEfficiency = 0.05f;
+            public float stiffness = 0.7f;
+            public float bendHardness = 0.8f;
             public float maxTransportDamage = 0.5f;
         }
 
@@ -1222,7 +1225,8 @@ namespace Zombie1111_uDestruction
                 desProps = new()
                 {
                     mass = defualtDestructionMaterial.mass,
-                    bendEfficiency = defualtDestructionMaterial.bendEfficiency,
+                    stiffness = defualtDestructionMaterial.stiffness,
+                    bendHardness = defualtDestructionMaterial.bendHardness,
                     transportCapacity = defualtDestructionMaterial.transportCapacity,
                     transportCoEfficiency = defualtDestructionMaterial.transportCoEfficiency,
                     transportMaxDamage = defualtDestructionMaterial.maxTransportDamage
@@ -2114,7 +2118,7 @@ namespace Zombie1111_uDestruction
             {
                 allParents[partParentI].partIndexes.Remove(partI);
                 allParents[partParentI].parentMass -= partDesMat.desProps.mass;
-                allParents[partParentI].totalBendEfficiency -= partDesMat.desProps.bendEfficiency;
+                allParents[partParentI].totalStiffness -= partDesMat.desProps.stiffness;
                 allParents[partParentI].totalTransportCoEfficiency -= partDesMat.desProps.transportCoEfficiency;
                 if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[partParentI].parentKinematic--;
 
@@ -2135,7 +2139,7 @@ namespace Zombie1111_uDestruction
             fr_bones[partBoneI].SetParent(newParentI > 0 || partsDefualtData.Count == 0 ? allParents[newParentI].parentTrans : partsDefualtData[partI].defParent);
             allParents[newParentI].partIndexes.Add(partI);
             allParents[newParentI].parentMass += partDesMat.desProps.mass;
-            allParents[newParentI].totalBendEfficiency += partDesMat.desProps.bendEfficiency;
+            allParents[newParentI].totalStiffness += partDesMat.desProps.stiffness;
             allParents[newParentI].totalTransportCoEfficiency += partDesMat.desProps.transportCoEfficiency;
             if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[newParentI].parentKinematic++;
             MarkParentAsModified(newParentI);
@@ -3371,22 +3375,15 @@ namespace Zombie1111_uDestruction
                 }
 
                 //Allocate global used variabels
-                NativeArray<float> forceRes = new(partCount, Allocator.Temp); //The resistance each part can make to movement
-                NativeArray<float> forceTrans = new(partCount, Allocator.Temp); //How much force X has transported to its neighbours
-                NativeArray<float> forceCons = new(partCount, Allocator.Temp); //How much force that is currently applied to part X
-                NativeArray<Vector3> structsWPosOg = new(partCount, Allocator.Temp);
-                NativeArray<Vector3> structsWPos = new(partCount, Allocator.Temp);
-                NativeQueue<int> pToUpdate = new(Allocator.Temp); //Contains all part indexes that we should compute next
-                float totForce; //The total force we have left to work with
-                DestructionSource desSource; //The destruction source we are currently working with
+                NativeArray<float> partsMoveMass = new(partCount, Allocator.Temp); //The resistance each part can make to movement
                 NativeHashSet<int> partsThatWillBreak = new(8, Allocator.Temp);
 
                 //get all parts world position
-                structsWPos = new(partCount, Allocator.Temp);
+                NativeArray<Vector3> partsWPos = new(partCount, Allocator.Temp);
 
                 for (int partI = 0; partI < partCount; partI++)
                 {
-                    structsWPos[partI] = bonesLToW_[partI + partBoneOffset].MultiplyPoint3x4(structPosL[partI]);
+                    partsWPos[partI] = bonesLToW_[partI + partBoneOffset].MultiplyPoint3x4(structPosL[partI]);
                 }
 
                 //Loop all sources and compute them
@@ -3398,15 +3395,13 @@ namespace Zombie1111_uDestruction
                 unsafe void CalcSource(int sourceI)
                 {
                     //get the source
-                    desSource = _desSources[sourceI];
+                    DestructionSource desSource = _desSources[sourceI];
                     if (desSource.impForceTotal <= 0.0f) return;
-                    totForce = desSource.impForceTotal;
-                    pToUpdate.Clear();
+                    float velDis = desSource.impVel.magnitude;
+                    Vector3 velDir = desSource.impVel.normalized;
 
                     //reset nativeArrays
-                    FractureHelperFunc.SetWholeNativeArray(ref forceRes, 0.0f);//To prevent devision by zero
-                    FractureHelperFunc.SetWholeNativeArray(ref forceCons, 0.0f);//To prevent devision by zero
-                    FractureHelperFunc.SetWholeNativeArray(ref forceTrans, 0.0f);
+                    FractureHelperFunc.SetWholeNativeArray(ref partsMoveMass, 0.0f);//To prevent devision by zero
 
                     //add impact forces to forceCons
                     NativeArray<DestructionPoint> desPoints = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<DestructionPoint>(
@@ -3416,8 +3411,8 @@ namespace Zombie1111_uDestruction
                     NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref desPoints, AtomicSafetyHandle.GetTempMemoryHandle());
 #endif
                     //get all impacts that has higher force than the highest impact force * 0.9f
-                    NativeArray<int> partDisOrder = new(partCount, Allocator.Temp);//Index 0 is a impact part
-                    NativeArray<int> partDisLayer = new(partCount, Allocator.Temp);//The layer each part has
+                    NativeArray<int> orderIToPartI = new(partCount, Allocator.Temp);//Index 0 is a impact part
+                    NativeArray<int> partIToLayerI = new(partCount, Allocator.Temp);//The layer each part has
 
                     float maxForce = 0.0f;
                     foreach (var point in desPoints)
@@ -3435,10 +3430,10 @@ namespace Zombie1111_uDestruction
                         desPoint = desPoints[impI];
                         if (desPoint.force > maxForce)
                         {
-                            partDisOrder[nextOrderI] = desPoint.partI;
+                            orderIToPartI[nextOrderI] = desPoint.partI;
                             nextOrderI++;
 
-                            partDisLayer[desPoint.partI] = nextLayerI;
+                            partIToLayerI[desPoint.partI] = nextLayerI;
                         }
                     }
 
@@ -3446,7 +3441,6 @@ namespace Zombie1111_uDestruction
 
                     //Get each part distance to any 90% impact
                     int oI = 0;
-                    FracStruct fPart;
 
                     while (oI < partCount)
                     {
@@ -3456,16 +3450,16 @@ namespace Zombie1111_uDestruction
                         while (oI < innerLoopStop)
                         {
 
-                            fPart = _fStructs[partDisOrder[oI]];
+                            FracStruct fPart = _fStructs[orderIToPartI[oI]];
                             oI++;
 
                             for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
                             {
                                 int npI = fPart.neighbourPartI[nI];
 
-                                if (partDisLayer[npI] != 0 || _partsParentI[npI] != desSource.parentI) continue;
-                                partDisLayer[npI] = nextLayerI;
-                                partDisOrder[nextOrderI] = npI;
+                                if (partIToLayerI[npI] != 0 || _partsParentI[npI] != desSource.parentI) continue;
+                                partIToLayerI[npI] = nextLayerI;
+                                orderIToPartI[nextOrderI] = npI;
                                 nextOrderI++;
                             }
                         }
@@ -3476,15 +3470,14 @@ namespace Zombie1111_uDestruction
                     NativeHashSet<int> usedPI = new(partCount, Allocator.Temp);
                     NativeList<int> usedTPI = new(usedStartCount, Allocator.Temp);
                     NativeHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
-                    DestructionMaterial.DesProperties desProp;
 
                     for (oI = partCount - 1; oI >= 0; oI--)
                     {
-                        int partI = partDisOrder[oI];
+                        int partI = orderIToPartI[oI];
                        
                         if (usedPI.Contains(partI) == true) continue;
 
-                        int layerI = partDisLayer[partI];
+                        int layerI = partIToLayerI[partI];
                         int npI;
                         float resMass = 0.0f;
                         float totTransCap = 0.0f;
@@ -3495,20 +3488,20 @@ namespace Zombie1111_uDestruction
                         for (int uI = 0; uI < usedTPI.Length; uI++)
                         {
                             partI = usedTPI[uI];
-                            fPart = _fStructs[partI];
-                            desProp = _desProps[fPart.desMatI];
+                            FracStruct fPart = _fStructs[partI];
+                            DestructionMaterial.DesProperties desProp = _desProps[fPart.desMatI];
                             resMass += desProp.mass;
-                            totTransCap += desProp.transportCapacity;
+                            totTransCap += GetPartActualTransCap(ref fPart, ref desProp);
 
                             for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
                             {
                                 npI = fPart.neighbourPartI[nI];
 
-                                if (partDisLayer[npI] < layerI) continue;
-                                if (partDisLayer[npI] > layerI)
+                                if (partIToLayerI[npI] < layerI) continue;
+                                if (partIToLayerI[npI] > layerI)
                                 {
                                     if (usedNPI.Add(npI) == false) continue;
-                                    resMass += forceRes[npI];
+                                    resMass += partsMoveMass[npI];
                                     continue;
                                 }
 
@@ -3519,14 +3512,78 @@ namespace Zombie1111_uDestruction
 
                         foreach (int pI in usedTPI)
                         {
-                            forceRes[pI] = resMass * (_desProps[_fStructs[pI].desMatI].transportCapacity / totTransCap);
+                            //partsMoveMass[pI] = resMass * (_desProps[_fStructs[pI].desMatI].transportCapacity / totTransCap);
+                            FracStruct fPart = _fStructs[pI];
+                            DestructionMaterial.DesProperties desProp = _desProps[fPart.desMatI];
+                            partsMoveMass[pI] = resMass * (GetPartActualTransCap(ref fPart, ref desProp) / totTransCap);
                         }
                     }
+
+                    //1: We hit X, get how much force is needed to move X vel distance (using mass resistance) and move X as far we can with the given impact force.
+                    NativeArray<Vector3> partsWPosOg = new(partsWPos, Allocator.Temp);
+                    float totForce = desSource.impForceTotal; //The total force we have left to work with
+                    oI = 0;
+
+                    while (true)
+                    {
+                        int partI = orderIToPartI[oI];
+                        if (partIToLayerI[partI] != 1) break;
+                        oI++;
+
+                        partsWPos[partI] += Mathf.Clamp01(totForce / (partsMoveMass[partI] * velDis)) * velDis * velDir;
+                    }
+
+                    //2: Y is X neighbour(s), Y goal is to have the same relative dir+dis from X as it had before we moved X
+                    void MoveYFromX(int xPI, int yPI)
+                    {
+                        Vector3 yGoalOffsetW = partsWPos[xPI] - partsWPosOg[xPI];
+                        
+                        //3: If X connection to Y is stronger than force required to move Y to goal, just move Y to goal
+                        float forceRequired = partsMoveMass[yPI] * yGoalOffsetW.magnitude;
+                        FracStruct fPart = _fStructs[xPI];
+                        DestructionMaterial.DesProperties desProp = _desProps[fPart.desMatI];
+                        float connectionStenght = GetPartActualTransCap(ref fPart, ref desProp);
+                        float connectionBendStenght = connectionStenght / desProp.stiffness;
+                        
+                        if (connectionStenght >= forceRequired)
+                        {
+                            partsWPos[yPI] += yGoalOffsetW;
+                        }
+                        else//4: If X connection*bendyness to Y is too weak, X breaks, Get how much we could move Y before X breaks and move Y by that amount (Including bendyness)
+                        if (connectionBendStenght < forceRequired)
+                        {
+                            float maxMove = connectionBendStenght / forceRequired;
+                            maxMove += (1.0f - maxMove) * desProp.bendHardness;
+                            yGoalOffsetW *= maxMove;
+                            partsWPos[yPI] += yGoalOffsetW;
+                            OnBreakPart(xPI);
+                        }
+                        else//5: If X connectionbendyness to Y is ok. Z is the first struct that could be moved to goal without bendyness.
+                            //5: Z goal is how much we could move Y without bendyness. Interpolate goal between X and Z, (If any inbetween is weaker and breaks, clamp next according to 4:)
+                            //5: Set each struct to interpolated and clamped goal
+                        {
+
+                        }
+                    }
+
+                    void OnBreakPart(int partI)
+                    {
+
+                    }
+
+                    //6: Set X-Z (Excluding next X) damage to how close it was to breaking or broke, if X broke also set next X damage
+
+                    //7: X is Y or Z, repeat from 2:
+                    NativeArray<float> forceTrans = new(partCount, Allocator.Temp); //How much force X has transported to its neighbours
+                    NativeArray<float> forceCons = new(partCount, Allocator.Temp); //How much force that is currently applied to part X
+                    FractureHelperFunc.SetWholeNativeArray(ref forceCons, 0.0f);//To prevent devision by zero
+                    FractureHelperFunc.SetWholeNativeArray(ref forceTrans, 0.0f);
+
 
                     //####Debug draw values
                     float maxValue = 0.0f;
                     float avgValue = 0.0f;
-                    foreach (var value in forceRes)
+                    foreach (var value in partsMoveMass)
                     {
                         avgValue += value;
                         if (value > maxValue) maxValue = value;
@@ -3536,8 +3593,13 @@ namespace Zombie1111_uDestruction
 
                     for (int i = 0; i < partCount; i++)
                     {
-                        FractureHelperFunc.Debug_drawBox(structsWPos[i], 0.1f, new Color(forceRes[i] / avgValue, 0.0f, 0.0f), 0.1f, false);
+                        FractureHelperFunc.Debug_drawBox(partsWPos[i], 0.1f, new Color(partsMoveMass[i] / avgValue, 0.0f, 0.0f), 0.1f, false);
                     }
+                }
+
+                float GetPartActualTransCap(ref FracStruct _fPart, ref DestructionMaterial.DesProperties _desProp)
+                {
+                    return _desProp.transportCapacity - (_desProp.transportCapacity * _fPart.maxTransportUsed * _desProp.transportMaxDamage);
                 }
             }
         }
@@ -3982,7 +4044,7 @@ namespace Zombie1111_uDestruction
             if (impForce > totalTransportCap) impForce = totalTransportCap;//We currently do not consider transportMaxDamage, we probably wanna do to that
 
             int parentPartCount = allParents[parentI].partIndexes.Count;
-            impForce += impForce * (allParents[parentI].totalBendEfficiency / parentPartCount);
+            impForce += impForce * (allParents[parentI].totalStiffness / parentPartCount);
             impForce += velSpeed * desMat.desProps.mass;
             impForce += impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
             return impForce + (impForce * (allParents[parentI].totalTransportCoEfficiency / parentPartCount));
@@ -3993,6 +4055,7 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public float GuessMaxForceApplied(Vector3 velocity, short partI, float bouncyness = 0.0f)
         {
+            //Fix later, These needs rethinking since we have redesigned how destruction works
             int parentI = jCDW_job.partsParentI[partI];
             DestructionMaterial desMat = GetDesMatFromIntId(allParts[partI].groupIdInt);
             float velSpeed = velocity.magnitude;
@@ -4009,7 +4072,7 @@ namespace Zombie1111_uDestruction
             float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - desMat.desProps.mass);
 
             int parentPartCount = allParents[parentI].partIndexes.Count;
-            impForce -= impForce * (allParents[parentI].totalBendEfficiency / parentPartCount);
+            impForce -= impForce * (allParents[parentI].totalStiffness / parentPartCount);
 
             float totalTransportCap = desMat.desProps.transportCapacity * jCDW_job.fStructs[partI].neighbourPartI_lenght;
             if (impForce > totalTransportCap) impForce = totalTransportCap;//We currently do not consider transportMaxDamage, we probably wanna do to that
@@ -4029,9 +4092,10 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public bool GuessIfForceCanCauseBreaking(float force, int partI, float bouncyness = 0.0f)
         {
+            //fix later, we have changed what stiffness does
             int parentI = jCDW_job.partsParentI[partI];
             int parentPartCount = allParents[parentI].partIndexes.Count;
-            force -= force * (allParents[parentI].totalBendEfficiency / parentPartCount);//Should bending count as breaking? Its currently not
+            force -= force * (allParents[parentI].totalStiffness / parentPartCount);//Should bending count as breaking? Its currently not
             force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
             force -= force * (allParents[parentI].totalTransportCoEfficiency / parentPartCount);
 
