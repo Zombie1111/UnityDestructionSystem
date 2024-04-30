@@ -3328,6 +3328,13 @@ namespace Zombie1111_uDestruction
             {
 
             }
+
+            //apply destruction result
+            wantToApplyDeformation = true;
+            for (short i = 0; i < allParts.Count; i++)
+            {
+                des_deformedParts[des_deformedPartsIndex].Add(i);
+            }
         }
 
         public ComputeDestruction_work jCDW_job;
@@ -3392,6 +3399,13 @@ namespace Zombie1111_uDestruction
                     CalcSource(sourceI);
                 }
 
+                //Return destruction result
+                //Transform parts world position back to local
+                for (int partI = 0; partI < partCount; partI++)
+                {
+                    structPosL[partI] = bonesLToW_[partI + partBoneOffset].inverse.MultiplyPoint3x4(partsWPos[partI]);
+                }
+
                 unsafe void CalcSource(int sourceI)
                 {
                     //get the source
@@ -3437,7 +3451,7 @@ namespace Zombie1111_uDestruction
                         }
                     }
 
-                    desPoints.Max(point => point.force);
+                    int usedImpPointCount = nextOrderI;
 
                     //Get each part distance to any 90% impact
                     int oI = 0;
@@ -3522,6 +3536,7 @@ namespace Zombie1111_uDestruction
                     //1: We hit X, get how much force is needed to move X vel distance (using mass resistance) and move X as far we can with the given impact force.
                     NativeArray<Vector3> partsWPosOg = new(partsWPos, Allocator.Temp);
                     float totForce = desSource.impForceTotal; //The total force we have left to work with
+                    float sourceTotForce = totForce / usedImpPointCount;
                     oI = 0;
 
                     while (true)
@@ -3530,50 +3545,84 @@ namespace Zombie1111_uDestruction
                         if (partIToLayerI[partI] != 1) break;
                         oI++;
 
-                        partsWPos[partI] += Mathf.Clamp01(totForce / (partsMoveMass[partI] * velDis)) * velDis * velDir;
+                        partsWPos[partI] += Mathf.Clamp01(sourceTotForce / (partsMoveMass[partI] * velDis)) * velDis * velDir;
                     }
 
-                    //2: Y is X neighbour(s), Y goal is to have the same relative dir+dis from X as it had before we moved X
-                    void MoveYFromX(int xPI, int yPI)
+                    //Loop all parts in layer order and compute there deformation+destruction
+                    foreach (int partI in orderIToPartI)
                     {
+                        int layerI = partIToLayerI[partI];
+                        FracStruct fPart = _fStructs[partI];
+
+                        for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                        {
+                            int nPI = fPart.neighbourPartI[nI];
+                            if (partIToLayerI[nPI] <= layerI) continue;
+
+                            MoveYFromX(partI, nPI, ref fPart);
+                        }
+                    }
+
+                    void MoveYFromX(int xPI, int yPI, ref FracStruct xFPart)
+                    {
+                        //2: Y is X neighbour(s), Y goal is to have the same relative dir+dis from X as it had before we moved X
                         Vector3 yGoalOffsetW = partsWPos[xPI] - partsWPosOg[xPI];
-                        
+                        Vector3 yOgWPos = partsWPosOg[yPI];
+                        float yOldOffsetSqrAmount = (partsWPos[yPI] - yOgWPos).sqrMagnitude;
+                        if (yOldOffsetSqrAmount >= yGoalOffsetW.sqrMagnitude) return;
+
                         //3: If X connection to Y is stronger than force required to move Y to goal, just move Y to goal
-                        float forceRequired = partsMoveMass[yPI] * yGoalOffsetW.magnitude;
-                        FracStruct fPart = _fStructs[xPI];
-                        DestructionMaterial.DesProperties desProp = _desProps[fPart.desMatI];
-                        float connectionStenght = GetPartActualTransCap(ref fPart, ref desProp);
-                        float connectionBendStenght = connectionStenght / desProp.stiffness;
+                        float forceRequired = partsMoveMass[xPI] * yGoalOffsetW.magnitude;
+                        DestructionMaterial.DesProperties xDesProp = _desProps[xFPart.desMatI];
+                        float connectionStenght = GetPartActualTransCap(ref xFPart, ref xDesProp);
+                        float connectionBendStenght = connectionStenght / xDesProp.stiffness;
                         
                         if (connectionStenght >= forceRequired)
                         {
-                            partsWPos[yPI] += yGoalOffsetW;
+
                         }
                         else//4: If X connection*bendyness to Y is too weak, X breaks, Get how much we could move Y before X breaks and move Y by that amount (Including bendyness)
                         if (connectionBendStenght < forceRequired)
                         {
                             float maxMove = connectionBendStenght / forceRequired;
-                            maxMove += (1.0f - maxMove) * desProp.bendHardness;
+                            maxMove += (1.0f - maxMove) * xDesProp.bendHardness;
                             yGoalOffsetW *= maxMove;
-                            partsWPos[yPI] += yGoalOffsetW;
-                            OnBreakPart(xPI);
+                            OnBreakPart(xPI, ref xFPart);
                         }
-                        else//5: If X connectionbendyness to Y is ok. Z is the first struct that could be moved to goal without bendyness.
-                            //5: Z goal is how much we could move Y without bendyness. Interpolate goal between X and Z, (If any inbetween is weaker and breaks, clamp next according to 4:)
-                            //5: Set each struct to interpolated and clamped goal
+                        else//5: If X connectionbendyness to Y is ok. Get how much we could move Y without bending and move it by that amount.
                         {
-
+                            float maxMove = connectionStenght / forceRequired;
+                            maxMove += (1.0f - maxMove) * xDesProp.bendHardness;
+                            yGoalOffsetW *= maxMove;
                         }
+
+                        //offset Y by the result amount
+                        if (yOldOffsetSqrAmount >= yGoalOffsetW.sqrMagnitude) return;
+                        partsWPos[yPI] = yOgWPos + yGoalOffsetW;
+
+                        //6: Set X damage to how close it was to breaking or broke, if X broke also set Y damage
+                        FracStruct yFPart = _fStructs[yPI];
+                        if (connectionBendStenght < forceRequired)
+                        {
+                            yFPart.maxTransportUsed = Mathf.Clamp01((partsMoveMass[yPI] * yGoalOffsetW.magnitude) / connectionBendStenght);
+                            _fStructs[yPI] = yFPart;
+                        }
+                        else
+                        {
+                            xFPart.maxTransportUsed = Mathf.Clamp01(forceRequired / connectionBendStenght);
+                            _fStructs[xPI] = xFPart;
+                        }
+
+                        //7: X is Y, repeat from 2
+                        //We do this in loop above
                     }
 
-                    void OnBreakPart(int partI)
+                    void OnBreakPart(int partI, ref FracStruct _fPart)
                     {
-
+                        _fPart.maxTransportUsed = 1.0f;
+                        _fStructs[partI] = _fPart;
                     }
 
-                    //6: Set X-Z (Excluding next X) damage to how close it was to breaking or broke, if X broke also set next X damage
-
-                    //7: X is Y or Z, repeat from 2:
                     NativeArray<float> forceTrans = new(partCount, Allocator.Temp); //How much force X has transported to its neighbours
                     NativeArray<float> forceCons = new(partCount, Allocator.Temp); //How much force that is currently applied to part X
                     FractureHelperFunc.SetWholeNativeArray(ref forceCons, 0.0f);//To prevent devision by zero
@@ -3649,12 +3698,14 @@ namespace Zombie1111_uDestruction
                 short partI = des_deformedParts[oppositeI].FirstOrDefault();
                 des_deformedParts[oppositeI].Remove(partI);
 
-                Matrix4x4 rendLToPartL = fracRend.localToWorldMatrix * fr_bones[partI + partBoneOffset].worldToLocalMatrix;
+                Matrix4x4 partLToW = fr_bones[partI + partBoneOffset].worldToLocalMatrix;
+                Matrix4x4 rendWToL = fracRend.localToWorldMatrix;
                 Vector3[] partPossL = new Vector3[allParts[partI].partMeshVerts.Count];
                 short pI = 0;
+
                 foreach (int vI in allParts[partI].partMeshVerts)
                 {
-                    partPossL[pI] = rendLToPartL.MultiplyPoint(gpuMeshVertexData[vI]);
+                    partPossL[pI] = partLToW.MultiplyPoint3x4(rendWToL.MultiplyPoint3x4(gpuMeshVertexData[vI]));
                     pI++;
                 }
 
