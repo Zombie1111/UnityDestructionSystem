@@ -185,7 +185,8 @@ namespace Zombie1111_uDestruction
 
         private unsafe void OnDrawGizmosSelected()
         {
-            if (Application.isPlaying == true || eOnly_ignoreNextDraw == true) return;
+            //if (Application.isPlaying == true || eOnly_ignoreNextDraw == true) return;
+            if (eOnly_ignoreNextDraw == true) return;
 
             //draw selected group id
             if (visualizedGroupId < 0 || useGroupIds == false || fracRend != null)
@@ -226,13 +227,19 @@ namespace Zombie1111_uDestruction
             //visualize fracture structure
             if (debugMode == DebugMode.showStructure && fractureIsValid == true && jCDW_job.structPosL.IsCreated == true)
             {
+                if (Application.isPlaying == true) ComputeDestruction_end();
+
                 Gizmos.color = Color.red;
                 Vector3 sPos;
                 bool prevWasKind = true;
 
                 for (int structI = 0; structI < allParts.Count; structI++)
                 {
-                    sPos = fr_bones[structI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
+                    int parentI = jCDW_job.partsParentI[structI];
+                    if (parentI < 0) continue;
+
+                    //sPos = fr_bones[structI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
+                    sPos = GetStructWorldPosition(structI);
                     if (jCDW_job.kinematicPartIndexes.Contains(structI) == true)
                     {
                         if (prevWasKind == false)
@@ -252,11 +259,13 @@ namespace Zombie1111_uDestruction
 
                     //foreach (int nStructI in allParts[structI].neighbourStructs)
                     FracStruct fStruct = jCDW_job.fStructs[structI];
+
                     for (byte neI = 0; neI < fStruct.neighbourPartI_lenght; neI++)
                     {
                         short nStructI = fStruct.neighbourPartI[neI];
-                        Gizmos.DrawLine(fr_bones[nStructI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[nStructI]), sPos);
-                        //Gizmos.DrawLine(allParts[structI].trans.position, allParts[nStructI].trans.position);
+                        if (jCDW_job.partsParentI[nStructI] != parentI) continue;
+                        //Gizmos.DrawLine(fr_bones[nStructI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[nStructI]), sPos);
+                        Gizmos.DrawLine(GetStructWorldPosition(nStructI), sPos);
                     }
                 }
             }
@@ -592,7 +601,7 @@ namespace Zombie1111_uDestruction
                 && (DestructionMaterials[0].affectedGroupIndexes == null || DestructionMaterials[0].affectedGroupIndexes.Count == 0)
                 && DestructionMaterials[0].desProps.transportCapacity == defualtDestructionMaterial.transportCapacity
                 && DestructionMaterials[0].objLayerBroken == defualtDestructionMaterial.objLayerBroken
-                && DestructionMaterials[0].desProps.stiffness == defualtDestructionMaterial.bendHardness)
+                && DestructionMaterials[0].desProps.stiffness == defualtDestructionMaterial.stiffness)
             {
                 DestructionMaterials.RemoveAt(0);
             }
@@ -1367,7 +1376,7 @@ namespace Zombie1111_uDestruction
         }
 
         private ComputeBuffer buf_desWeights;
-        private ComputeBuffer buf_allFracBonesLToW;
+        private ComputeBuffer buf_boneBindsLToW;
         private ComputeBuffer buf_meshData;
         private ComputeBuffer buf_fr_boneWeightsCurrent;
         private ComputeBuffer buf_structs_posL;
@@ -1499,13 +1508,13 @@ namespace Zombie1111_uDestruction
                     buf_fr_boneWeightsCurrent.SetData(fr_boneWeightsCurrent);
                     computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "fr_boneWeightsCurrent", buf_fr_boneWeightsCurrent);
 
-                    if (buf_allFracBonesLToW == null || buf_allFracBonesLToW.IsValid() == false || buf_allFracBonesLToW.count == 0)
+                    if (buf_boneBindsLToW == null || buf_boneBindsLToW.IsValid() == false || buf_boneBindsLToW.count == 0)
                     {
                         GetTransformData_start();
                         GetTransformData_end();
                     }
 
-                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "allFracBonesLToW", buf_allFracBonesLToW);
+                    computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "allFracBonesLToW", buf_boneBindsLToW);
 
                     //sync fracRend mesh vertics and normals for gpu write
                     Mesh mesh = fracFilter.sharedMesh;
@@ -1547,9 +1556,10 @@ namespace Zombie1111_uDestruction
             void SetModifiedParts()
             {
                 //Set the desStruct weight for every vertex used by the modified parts
-                GetTransformData_start();
-
                 //get world position of every struct
+                GetTransformData_start();
+                GetTransformData_end();
+
                 Vector3[] structsWPos = new Vector3[allParts.Count];
                 for (int partI = 0; partI < allParts.Count; partI++)
                 {
@@ -1557,10 +1567,6 @@ namespace Zombie1111_uDestruction
                 }
 
                 //get the weight for every vertex in every part
-                GetTransformData_end();
-                //UpdateFracWorldSpaceMesh(true);//Could be made much faster by only updating the vertices for the modified parts
-                //Vector3[] frWVers = fracWorldSpaceMesh.vertices;
-
                 HashSet<int> usedVers = new();
                 List<List<int>> actuallPartVers = new();
                 List<int> actuallPartVers_partI = new();
@@ -1908,6 +1914,7 @@ namespace Zombie1111_uDestruction
             }
 
             fr_bindPoses.Add(fObj.col.transform.worldToLocalMatrix * fracRend.transform.localToWorldMatrix);
+            jCDW_job.structPosL.Add((fr_bones[newPartI + partBoneOffset].localToWorldMatrix * fr_bindPoses[newPartI + partBoneOffset]).inverse.MultiplyPoint3x4(GetPartWorldPosition(newPartI)));
             fr_verticesL.AddRange(FractureHelperFunc.ConvertPositionsWithMatrix(fObj.meshW.vertices, rendWtoL));
             fr_normalsL.AddRange(FractureHelperFunc.ConvertDirectionsWithMatrix(fObj.meshW.normals, rendWtoL));
             fr_verToPartI.AddRange(Enumerable.Repeat((int)newPartI, fObj.meshW.vertexCount));
@@ -2011,8 +2018,7 @@ namespace Zombie1111_uDestruction
                     || partGroupD.isKinematic == true) SetPartKinematicStatus(newPartI, true);
 
                 //get what nearPartIndexes is actually valid neighbours and create structure for the new part
-                jCDW_job.structPosL.Add(fr_bones[newPartI + partBoneOffset].worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)));
-
+                //jCDW_job.structPosL.Add(fr_bones[newPartI + partBoneOffset].worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)));
                 foreach (short nearPartI in nearPartIndexes)
                 {
                     //ignore if this neighbour part is invalid
@@ -2273,7 +2279,8 @@ namespace Zombie1111_uDestruction
 
         private Vector3 GetStructWorldPosition(int structI)
         {
-            return fr_bones[structI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
+            return jCDW_job.boneBindsLToW[structI + partBoneOffset].MultiplyPoint3x4(jCDW_job.structPosL[structI]);
+            //return fr_bones[structI + partBoneOffset].localToWorldMatrix.MultiplyPoint(jCDW_job.structPosL[structI]);
         }
 
         /// <summary>
@@ -2876,22 +2883,27 @@ namespace Zombie1111_uDestruction
             jCDW_job.desSources = new NativeArray<DestructionSource>(0, Allocator.Persistent);
             jCDW_job.desProps = DestructionMaterials.Select(desMat => desMat.desProps).ToList().ToNativeArray(Allocator.Persistent);
             jCDW_job.partBoneOffset = partBoneOffset;
+            jCDW_job.partsToBreak = new NativeHashMap<int, DesPartToBreak>(8, Allocator.Persistent);
             destructionSources = new();
             destructionBodies = new();
             destructionPairs = new();
+
+            //setup gpu readback
+            gpuMeshVertexData = new GpuMeshVertex[allParts.Count];
+            gpuMeshBonesLToW = new Matrix4x4[fr_bones.Count];
         }
 
         private void Update()
         {
 #if UNITY_EDITOR
+            if (eOnly_ignoreNextDraw == true)
+            {
+                eOnly_ignoreNextDraw = false;
+                return;
+            }
+
             if (Application.isPlaying == false)
             {
-                if (eOnly_ignoreNextDraw == true)
-                {
-                    eOnly_ignoreNextDraw = false;
-                    return;
-                }
-
                 EditorUpdate();
             }
 #endif
@@ -3039,10 +3051,10 @@ namespace Zombie1111_uDestruction
                 buf_fr_boneWeightsCurrent.Dispose();
             }
 
-            if (buf_allFracBonesLToW != null)
+            if (buf_boneBindsLToW != null)
             {
-                buf_allFracBonesLToW.Release();
-                buf_allFracBonesLToW.Dispose();
+                buf_boneBindsLToW.Release();
+                buf_boneBindsLToW.Dispose();
             }
 
             if (buf_structs_parentI != null)
@@ -3085,7 +3097,8 @@ namespace Zombie1111_uDestruction
             if (jCDW_job.desSources.IsCreated == true) jCDW_job.desSources.Dispose();
             if (jCDW_job.fStructs.IsCreated == true) jCDW_job.fStructs.Dispose();
             if (jCDW_job.desProps.IsCreated == true) jCDW_job.desProps.Dispose();
-            if (jCDW_job.bonesLToW.IsCreated == true) jCDW_job.bonesLToW.Dispose();
+            if (jCDW_job.boneBindsLToW.IsCreated == true) jCDW_job.boneBindsLToW.Dispose();
+            if (jCDW_job.partsToBreak.IsCreated == true) jCDW_job.partsToBreak.Dispose();
         }
 
         private int cpKernelId_ComputeSkinDef = -1;
@@ -3115,8 +3128,8 @@ namespace Zombie1111_uDestruction
         {
             if (jGTD_jobIsActive == true) return;
             if (jGTD_fracBoneTrans.isCreated == false || jGTD_fracBoneTrans.length != fr_bones.Count
-                || jCDW_job.bonesLToW == null || jCDW_job.bonesLToW.Length != fr_bones.Count || jGTD_hasMoved.IsCreated == false) GetTransformData_setup();
-            
+                || jCDW_job.boneBindsLToW == null || jCDW_job.boneBindsLToW.Length != fr_bones.Count || jGTD_hasMoved.IsCreated == false) GetTransformData_setup();
+
             //Run the job
             jGTD_handle = jGTD_job.Schedule(jGTD_fracBoneTrans);
             jGTD_jobIsActive = true;
@@ -3125,8 +3138,8 @@ namespace Zombie1111_uDestruction
             {
                 //Assign variabels used in GetTransformData job
                 if (jGTD_fracBoneTrans.isCreated == false) jGTD_fracBoneTrans = new(fr_bones.ToArray());
-                jCDW_job.bonesLToW = new NativeArray<Matrix4x4>(jGTD_fracBoneTrans.length, Allocator.Persistent);
-                buf_allFracBonesLToW = new ComputeBuffer(jGTD_fracBoneTrans.length, 16 * sizeof(float));
+                jCDW_job.boneBindsLToW = new NativeArray<Matrix4x4>(jGTD_fracBoneTrans.length, Allocator.Persistent);
+                buf_boneBindsLToW = new ComputeBuffer(jGTD_fracBoneTrans.length, 16 * sizeof(float));
 
                 if (jGTD_hasMoved.IsCreated == false) jGTD_hasMoved = new NativeQueue<short>(Allocator.Persistent);
 
@@ -3167,12 +3180,12 @@ namespace Zombie1111_uDestruction
                 //Copy updated localToWorld matrixes to allFracBonesLToW and gpu
                 while (jGTD_hasMoved.TryDequeue(out short boneI) == true)
                 {
-                    jCDW_job.bonesLToW[boneI] = jGTD_job.fracBonesLToW[boneI] * fr_bindPoses[boneI];
+                    jCDW_job.boneBindsLToW[boneI] = jGTD_job.fracBonesLToW[boneI] * fr_bindPoses[boneI];
                 }
 
                 jGTD_hasMoved.Clear();
 
-                buf_allFracBonesLToW.SetData(jCDW_job.bonesLToW);
+                buf_boneBindsLToW.SetData(jCDW_job.boneBindsLToW);
 
                 //Update fracRend bounds
                 if (fracRend == null) return;
@@ -3240,7 +3253,6 @@ namespace Zombie1111_uDestruction
         private HashSet<short>[] des_deformedParts = new HashSet<short>[2];
         private byte des_deformedPartsIndex = 0;
         private AsyncGPUReadbackRequest gpuMeshRequest;
-        private List<Vector3> gpuMeshVertexData = new();
         private List<Rigidbody> jCDW_bodies = new();
 
         private struct GpuMeshVertex
@@ -3257,6 +3269,7 @@ namespace Zombie1111_uDestruction
 
         private void ComputeDestruction_start()
         {
+
 #if UNITY_EDITOR
             if (Application.isPlaying == false)
             {
@@ -3302,10 +3315,11 @@ namespace Zombie1111_uDestruction
             destructionPairs.Clear();//The nativeArrays will be disposed later by the worker
 
             //update bone matrixes
-            jCDW_job.bonesLToW_ = jGTD_job.fracBonesLToW.AsReadOnly();
+            jCDW_job.bonesLToW = jGTD_job.fracBonesLToW.AsReadOnly();
 
             //run the job
             jCDW_jobIsActive = true;
+
             //Debug.Log(jCDW_job.partsParentI[0]);
             jCDW_handle = jCDW_job.Schedule();
         }
@@ -3335,6 +3349,11 @@ namespace Zombie1111_uDestruction
             {
                 des_deformedParts[des_deformedPartsIndex].Add(i);
             }
+
+            foreach (DesPartToBreak pBreak in jCDW_job.partsToBreak.GetValueArray(Allocator.Temp))
+            {
+                SetPartParent((short)pBreak.partI, -1);
+            }
         }
 
         public ComputeDestruction_work jCDW_job;
@@ -3343,7 +3362,7 @@ namespace Zombie1111_uDestruction
         //[BurstCompile]
         public struct ComputeDestruction_work : IJob
         {
-            //solve destruction
+            //solve destruction, to fix later, nearby must move the same amount as X - dis to X * dir to X dot
             public NativeList<Vector3> structPosL;
 
             /// <summary>
@@ -3358,12 +3377,13 @@ namespace Zombie1111_uDestruction
             public NativeArray<DestructionSource> desSources;    
             public NativeList<FracStruct> fStructs;
             public NativeArray<DestructionMaterial.DesProperties> desProps;
-            public NativeArray<Matrix4x4>.ReadOnly bonesLToW_;
+            public NativeArray<Matrix4x4>.ReadOnly bonesLToW;
+            public NativeHashMap<int, DesPartToBreak> partsToBreak;
 
             /// <summary>
             /// The local to world matrix for every bone (Parts bones + skinned bones), skinned bones are first
             /// </summary>
-            public NativeArray<Matrix4x4> bonesLToW;
+            public NativeArray<Matrix4x4> boneBindsLToW;
             public int partBoneOffset;
 
             public unsafe void Execute()
@@ -3375,11 +3395,7 @@ namespace Zombie1111_uDestruction
                 var _desProps = desProps;
                 int partCount = structPosL.Length;
                 var _KinParts = kinematicPartIndexes;
-
-                for (int i = 0; i < _desProps.Length; i++)
-                {
-                    Debug.Log(_desProps[i].mass);
-                }
+                var _partsToBreak = partsToBreak;
 
                 //Allocate global used variabels
                 NativeArray<float> partsMoveMass = new(partCount, Allocator.Temp); //The resistance each part can make to movement
@@ -3390,7 +3406,13 @@ namespace Zombie1111_uDestruction
 
                 for (int partI = 0; partI < partCount; partI++)
                 {
-                    partsWPos[partI] = bonesLToW_[partI + partBoneOffset].MultiplyPoint3x4(structPosL[partI]);
+                    partsWPos[partI] = boneBindsLToW[partI + partBoneOffset].MultiplyPoint3x4(structPosL[partI]);
+                }
+
+                //debug draw
+                for (int i = 0; i < partCount; i++)
+                {
+                    FractureHelperFunc.Debug_drawBox(partsWPos[i], 0.05f, Color.yellow, 0.5f, false);
                 }
 
                 //Loop all sources and compute them
@@ -3403,16 +3425,14 @@ namespace Zombie1111_uDestruction
                 //Transform parts world position back to local
                 for (int partI = 0; partI < partCount; partI++)
                 {
-                    structPosL[partI] = bonesLToW_[partI + partBoneOffset].inverse.MultiplyPoint3x4(partsWPos[partI]);
+                    structPosL[partI] = boneBindsLToW[partI + partBoneOffset].inverse.MultiplyPoint3x4(partsWPos[partI]);
                 }
 
                 unsafe void CalcSource(int sourceI)
                 {
                     //get the source
                     DestructionSource desSource = _desSources[sourceI];
-                    if (desSource.impForceTotal <= 0.0f) return;
-                    float velDis = desSource.impVel.magnitude;
-                    Vector3 velDir = desSource.impVel.normalized;
+                    if (desSource.impForceTotal <= 0.0f || desSource.parentI < 0) return;
 
                     //reset nativeArrays
                     FractureHelperFunc.SetWholeNativeArray(ref partsMoveMass, 0.0f);//To prevent devision by zero
@@ -3424,6 +3444,7 @@ namespace Zombie1111_uDestruction
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                     NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref desPoints, AtomicSafetyHandle.GetTempMemoryHandle());
 #endif
+
                     //get all impacts that has higher force than the highest impact force * 0.9f
                     NativeArray<int> orderIToPartI = new(partCount, Allocator.Temp);//Index 0 is a impact part
                     NativeArray<int> partIToLayerI = new(partCount, Allocator.Temp);//The layer each part has
@@ -3456,7 +3477,7 @@ namespace Zombie1111_uDestruction
                     //Get each part distance to any 90% impact
                     int oI = 0;
 
-                    while (oI < partCount)
+                    while (oI < nextOrderI)
                     {
                         int innerLoopStop = nextOrderI;
                         nextLayerI++;
@@ -3484,6 +3505,10 @@ namespace Zombie1111_uDestruction
                     NativeHashSet<int> usedPI = new(partCount, Allocator.Temp);
                     NativeList<int> usedTPI = new(usedStartCount, Allocator.Temp);
                     NativeHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
+                    float velDis = desSource.impVel.magnitude;
+                    Vector3 velDir = desSource.impVel.normalized;
+                    float totForce = desSource.impForceTotal; //The total force we have left to work with
+                    float totForceOg = totForce;
 
                     for (oI = partCount - 1; oI >= 0; oI--)
                     {
@@ -3514,6 +3539,7 @@ namespace Zombie1111_uDestruction
                                 if (partIToLayerI[npI] < layerI) continue;
                                 if (partIToLayerI[npI] > layerI)
                                 {
+                                    //partI will "push" npI
                                     if (usedNPI.Add(npI) == false) continue;
                                     resMass += partsMoveMass[npI];
                                     continue;
@@ -3526,99 +3552,174 @@ namespace Zombie1111_uDestruction
 
                         foreach (int pI in usedTPI)
                         {
-                            //partsMoveMass[pI] = resMass * (_desProps[_fStructs[pI].desMatI].transportCapacity / totTransCap);
                             FracStruct fPart = _fStructs[pI];
                             DestructionMaterial.DesProperties desProp = _desProps[fPart.desMatI];
-                            partsMoveMass[pI] = resMass * (GetPartActualTransCap(ref fPart, ref desProp) / totTransCap);
+                            float pTransCap = GetPartActualTransCap(ref fPart, ref desProp);
+                            partsMoveMass[pI] = resMass * (pTransCap / totTransCap);
+
+                            //get if part should break
+                            Vector3 transDir = Vector3.zero;
+                            Vector3 partWPos = partsWPos[pI];
+                            byte usedNeighbourCount = 0;
+                            layerI = partIToLayerI[pI];
+
+                            for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                            {
+                                int nPI = fPart.neighbourPartI[nI];
+                                if (partIToLayerI[nPI] <= layerI) continue;
+
+                                transDir += (partsWPos[nPI] - partWPos).normalized;
+                                usedNeighbourCount++;
+                            }
+
+                            if (usedNeighbourCount == 0) continue;
+                            float forceRequired = Mathf.Min(velDis * partsMoveMass[pI], (totForceOg * Mathf.Clamp01((pTransCap / totTransCap) * (usedTPI.Length / 2.0f))));
+                            forceRequired -= forceRequired * Mathf.Clamp01((layerI - 1) * desProp.transportCoEfficiency);
+
+                            transDir /= usedNeighbourCount;
+                            pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(velDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
+                            //float forceRequired = Mathf.Min(velDis * partsMoveMass[pI], totForceOg / usedTPI.Length);
+
+
+                            if (pTransCap <= forceRequired)
+                            {
+                                //totForce -= pTransCap;
+                                totForce *= pTransCap / forceRequired;
+
+                                partsMoveMass[pI] *= pTransCap / forceRequired;
+                                fPart.maxTransportUsed = 1.0f;
+
+                                _partsToBreak[pI] = new()
+                                {
+                                    partI = pI,
+                                    velForce = pTransCap,
+                                    velDir = velDir
+                                };
+                            }
+                            else
+                            {
+                                fPart.maxTransportUsed = Mathf.Max(forceRequired / pTransCap, fPart.maxTransportUsed);
+                            }
+
+                            _fStructs[pI] = fPart;
                         }
                     }
 
-                    //1: We hit X, get how much force is needed to move X vel distance (using mass resistance) and move X as far we can with the given impact force.
-                    NativeArray<Vector3> partsWPosOg = new(partsWPos, Allocator.Temp);
-                    float totForce = desSource.impForceTotal; //The total force we have left to work with
-                    float sourceTotForce = totForce / usedImpPointCount;
-                    oI = 0;
+                    Debug.Log(totForceOg + " " + totForce);
 
-                    while (true)
+                    ////1: We hit X, get how much force is needed to move X vel distance (using mass resistance) and move X as far we can with the given impact force.
+                    //NativeArray<Vector3> partsWPosOg = new(partsWPos, Allocator.Temp);
+                    //float sourceTotForce = totForce / usedImpPointCount;
+                    //oI = 0;
+                    //
+                    //while (true)
+                    //{
+                    //    int partI = orderIToPartI[oI];
+                    //    if (partIToLayerI[partI] != 1) break;
+                    //    oI++;
+                    //
+                    //    partsWPos[partI] += Mathf.Clamp01(sourceTotForce / (partsMoveMass[partI] * velDis)) * velDis * velDir;
+                    //}
+                    //
+                    ////Loop all parts in layer order and compute there deformation+destruction
+                    //float minMoveDis = float.MaxValue;
+                    //int minMoveIndex = -1;
+                    //
+                    //foreach (int partI in orderIToPartI)
+                    //{
+                    //    int layerI = partIToLayerI[partI];
+                    //    FracStruct fPart = _fStructs[partI];
+                    //
+                    //    for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                    //    {
+                    //        int nPI = fPart.neighbourPartI[nI];
+                    //        if (partIToLayerI[nPI] <= layerI) continue;
+                    //
+                    //        MoveYFromX(partI, nPI, ref fPart);
+                    //    }
+                    //}
+                    //
+                    ////reduce each part offset with minMoveDis
+                    //Vector3 reduceOffset = velDir * minMoveDis;
+                    //for (int partI = 0; partI < partCount; partI++)
+                    //{
+                    //    partsWPos[partI] -= reduceOffset;
+                    //}
+                    //
+                    //void MoveYFromX(int xPI, int yPI, ref FracStruct xFPart)
+                    //{
+                    //    //2: Y is X neighbour(s), Y goal is to have the same relative dir+dis from X as it had before we moved X
+                    //    Vector3 yGoalOffsetW = partsWPos[xPI] - partsWPosOg[xPI];
+                    //    Vector3 yOgWPos = partsWPosOg[yPI];
+                    //    float yOldOffsetSqrAmount = (partsWPos[yPI] - yOgWPos).magnitude;
+                    //
+                    //    float yMinOffsetSqrAmount = yGoalOffsetW.magnitude;
+                    //    if (yOldOffsetSqrAmount >= yMinOffsetSqrAmount) return;
+                    //    Vector3 xToYoffset = partsWPosOg[yPI] - partsWPosOg[xPI];
+                    //    yMinOffsetSqrAmount -= xToYoffset.magnitude * 0.99f;
+                    //    //yMinOffsetSqrAmount *= Mathf.Abs(Vector3.Dot(yGoalOffsetW.normalized, xToYoffset.normalized));
+                    //
+                    //    //3: If X connection to Y is stronger than force required to move Y to goal, just move Y to goal
+                    //    float forceRequired = partsMoveMass[xPI] * yGoalOffsetW.magnitude;
+                    //    DestructionMaterial.DesProperties xDesProp = _desProps[xFPart.desMatI];
+                    //    float connectionStenght = GetPartActualTransCap(ref xFPart, ref xDesProp);
+                    //    float connectionBendStenght = connectionStenght / xDesProp.stiffness;
+                    //    
+                    //    if (connectionStenght >= forceRequired)
+                    //    {
+                    //
+                    //    }
+                    //    else//4: If X connection*bendyness to Y is too weak, X breaks, Get how much we could move Y before X breaks and move Y by that amount (Including bendyness)
+                    //    if (connectionBendStenght < forceRequired)
+                    //    {
+                    //        float maxMove = connectionBendStenght / forceRequired;
+                    //        maxMove += (1.0f - maxMove) * xDesProp.bendHardness;
+                    //        yGoalOffsetW *= maxMove;
+                    //        OnBreakPart(xPI, ref xFPart, forceRequired * (1.0f - maxMove));
+                    //    }
+                    //    else//5: If X connectionbendyness to Y is ok. Get how much we could move Y without bending and move it by that amount.
+                    //    {
+                    //        float maxMove = connectionStenght / forceRequired;
+                    //        maxMove += (1.0f - maxMove) * xDesProp.bendHardness;
+                    //        yGoalOffsetW *= maxMove;
+                    //    }
+                    //
+                    //    //offset Y by the result amount
+                    //    float moveDis = yGoalOffsetW.magnitude;
+                    //    if (yMinOffsetSqrAmount > moveDis)
+                    //    {
+                    //        yGoalOffsetW = yGoalOffsetW.normalized * yMinOffsetSqrAmount;
+                    //        moveDis = yMinOffsetSqrAmount;
+                    //    }
+                    //
+                    //    if (yOldOffsetSqrAmount >= moveDis) return;
+                    //    partsWPos[yPI] = yOgWPos + yGoalOffsetW;
+                    //    if (minMoveDis > moveDis || minMoveIndex == yPI)
+                    //    {
+                    //        minMoveDis = moveDis;
+                    //        minMoveIndex = yPI;
+                    //    }
+                    //
+                    //    //6: Set X damage to how close it was to breaking or broke, if X broke also set Y damage
+                    //    FracStruct yFPart = _fStructs[yPI];
+                    //    if (connectionBendStenght < forceRequired)
+                    //    {
+                    //        yFPart.maxTransportUsed = Mathf.Clamp01((partsMoveMass[yPI] * yGoalOffsetW.magnitude) / connectionBendStenght);
+                    //        _fStructs[yPI] = yFPart;
+                    //    }
+                    //    else
+                    //    {
+                    //        xFPart.maxTransportUsed = Mathf.Clamp01(forceRequired / connectionBendStenght);
+                    //        _fStructs[xPI] = xFPart;
+                    //    }
+                    //
+                    //    //7: X is Y, repeat from 2
+                    //    //We do this in loop above
+                    //}
+
+                    void OnBreakPart(int partI, ref FracStruct _fPart, float energyOverflow)
                     {
-                        int partI = orderIToPartI[oI];
-                        if (partIToLayerI[partI] != 1) break;
-                        oI++;
-
-                        partsWPos[partI] += Mathf.Clamp01(sourceTotForce / (partsMoveMass[partI] * velDis)) * velDis * velDir;
-                    }
-
-                    //Loop all parts in layer order and compute there deformation+destruction
-                    foreach (int partI in orderIToPartI)
-                    {
-                        int layerI = partIToLayerI[partI];
-                        FracStruct fPart = _fStructs[partI];
-
-                        for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
-                        {
-                            int nPI = fPart.neighbourPartI[nI];
-                            if (partIToLayerI[nPI] <= layerI) continue;
-
-                            MoveYFromX(partI, nPI, ref fPart);
-                        }
-                    }
-
-                    void MoveYFromX(int xPI, int yPI, ref FracStruct xFPart)
-                    {
-                        //2: Y is X neighbour(s), Y goal is to have the same relative dir+dis from X as it had before we moved X
-                        Vector3 yGoalOffsetW = partsWPos[xPI] - partsWPosOg[xPI];
-                        Vector3 yOgWPos = partsWPosOg[yPI];
-                        float yOldOffsetSqrAmount = (partsWPos[yPI] - yOgWPos).sqrMagnitude;
-                        if (yOldOffsetSqrAmount >= yGoalOffsetW.sqrMagnitude) return;
-
-                        //3: If X connection to Y is stronger than force required to move Y to goal, just move Y to goal
-                        float forceRequired = partsMoveMass[xPI] * yGoalOffsetW.magnitude;
-                        DestructionMaterial.DesProperties xDesProp = _desProps[xFPart.desMatI];
-                        float connectionStenght = GetPartActualTransCap(ref xFPart, ref xDesProp);
-                        float connectionBendStenght = connectionStenght / xDesProp.stiffness;
-                        
-                        if (connectionStenght >= forceRequired)
-                        {
-
-                        }
-                        else//4: If X connection*bendyness to Y is too weak, X breaks, Get how much we could move Y before X breaks and move Y by that amount (Including bendyness)
-                        if (connectionBendStenght < forceRequired)
-                        {
-                            float maxMove = connectionBendStenght / forceRequired;
-                            maxMove += (1.0f - maxMove) * xDesProp.bendHardness;
-                            yGoalOffsetW *= maxMove;
-                            OnBreakPart(xPI, ref xFPart);
-                        }
-                        else//5: If X connectionbendyness to Y is ok. Get how much we could move Y without bending and move it by that amount.
-                        {
-                            float maxMove = connectionStenght / forceRequired;
-                            maxMove += (1.0f - maxMove) * xDesProp.bendHardness;
-                            yGoalOffsetW *= maxMove;
-                        }
-
-                        //offset Y by the result amount
-                        if (yOldOffsetSqrAmount >= yGoalOffsetW.sqrMagnitude) return;
-                        partsWPos[yPI] = yOgWPos + yGoalOffsetW;
-
-                        //6: Set X damage to how close it was to breaking or broke, if X broke also set Y damage
-                        FracStruct yFPart = _fStructs[yPI];
-                        if (connectionBendStenght < forceRequired)
-                        {
-                            yFPart.maxTransportUsed = Mathf.Clamp01((partsMoveMass[yPI] * yGoalOffsetW.magnitude) / connectionBendStenght);
-                            _fStructs[yPI] = yFPart;
-                        }
-                        else
-                        {
-                            xFPart.maxTransportUsed = Mathf.Clamp01(forceRequired / connectionBendStenght);
-                            _fStructs[xPI] = xFPart;
-                        }
-
-                        //7: X is Y, repeat from 2
-                        //We do this in loop above
-                    }
-
-                    void OnBreakPart(int partI, ref FracStruct _fPart)
-                    {
+                        Debug.Log(energyOverflow + " " + partI);
                         _fPart.maxTransportUsed = 1.0f;
                         _fStructs[partI] = _fPart;
                     }
@@ -3642,7 +3743,7 @@ namespace Zombie1111_uDestruction
 
                     for (int i = 0; i < partCount; i++)
                     {
-                        FractureHelperFunc.Debug_drawBox(partsWPos[i], 0.1f, new Color(partsMoveMass[i] / avgValue, 0.0f, 0.0f), 0.1f, false);
+                        FractureHelperFunc.Debug_drawBox(partsWPos[i], 0.1f, new Color(partsMoveMass[i] / avgValue, 0.0f, 0.0f), 0.5f, false);
                     }
                 }
 
@@ -3651,6 +3752,13 @@ namespace Zombie1111_uDestruction
                     return _desProp.transportCapacity - (_desProp.transportCapacity * _fPart.maxTransportUsed * _desProp.transportMaxDamage);
                 }
             }
+        }
+
+        public struct DesPartToBreak
+        {
+            public int partI;
+            public Vector3 velDir;
+            public float velForce;
         }
 
         private void ApplySkinAndDef()
@@ -3671,6 +3779,9 @@ namespace Zombie1111_uDestruction
             }
         }
 
+        Matrix4x4[] gpuMeshBonesLToW;
+        GpuMeshVertex[] gpuMeshVertexData;
+
         private void UpdateGpuMeshReadback()
         {
             //get mesh data from readback
@@ -3680,44 +3791,59 @@ namespace Zombie1111_uDestruction
             {
                 if (gpuMeshRequest.hasError == false)
                 {
-                    NativeArray<GpuMeshVertex> newMD = gpuMeshRequest.GetData<GpuMeshVertex>();
-                    FractureHelperFunc.SetListLenght(ref gpuMeshVertexData, newMD.Length);
 
-                    for (int i = 0; i < newMD.Length; i++)
-                    {
-                        gpuMeshVertexData[i] = newMD[i].pos;
-                    }
+                    //gpu readback is done, get the result
+                    NativeArray<GpuMeshVertex> newMD = gpuMeshRequest.GetData<GpuMeshVertex>();
+
+                    if (gpuMeshVertexData.Length != newMD.Length) gpuMeshVertexData = new GpuMeshVertex[newMD.Length];
+                    newMD.CopyTo(gpuMeshVertexData);
                 }
-                else if (gpuMeshVertexData.Count != fr_verticesL.Count)
+                else if (gpuMeshVertexData.Length != fr_verticesL.Count)
                 {
-                    gpuMeshRequest = AsyncGPUReadback.Request(buf_verNors);
-                    Debug.Log("Wrong readback");
+                    //for some reason readback result is invalid, just request again
+                    RequestMeshFromGpu();
                     return;
                 }
 
-                short partI = des_deformedParts[oppositeI].FirstOrDefault();
-                des_deformedParts[oppositeI].Remove(partI);
-
-                Matrix4x4 partLToW = fr_bones[partI + partBoneOffset].worldToLocalMatrix;
-                Matrix4x4 rendWToL = fracRend.localToWorldMatrix;
-                Vector3[] partPossL = new Vector3[allParts[partI].partMeshVerts.Count];
-                short pI = 0;
-
-                foreach (int vI in allParts[partI].partMeshVerts)
+                //Update colliders from new mesh
+                byte maxLoops = FracGlobalSettings.maxColliderUpdatesPerFrame;
+                while (maxLoops > 0 && des_deformedParts.Length > 0)
                 {
-                    partPossL[pI] = partLToW.MultiplyPoint3x4(rendWToL.MultiplyPoint3x4(gpuMeshVertexData[vI]));
-                    pI++;
-                }
+                    maxLoops--;
+                    short partI = des_deformedParts[oppositeI].FirstOrDefault();
+                    if (des_deformedParts[oppositeI].Remove(partI) == false) break;
 
-                FractureHelperFunc.SetColliderFromFromPoints(saved_allPartsCol[partI], partPossL, ref partMaxExtent);
+                    Matrix4x4 partLToW = gpuMeshBonesLToW[partI + partBoneOffset].inverse;
+                    Matrix4x4 rendWToL = fracRend.localToWorldMatrix;
+                    Vector3[] partPossL = new Vector3[allParts[partI].partMeshVerts.Count];
+                    short pI = 0;
+
+                    foreach (int vI in allParts[partI].partMeshVerts)
+                    {
+                        partPossL[pI] = partLToW.MultiplyPoint3x4(rendWToL.MultiplyPoint3x4(gpuMeshVertexData[vI].pos));
+                        pI++;
+                    }
+
+                    FractureHelperFunc.SetColliderFromFromPoints(saved_allPartsCol[partI], partPossL, ref partMaxExtent);
+                }
             }
 
+            //If all colliders from previous request has been updated and more colliders needs updating, do request
             if (gpuMeshRequest_do == true && des_deformedParts[oppositeI].Count == 0)
+            {
+                RequestMeshFromGpu();
+                des_deformedPartsIndex = oppositeI;
+                gpuMeshRequest_do = false;
+            }
+
+            void RequestMeshFromGpu()
             {
                 gpuMeshRequest = AsyncGPUReadback.Request(buf_verNors);
                 gpuMeshRequest.forcePlayerLoopUpdate = true;
-                des_deformedPartsIndex = oppositeI;
-                gpuMeshRequest_do = false;
+
+                //We need to store all colliders matrix since they may move durring gpu->cpu transfer. The matrixes they had at request seems to always stay valid
+                if (gpuMeshBonesLToW.Length != jGTD_job.fracBonesLToW.Length) gpuMeshBonesLToW = new Matrix4x4[jGTD_job.fracBonesLToW.Length];
+                jGTD_job.fracBonesLToW.CopyTo(gpuMeshBonesLToW);
             }
         }
 
@@ -3999,10 +4125,10 @@ namespace Zombie1111_uDestruction
             {
                 //Storing all mBake_vms in a array and only updating them when a bone has moved may be worth it??
                 mBake_weight = fr_boneWeightsCurrent[vI];
-                mBake_bm0 = jCDW_job.bonesLToW[mBake_weight.boneIndex0];
-                mBake_bm1 = jCDW_job.bonesLToW[mBake_weight.boneIndex1];
-                mBake_bm2 = jCDW_job.bonesLToW[mBake_weight.boneIndex2];
-                mBake_bm3 = jCDW_job.bonesLToW[mBake_weight.boneIndex3];
+                mBake_bm0 = jCDW_job.boneBindsLToW[mBake_weight.boneIndex0];
+                mBake_bm1 = jCDW_job.boneBindsLToW[mBake_weight.boneIndex1];
+                mBake_bm2 = jCDW_job.boneBindsLToW[mBake_weight.boneIndex2];
+                mBake_bm3 = jCDW_job.boneBindsLToW[mBake_weight.boneIndex3];
 
                 mBake_vms.m00 = mBake_bm0.m00 * mBake_weight.weight0 + mBake_bm1.m00 * mBake_weight.weight1 + mBake_bm2.m00 * mBake_weight.weight2 + mBake_bm3.m00 * mBake_weight.weight3;
                 mBake_vms.m01 = mBake_bm0.m01 * mBake_weight.weight0 + mBake_bm1.m01 * mBake_weight.weight1 + mBake_bm2.m01 * mBake_weight.weight2 + mBake_bm3.m01 * mBake_weight.weight3;

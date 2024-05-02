@@ -128,6 +128,7 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
         fr_meshData[id.x] = meshD;
     }
     
+    //Idea for later, rope mode. Do by having a offset in structs_posL space and when moving a part transform add the move amount to structs_posL and the opposite move amount to the new offset
     //Write updated vertics and normals to mesh
     verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
     verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
