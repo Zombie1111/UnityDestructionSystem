@@ -592,6 +592,7 @@ namespace Zombie1111_uDestruction
             {
                 structPosL = new NativeList<Vector3>(Allocator.Persistent),
                 partsParentI = new NativeList<int>(Allocator.Persistent),
+                parentPartCount = new NativeList<short>(Allocator.Persistent),
                 kinematicPartIndexes = new NativeHashSet<int>(0, Allocator.Persistent),
                 fStructs = new NativeList<FracStruct>(Allocator.Persistent)
             };
@@ -2110,7 +2111,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Sets the given parts parent to newParentI, if -1 the part will become lose
         /// </summary>
-        private void SetPartParent(short partI, int newParentI)
+        private void SetPartParent(short partI, int newParentI, Vector3 losePartVelocity = default)
         {
             int partParentI = jCDW_job.partsParentI[partI];
             if (partParentI == newParentI) return;
@@ -2122,6 +2123,7 @@ namespace Zombie1111_uDestruction
             //remove part from previous parent
             if (partParentI >= 0)
             {
+                jCDW_job.parentPartCount[partParentI]--;
                 allParents[partParentI].partIndexes.Remove(partI);
                 allParents[partParentI].parentMass -= partDesMat.desProps.mass;
                 allParents[partParentI].totalStiffness -= partDesMat.desProps.stiffness;
@@ -2143,6 +2145,7 @@ namespace Zombie1111_uDestruction
 
             //if want to change parent
             fr_bones[partBoneI].SetParent(newParentI > 0 || partsDefualtData.Count == 0 ? allParents[newParentI].parentTrans : partsDefualtData[partI].defParent);
+            jCDW_job.parentPartCount[newParentI]++;
             allParents[newParentI].partIndexes.Add(partI);
             allParents[newParentI].parentMass += partDesMat.desProps.mass;
             allParents[newParentI].totalStiffness += partDesMat.desProps.stiffness;
@@ -2166,6 +2169,7 @@ namespace Zombie1111_uDestruction
                 newRb.drag = phyPartsOptions.drag;
                 newRb.angularDrag = phyPartsOptions.angularDrag;
                 newRb.useGravity = phyPartsOptions.useGravity;
+                newRb.velocity = losePartVelocity;
             }
 
             void FromNoParentToParent()
@@ -2174,7 +2178,6 @@ namespace Zombie1111_uDestruction
                 //set transform
                 fr_bones[partBoneI].gameObject.layer = partDesMat.objLayerDefualt;
                 saved_allPartsCol[partI].hasModifiableContacts = true;
-
                 //remove rigidbody
                 //Destroy(allParts[partI].col.attachedRigidbody);
             }
@@ -2192,8 +2195,9 @@ namespace Zombie1111_uDestruction
             {
                 for (short parentI = 1; parentI < allParents.Count; parentI++)
                 {
-                    if (allParents[parentI].partIndexes.Count == 0 && allParents[parentI].parentTrans != null && allParents[parentI].parentTrans.parent == transform &&
-                        (allParents[parentI].parentRb != null || phyMainOptions.mainPhysicsType == OptMainPhysicsType.alwaysKinematic))
+                    if (allParents[parentI].partIndexes.Count == 0 && parentsThatNeedsUpdating.Contains(parentI) == false
+                        && allParents[parentI].parentTrans != null && allParents[parentI].parentTrans.parent == transform
+                        && (allParents[parentI].parentRb != null || phyMainOptions.mainPhysicsType == OptMainPhysicsType.alwaysKinematic))
                     {
                         newParentI = parentI;
                         allParents[newParentI].parentTrans.gameObject.SetActive(true);
@@ -2226,6 +2230,8 @@ namespace Zombie1111_uDestruction
                     partIndexes = new(),
                     parentMass = 0.0f
                 });
+
+                jCDW_job.parentPartCount.Add(new());
             }
 
             //set new parent defualt properties
@@ -2884,6 +2890,8 @@ namespace Zombie1111_uDestruction
             jCDW_job.desProps = DestructionMaterials.Select(desMat => desMat.desProps).ToList().ToNativeArray(Allocator.Persistent);
             jCDW_job.partBoneOffset = partBoneOffset;
             jCDW_job.partsToBreak = new NativeHashMap<int, DesPartToBreak>(8, Allocator.Persistent);
+            jCDW_job.newParentsData = new NativeHashMap<byte, DesNewParentData>(4, Allocator.Persistent);
+            jCDW_job.partsNewParentI = new NativeArray<byte>(allParts.Count, Allocator.Persistent);
             destructionSources = new();
             destructionBodies = new();
             destructionPairs = new();
@@ -3099,6 +3107,8 @@ namespace Zombie1111_uDestruction
             if (jCDW_job.desProps.IsCreated == true) jCDW_job.desProps.Dispose();
             if (jCDW_job.boneBindsLToW.IsCreated == true) jCDW_job.boneBindsLToW.Dispose();
             if (jCDW_job.partsToBreak.IsCreated == true) jCDW_job.partsToBreak.Dispose();
+            if (jCDW_job.newParentsData.IsCreated == true) jCDW_job.newParentsData.Dispose();
+            if (jCDW_job.partsNewParentI.IsCreated == true) jCDW_job.partsNewParentI.Dispose();
         }
 
         private int cpKernelId_ComputeSkinDef = -1;
@@ -3350,9 +3360,41 @@ namespace Zombie1111_uDestruction
                 des_deformedParts[des_deformedPartsIndex].Add(i);
             }
 
+            //create new parents and set their velocity
+            NativeArray<byte> newParentKeys = jCDW_job.newParentsData.GetKeyArray(Allocator.Temp);
+            Dictionary<byte, int> newParentIToParentI = new(newParentKeys.Length);
+
+            for (int i = 0; i < newParentKeys.Length; i++)
+            {
+                DesNewParentData newPD = jCDW_job.newParentsData[newParentKeys[i]];
+                if (newPD.newPartCount >= 0)
+                {
+                    newPD.sourceParentI = CreateNewParent(null);
+                    newParentIToParentI.Add(newParentKeys[i], newPD.sourceParentI);
+                }
+
+                Debug.Log(newPD.sourceParentI);
+                if (allParents[newPD.sourceParentI].parentRb != null) allParents[newPD.sourceParentI].parentRb.AddForceAtPosition(newPD.velocity, newPD.velPos, ForceMode.VelocityChange);
+            }
+            
+            //set parts to their new parents
+            if (newParentIToParentI.Count > 0)
+            {
+                int partCount = allParts.Count;
+                for (short partI = 0; partI < partCount; partI++)
+                {
+                    byte newPKey = jCDW_job.partsNewParentI[partI];
+                    if (newPKey == 0) continue;
+            
+                    if (jCDW_job.partsToBreak.ContainsKey(partI) == true) Debug.Log(partI);
+                    SetPartParent(partI, newParentIToParentI[newPKey]);
+                }
+            }
+
+            //break parts that should break
             foreach (DesPartToBreak pBreak in jCDW_job.partsToBreak.GetValueArray(Allocator.Temp))
             {
-                SetPartParent((short)pBreak.partI, -1);
+                SetPartParent((short)pBreak.partI, -1, pBreak.velTarget);
             }
         }
 
@@ -3371,6 +3413,11 @@ namespace Zombie1111_uDestruction
             public NativeList<int> partsParentI;
 
             /// <summary>
+            /// The number of parts each parent has
+            /// </summary>
+            public NativeList<short> parentPartCount;
+
+            /// <summary>
             /// Contains all part indexes that are kinematic
             /// </summary>
             public NativeHashSet<int> kinematicPartIndexes;
@@ -3379,6 +3426,8 @@ namespace Zombie1111_uDestruction
             public NativeArray<DestructionMaterial.DesProperties> desProps;
             public NativeArray<Matrix4x4>.ReadOnly bonesLToW;
             public NativeHashMap<int, DesPartToBreak> partsToBreak;
+            public NativeHashMap<byte, DesNewParentData> newParentsData;
+            public NativeArray<byte> partsNewParentI;
 
             /// <summary>
             /// The local to world matrix for every bone (Parts bones + skinned bones), skinned bones are first
@@ -3396,10 +3445,16 @@ namespace Zombie1111_uDestruction
                 int partCount = structPosL.Length;
                 var _KinParts = kinematicPartIndexes;
                 var _partsToBreak = partsToBreak;
+                var _newParentsData = newParentsData;
+                var _parentPartCount = parentPartCount;
+                var _partsNewParentI = partsNewParentI;
 
                 //Allocate global used variabels
+                _partsToBreak.Clear();
+                _newParentsData.Clear();
                 NativeArray<float> partsMoveMass = new(partCount, Allocator.Temp); //The resistance each part can make to movement
                 NativeHashSet<int> partsThatWillBreak = new(8, Allocator.Temp);
+                float allTotImpForces = 0.0f;
 
                 //get all parts world position
                 NativeArray<Vector3> partsWPos = new(partCount, Allocator.Temp);
@@ -3421,6 +3476,9 @@ namespace Zombie1111_uDestruction
                     CalcSource(sourceI);
                 }
 
+                //get the velocity to give all parts and if need any new parents
+                CalcChunks();
+
                 //Return destruction result
                 //Transform parts world position back to local
                 for (int partI = 0; partI < partCount; partI++)
@@ -3428,11 +3486,206 @@ namespace Zombie1111_uDestruction
                     structPosL[partI] = boneBindsLToW[partI + partBoneOffset].inverse.MultiplyPoint3x4(partsWPos[partI]);
                 }
 
+                void CalcChunks()
+                {
+                    //declare native containers and clear
+                    int breakCount = _partsToBreak.Count;
+                    if (breakCount == 0) return;
+
+                    NativeHashSet<int> p_breakSources = new(breakCount, Allocator.Temp);
+                    NativeArray<int> p_parts = new(partCount - breakCount, Allocator.Temp); 
+                    NativeHashSet<int> p_partsUsed = new(p_parts.Length, Allocator.Temp);
+                    NativeArray<int> toBreakKeys = _partsToBreak.GetKeyArray(Allocator.Temp);
+                    FractureHelperFunc.SetWholeNativeArray<byte>(ref _partsNewParentI, 0);
+                    byte nextNewParentI = 0;
+                    float totUsedForce = 0.0f;
+
+                    for (int brI = 0; brI < breakCount; brI++)
+                    {
+                        //get the spreadPart
+                        DesPartToBreak pBreak = _partsToBreak[toBreakKeys[brI]];
+                        FracStruct fPart = _fStructs[pBreak.partI];
+                        int parentI = _partsParentI[pBreak.partI];
+                        int nPI = -1;
+                        float p_totMass = 0.0f;
+
+                        for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                        {
+                            nPI = fPart.neighbourPartI[nI];
+                            if (_partsToBreak.ContainsKey(nPI) == true || _partsParentI[nPI] != parentI || p_partsUsed.Add(nPI) == false)
+                            {
+                                nPI = -1;
+                                continue;
+                            }
+
+                            p_parts[0] = nPI;
+                            p_totMass += _desProps[_fStructs[nPI].desMatI].mass;
+                            break;
+                        }
+
+                        if (nPI < 0) continue;
+                        nextNewParentI++;
+                        _partsNewParentI[nPI] = nextNewParentI;
+                        brI--;//If breaking caused a new parent, we must loop it again since it may have caused even more new parents
+
+                        //get all parts that are connected to spreadPart
+                        int ppCount = 1;
+                        int avgBreakSourceLayerI = 0;
+                        p_breakSources.Clear();
+
+                        for (int i = 0; i < ppCount; i++)
+                        {
+                            fPart = _fStructs[p_parts[i]];
+
+                            for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                            {
+                                nPI = fPart.neighbourPartI[nI];
+                                if (_partsParentI[nPI] != parentI) continue;
+
+                                if (_partsToBreak.ContainsKey(nPI) == true)
+                                {
+                                    if (p_breakSources.Add(nPI) == false) continue;
+                                    avgBreakSourceLayerI += _partsToBreak[nPI].layerI;
+                                    continue;
+                                }
+
+                                if (p_partsUsed.Add(nPI) == false) continue;
+                                _partsNewParentI[nPI] = nextNewParentI;
+                                p_parts[ppCount] = nPI;
+                                p_totMass += _desProps[_fStructs[nPI].desMatI].mass;
+                                ppCount++;
+                            }
+                        }
+
+                        //get break dir and break force
+                        int resistanceLayer = Mathf.CeilToInt(avgBreakSourceLayerI / (float)p_breakSources.Count) + 1;
+                        float breakForce = 0.0f;
+                        Vector3 breakVel = Vector3.zero;
+                        Vector3 breakPos = Vector3.zero;
+                        int usedBreakCount = 0;
+
+                        foreach (int bsPI in p_breakSources)
+                        {
+                            pBreak = _partsToBreak[bsPI];
+                            if (pBreak.layerI > resistanceLayer)
+                            {
+                                breakForce -= pBreak.velForce;
+                                continue;
+                            }
+
+                            breakForce += pBreak.velForce;
+                            breakVel += pBreak.velTarget;
+                            breakPos += partsWPos[bsPI];
+                            usedBreakCount++;
+                        }
+
+                        if (breakForce < 0.0f)
+                        {
+                            breakForce = 0.0f; //In theory it should be impossible for it to be <0.0f
+                            if (usedBreakCount == 0) continue;
+                        }
+
+                        breakVel /= usedBreakCount;
+
+                        //If newParent is too small, just break those parts
+                        if (ppCount < FracGlobalSettings.minParentPartCount)
+                        {
+                            for (int ppI = 0; ppI < ppCount; ppI++)
+                            {
+                                int partI = p_parts[ppI];
+                                _partsNewParentI[partI] = 0;
+
+                                _partsToBreak[partI] = new()
+                                {
+                                    layerI = resistanceLayer - 1,
+                                    velForce = breakForce / usedBreakCount,
+                                    velTarget = breakVel,
+                                    partI = partI,
+                                };
+                            }
+
+                            nextNewParentI--;
+                            continue;
+                        }
+
+                        //needs new parent, so add one
+                        breakForce /= breakCount;
+                        breakPos /= usedBreakCount;
+                        totUsedForce += breakForce;
+
+                        _newParentsData.Add(nextNewParentI, new()
+                        {
+                            force = breakForce,
+                            velocity = breakVel * Mathf.Clamp01(breakForce / (p_totMass * breakVel.magnitude)),
+                            velPos = breakPos,
+                            sourceParentI = (short)parentI,
+                            newPartCount = ppCount,
+                            forceLeft = breakForce - (p_totMass * breakVel.magnitude)
+                        });
+                    }
+
+                    //get the velocity broken parts should get
+                    breakCount = _partsToBreak.Count;
+                    if (toBreakKeys.Length != breakCount) toBreakKeys = _partsToBreak.GetKeyArray(Allocator.Temp);
+                    float breakForceLeft = (allTotImpForces - totUsedForce) / breakCount;
+                    if (breakForceLeft < 0.0f)
+                    {
+                        Debug.LogWarning("Destruction resulted in negative force left, how? " + breakForceLeft);
+                        breakForceLeft = 0.0f;
+                    }
+
+                    for (int brI = 0; brI < breakCount; brI++)
+                    {
+                        DesPartToBreak pBreak = _partsToBreak[toBreakKeys[brI]];
+                        float forceRequired = (pBreak.velTarget.magnitude * _desProps[_fStructs[pBreak.partI].desMatI].mass);
+                        pBreak.velTarget *= Mathf.Clamp01(breakForceLeft / forceRequired);
+                        pBreak.velForce = breakForceLeft - forceRequired;
+                    }
+
+                    //get what parent to keep (Keep the one with most parts as it is the slowest to set)
+                    int newPCount = _newParentsData.Count;
+                    NativeArray<byte> newPKeys = _newParentsData.GetKeyArray(Allocator.Temp);
+                    NativeHashSet<int> usedSourcePI = new(newPCount, Allocator.Temp);
+
+                    for (int newPI = 0; newPI < newPCount; newPI++)
+                    {
+                        //Get the best newParent with the most source parent parts
+                        byte best_nParentI = newPKeys[newPI];
+                        int sParentI = _newParentsData[best_nParentI].sourceParentI;
+                        if (usedSourcePI.Add(sParentI) == false) continue;
+
+                        int best_newPartCount = _newParentsData[best_nParentI].newPartCount;
+
+                        for (int newPII = newPI + 1; newPII < newPCount; newPII++)
+                        {
+                            byte nParentI = newPKeys[newPII];
+                            if (_newParentsData[nParentI].sourceParentI != sParentI) continue;
+
+                            int newPartCount = _newParentsData[nParentI].newPartCount;
+                            if (newPartCount <= best_newPartCount) continue;
+
+                            best_nParentI = nParentI;
+                            best_newPartCount = newPartCount;
+                        }
+
+                        //Keep the best newParent
+                        DesNewParentData newPD = _newParentsData[best_nParentI];
+                        newPD.newPartCount = -1;
+                        _newParentsData[best_nParentI] = newPD;
+
+                        for (int partI = 0; partI < partCount; partI++)
+                        {
+                            if (_partsNewParentI[partI] == best_nParentI) _partsNewParentI[partI] = 0;
+                        }
+                    }
+                }
+
                 unsafe void CalcSource(int sourceI)
                 {
                     //get the source
                     DestructionSource desSource = _desSources[sourceI];
                     if (desSource.impForceTotal <= 0.0f || desSource.parentI < 0) return;
+                    allTotImpForces += desSource.impForceTotal;
 
                     //reset nativeArrays
                     FractureHelperFunc.SetWholeNativeArray(ref partsMoveMass, 0.0f);//To prevent devision by zero
@@ -3463,6 +3716,8 @@ namespace Zombie1111_uDestruction
                     for (int impI = 0; impI < desPoints.Length; impI++)
                     {
                         desPoint = desPoints[impI];
+                        if (_partsToBreak.ContainsKey(desPoint.partI) == true) continue;
+
                         if (desPoint.force > maxForce)
                         {
                             orderIToPartI[nextOrderI] = desPoint.partI;
@@ -3492,7 +3747,7 @@ namespace Zombie1111_uDestruction
                             {
                                 int npI = fPart.neighbourPartI[nI];
 
-                                if (partIToLayerI[npI] != 0 || _partsParentI[npI] != desSource.parentI) continue;
+                                if (partIToLayerI[npI] != 0 || _partsParentI[npI] != desSource.parentI || _partsToBreak.ContainsKey(npI) == true) continue;
                                 partIToLayerI[npI] = nextLayerI;
                                 orderIToPartI[nextOrderI] = npI;
                                 nextOrderI++;
@@ -3558,6 +3813,8 @@ namespace Zombie1111_uDestruction
                             partsMoveMass[pI] = resMass * (pTransCap / totTransCap);
 
                             //get if part should break
+                            if (_KinParts.Contains(pI) == true) continue;
+
                             Vector3 transDir = Vector3.zero;
                             Vector3 partWPos = partsWPos[pI];
                             byte usedNeighbourCount = 0;
@@ -3578,8 +3835,6 @@ namespace Zombie1111_uDestruction
 
                             transDir /= usedNeighbourCount;
                             pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(velDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
-                            //float forceRequired = Mathf.Min(velDis * partsMoveMass[pI], totForceOg / usedTPI.Length);
-
 
                             if (pTransCap <= forceRequired)
                             {
@@ -3593,7 +3848,8 @@ namespace Zombie1111_uDestruction
                                 {
                                     partI = pI,
                                     velForce = pTransCap,
-                                    velDir = velDir
+                                    velTarget = velDir * velDis,
+                                    layerI = layerI
                                 };
                             }
                             else
@@ -3757,8 +4013,19 @@ namespace Zombie1111_uDestruction
         public struct DesPartToBreak
         {
             public int partI;
-            public Vector3 velDir;
+            public Vector3 velTarget;
             public float velForce;
+            public int layerI;
+        }
+
+        public struct DesNewParentData
+        {
+            public Vector3 velocity;
+            public Vector3 velPos;
+            public float force;
+            public short sourceParentI;
+            public int newPartCount;
+            public float forceLeft;
         }
 
         private void ApplySkinAndDef()

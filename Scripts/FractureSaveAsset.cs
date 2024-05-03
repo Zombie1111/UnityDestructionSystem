@@ -66,6 +66,7 @@ namespace Zombie1111_uDestruction
             public List<int> saved_fracWeightsI = new();
             public List<int> saved_fr_verToPartI = new();
             public FractureThis.FracStruct[] saved_fracStructs = new FractureThis.FracStruct[0];
+            public List<short> saved_parentPartCount = new();
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
@@ -208,6 +209,12 @@ namespace Zombie1111_uDestruction
                 fracSavedData.saved_structs_parentI.Add(parentI);
             }
 
+            fracSavedData.saved_parentPartCount = new();
+            foreach (short partCount in saveFrom.jCDW_job.parentPartCount)
+            {
+                fracSavedData.saved_parentPartCount.Add(partCount);
+            }
+
             fracSavedData.saved_desWeights = saveFrom.desWeights.ToList();
             fracSavedData.saved_fracWeightsI = saveFrom.fr_fracWeightsI.ToList();
             fracSavedData.saved_fr_verToPartI = saveFrom.fr_verToPartI.ToList();
@@ -283,6 +290,7 @@ namespace Zombie1111_uDestruction
                 partsParentI = fracSavedData.saved_structs_parentI.ToNativeList(Allocator.Persistent),
                 kinematicPartIndexes = new(fracSavedData.saved_kinematicPartsStatus.Count, Allocator.Persistent),
                 fStructs = new(fracSavedData.saved_fracStructs.Length, Allocator.Persistent),
+                parentPartCount = fracSavedData.saved_parentPartCount.ToNativeList(Allocator.Persistent) 
             };
 
             //Load kinematic parts, and maybe recalculate kinematic parts depending on global setting

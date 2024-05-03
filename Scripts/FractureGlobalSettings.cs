@@ -1,3 +1,5 @@
+using UnityEngine.Experimental.GlobalIllumination;
+
 namespace Zombie1111_uDestruction
 {
     /*
@@ -56,5 +58,8 @@ namespace Zombie1111_uDestruction
         //If collision deformation is enabled, it has to sync all colliders with the deformed mesh.
         //Modifying a collider aint very fast, this limits how many colliders each destructable object can sync per frame
         public const byte maxColliderUpdatesPerFrame = 2;
+
+        //How many parts a parent must have for it to be created when destoying stuff, used to prevent hundreds of tiny parents from potentially being created when destroying stuff
+        public const byte minParentPartCount = 3;
     }
 }
