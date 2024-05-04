@@ -750,18 +750,24 @@ namespace Zombie1111_uDestruction
 
                     if (fracD_a != null)
                     {
+                        //float rbA_forceApplied = Mathf.Min(
+                        //    rbForceVel.magnitude * fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentMass,
+                        //    GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness));
                         float rbA_forceApplied = Mathf.Min(
-                            rbForceVel.magnitude * fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentMass,
-                            GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness));
-                        
+                            GuessMaxForceApply(rbForceVel, null, rbI_a, impBouncyness, fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentKinematic > 0),
+                            GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, false));
+
                         CalcImpContact(fracD_a, rbA_causedImp == true ? -rbA_vel : rbB_vel, rbA_forceApplied, rbI_b, 0);
                     }
 
                     if (fracD_b != null)
                     {
+                        //float rbB_forceApplied = Mathf.Min(
+                        //    rbForceVel.magnitude * fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentMass,
+                        //    GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness));
                         float rbB_forceApplied = Mathf.Min(
-                            rbForceVel.magnitude * fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentMass,
-                            GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness));
+                            GuessMaxForceApply(rbForceVel, null, rbI_b, impBouncyness, fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentKinematic > 0),
+                            GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness, false));
 
                         CalcImpContact(fracD_b, rbB_causedImp == true ? -rbB_vel : rbA_vel, rbB_forceApplied, rbI_a, 1);
                     }
@@ -847,12 +853,12 @@ namespace Zombie1111_uDestruction
                 return forceConsume + (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
             }
 
-            float GuessMaxForceApply(Vector3 forceVel, GlobalFracData fracD_hit, int rbI_hit, float bouncyness)
+            float GuessMaxForceApply(Vector3 forceVel, GlobalFracData fracD_hit, int rbI_hit, float bouncyness, bool rbIsKinematic = false)
             {
                 if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceApplied(forceVel, fracD_hit.partIndex, bouncyness);
 
                 //if the opposite object is not destructable it has infinit stenght
-                if (rbI_hit < 0) return float.MaxValue;
+                if (rbI_hit < 0 || rbIsKinematic == true) return float.MaxValue;
                 float forceConsume = forceVel.magnitude * Mathf.Abs(jGRV_rb_mass[rbI_hit].mass);
                 return forceConsume - (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
             }
