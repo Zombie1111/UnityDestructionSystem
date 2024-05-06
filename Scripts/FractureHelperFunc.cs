@@ -2269,15 +2269,30 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Subtracts the given vector lenght by amount
         /// </summary>
-        /// <param name="vector"></param>
-        /// <param name="amount"></param>
-        /// <returns></returns>
         public static Vector3 SubtractMagnitude(Vector3 vector, float amount)
         {
             if (vector.magnitude <= amount) return Vector3.zero;
             return vector.normalized * (vector.magnitude - amount);
         }
 
+        /// <summary>
+        /// Returns the relative velocity, if A move forward 4 and B moves forward 10 result is 6
+        /// </summary>
+        public static Vector3 GetRelativeVelocity(Vector3 velA, Vector3 velB)
+        {
+            if (velA.sqrMagnitude > velB.sqrMagnitude)
+            {
+                return velA - velB;
+            }
+            else
+            {
+                return velB - velA;
+            }
+        }
+
+        /// <summary>
+        /// Returns the square magnitude of the quaternion, like Vector3.SqrMagnitude
+        /// </summary>
         public static float QuaternionSqrMagnitude(Quaternion quaternion)
         {
             return quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z + quaternion.w * quaternion.w;
@@ -2286,9 +2301,6 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns true if transToLookFor is a parent of transToSearchFrom (Includes indirect parents like transform.parent.parent)
         /// </summary>
-        /// <param name="transToLookFor"></param>
-        /// <param name="transToSearchFrom"></param>
-        /// <returns></returns>
         public static bool GetIfTransformIsAnyParent(Transform transToLookFor, Transform transToSearchFrom)
         {
             if (transToLookFor == transToSearchFrom) return true;

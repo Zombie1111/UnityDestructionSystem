@@ -475,6 +475,7 @@ namespace Zombie1111_uDestruction
                 return true;
             }
 
+            //load
             if (saveAsset.Load(this) == false)
             {
                 //when cant load, log error
@@ -489,6 +490,7 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 
+            MarkParentAsModified(0);//There is always 1 parent when loading
             SyncFracRendData();
             return true;
         }
@@ -2296,7 +2298,8 @@ namespace Zombie1111_uDestruction
                 parentRb.mass = newRbMass;
                 parentRb.isKinematic = allParents[parentI].parentKinematic > 0;
 
-                globalHandler.OnAddOrUpdateRb(parentRb, newRbMass);
+                //globalHandler.OnAddOrUpdateRb(parentRb, newRbMass);
+                globalHandler.OnAddOrUpdateRb(parentRb, allParents[parentI].parentMass);
             }
         }
 
@@ -3334,7 +3337,6 @@ namespace Zombie1111_uDestruction
 
         private void ComputeDestruction_start()
         {
-
 #if UNITY_EDITOR
             if (Application.isPlaying == false)
             {
@@ -3456,7 +3458,7 @@ namespace Zombie1111_uDestruction
         public ComputeDestruction_work jCDW_job;
         private JobHandle jCDW_handle;
 
-        [BurstCompile]
+        //[BurstCompile]
         public struct ComputeDestruction_work : IJob
         {
             //solve destruction, to fix later, nearby must move the same amount as X - dis to X * dir to X dot
@@ -3792,6 +3794,7 @@ namespace Zombie1111_uDestruction
                     int nextOrderI = 0;
                     int nextLayerI = 1;//We must start at 1 since defualt is 0 and we must know if it has been assigned
                     DestructionPoint desPoint;
+                    float totForceOgklk = 0.0f;
 
                     for (int impI = 0; impI < desPoints.Length; impI++)
                     {
@@ -3800,14 +3803,15 @@ namespace Zombie1111_uDestruction
 
                         if (desPoint.force > maxForce)
                         {
+                            if (partIToLayerI[desPoint.partI] != 0) continue;
+
                             orderIToPartI[nextOrderI] = desPoint.partI;
                             nextOrderI++;
 
                             partIToLayerI[desPoint.partI] = nextLayerI;
+                            totForceOgklk += desPoint.force;
                         }
                     }
-
-                    int usedImpPointCount = nextOrderI;
 
                     //Get each part distance to any 90% impact
                     int oI = 0;
@@ -3822,7 +3826,7 @@ namespace Zombie1111_uDestruction
 
                             FracStruct fPart = _fStructs[orderIToPartI[oI]];
                             oI++;
-
+                            
                             for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
                             {
                                 int npI = fPart.neighbourPartI[nI];
@@ -3842,8 +3846,6 @@ namespace Zombie1111_uDestruction
                     NativeHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
                     float velDis = desSource.impVel.magnitude;
                     Vector3 velDir = desSource.impVel.normalized;
-                    float totForce = desSource.impForceTotal; //The total force we have left to work with
-                    float totForceOg = totForce;
                     bool alwaysKin = (desSource.parentI == 0 && _optMainPhyType == OptMainPhysicsType.orginalIsKinematic) || _optMainPhyType == OptMainPhysicsType.alwaysKinematic;
 
                     for (oI = partCount - 1; oI >= 0; oI--)
@@ -3914,18 +3916,19 @@ namespace Zombie1111_uDestruction
 
                             if (usedNeighbourCount == 0) continue;
 
-                            float forceRequired = totForceOg * Mathf.Clamp01((pTransCap / totTransCap) * (usedTPI.Length / 2.0f));
+                            //float forceRequired = totForceOgklk * Mathf.Clamp01((pTransCap / totTransCap) * (usedTPI.Length / 2.0f));
+                            float forceRequired = totForceOgklk * Mathf.Clamp01((pTransCap / totTransCap) * Mathf.Max(1.0f, usedTPI.Length / 2.0f));
                             forceRequired = Mathf.Min((velDis * partsMoveMass[pI]) + (forceRequired - (forceRequired * Mathf.Clamp01(desProp.chockResistance * layerI))), forceRequired);
                             forceRequired -= forceRequired * Mathf.Clamp01((layerI - 1) * desProp.falloff);
 
-                            transDir /= usedNeighbourCount;
+                            //transDir /= usedNeighbourCount;
+                            transDir.Normalize();//Maybe we should use the best dir instead of avg?
                             pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(velDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
+
+
 
                             if (pTransCap <= forceRequired)
                             {
-                                //totForce -= pTransCap;
-                                totForce *= pTransCap / forceRequired;
-
                                 partsMoveMass[pI] *= pTransCap / forceRequired;
                                 fPart.maxTransportUsed = 1.0f;
 
@@ -4063,9 +4066,9 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// The rb that caused the impact, null if caused by self or misc, always contains the same keys as destructionSources
         /// </summary>
-        private ConcurrentDictionary<int, Rigidbody> destructionBodies;
-        private ConcurrentDictionary<int, NativeArray<DestructionPoint>> destructionPairs;
-        private ConcurrentDictionary<int, DestructionSource> destructionSources;
+        private Dictionary<int, Rigidbody> destructionBodies;
+        private Dictionary<int, NativeArray<DestructionPoint>> destructionPairs;
+        private ConcurrentDictionary<int, DestructionSource> destructionSources;//For some weird reason it does not work correctly if I replace this with a Dictionary
 
         public unsafe struct DestructionSource
         {
@@ -4106,48 +4109,52 @@ namespace Zombie1111_uDestruction
             impactData.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impactPoints);
             impactData.desPoints_lenght = impactPoints.Length;
 
-            if (impactId == 0) impactId = destructionSources.Count;
-            if (destructionSources.TryAdd(impactId, impactData) == false)
+            lock (destructionPairs)
             {
-                if (canOverwrite == true) destructionSources.TryUpdate(impactId, impactData, impactData);
+                if (impactId == 0) impactId = destructionSources.Count;
+                if (destructionSources.TryAdd(impactId, impactData) == false)
+                {
+                    if (canOverwrite == true) destructionSources.TryUpdate(impactId, impactData, impactData);
+                    else
+                    {
+                        //merge the sources if cant overwrite
+                        destructionSources.TryGetValue(impactId, out DestructionSource impD);
+                        destructionPairs.TryGetValue(impactId, out NativeArray<DestructionPoint> impP);
+
+                        //impP can sometimes be [writeOnly] and [readOnly] but im never declaring anything writeOnly. Spent hours debugging and still no idea
+                        int ogLenght = impP.Length;
+                        impP.ResizeArray(impP.Length + impactPoints.Length);
+                        impactPoints.CopyTo(impP.GetSubArray(ogLenght, impactPoints.Length));
+
+
+                        float tempTotalForce = impD.impForceTotal + impactData.impForceTotal;
+
+                        if (impactData.impForceTotal > impD.impForceTotal)
+                        {
+                            impD.impForceTotal = impactData.impForceTotal;
+                            impD.impVel = impactData.impVel;
+                            destructionBodies[impactId] = sourceRb;//Should always be the same but we update it anyways just in case
+                        }
+
+                        for (int i = 0; i < impP.Length; i++)
+                        {
+                            DestructionPoint desP = impP[i];
+                            desP.force /= tempTotalForce;
+                            desP.force *= impD.impForceTotal;
+                            impP[i] = desP;
+                        }
+
+                        impD.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impP);//We must update the pointer since we created a new instance
+                        impD.desPoints_lenght = impP.Length;
+                        destructionSources.TryUpdate(impactId, impD, impD);
+                        destructionPairs[impactId] = impP;
+                    }
+                }
                 else
                 {
-                    //merge the sources if cant overwrite
-                    destructionSources.TryGetValue(impactId, out DestructionSource impD);
-                    destructionPairs.TryGetValue(impactId, out NativeArray<DestructionPoint> impP);
-
-                    int ogLenght = impP.Length;
-                    impP.ResizeArray(impP.Length + impactPoints.Length);
-                    impactPoints.CopyTo(impP.GetSubArray(ogLenght, impactPoints.Length));
-
-
-                    float tempTotalForce = impD.impForceTotal + impactData.impForceTotal;
-
-                    if (impactData.impForceTotal > impD.impForceTotal)
-                    {
-                        impD.impForceTotal = impactData.impForceTotal;
-                        impD.impVel = impactData.impVel;
-                        destructionBodies.TryUpdate(impactId, sourceRb, sourceRb);//Should always be the same but we update it anyways just in case
-                    }
-
-                    for (int i = 0; i < impP.Length; i++)
-                    {
-                        DestructionPoint desP = impP[i];
-                        desP.force /= tempTotalForce;
-                        desP.force *= impD.impForceTotal;
-                        impP[i] = desP;
-                    }
-
-                    impD.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impP);//We must update the pointer since we created a new instance
-                    impD.desPoints_lenght = impP.Length;
-                    destructionSources.TryUpdate(impactId, impD, impD);
-                    destructionPairs.TryUpdate(impactId, impP, impP);
+                    destructionPairs.TryAdd(impactId, impactPoints);//In theory we dont need to store impactPoints anywhere, since its Persistant and we dispose it by a pointer (No, we need it for merging)
+                    destructionBodies.TryAdd(impactId, sourceRb);
                 }
-            }
-            else
-            {
-                destructionPairs.TryAdd(impactId, impactPoints);//In theory we dont need to store impactPoints anywhere, since its Persistant and we dispose it by a pointer
-                destructionBodies.TryAdd(impactId, sourceRb);
             }
         }
 
@@ -4485,13 +4492,14 @@ namespace Zombie1111_uDestruction
             //fix later, we have changed what stiffness does
             int parentI = jCDW_job.partsParentI[partI];
             int parentPartCount = allParents[parentI].partIndexes.Count;
-            force -= force * (allParents[parentI].totalStiffness / parentPartCount);//Should bending count as breaking? Its currently not
-            force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
-            force -= force * (allParents[parentI].totalTransportCoEfficiency / parentPartCount);
+            FracStruct fPart = jCDW_job.fStructs[partI];
+            DestructionMaterial.DesProperties desProp = destructionMaterials[fPart.desMatI].desProps;
 
-            //the reason why we use lowest and not partI Capacity is because partI may be made out of steel but its connected
-            //to the wall with glass, steel wont break but glass will. Computing that just takes too long so we pretend its always connected with glass
-            return force > lowestTransportCapacity * jCDW_job.fStructs[partI].neighbourPartI_lenght;//We currently do not consider transportMaxDamage, we probably wanna do to that
+            float transCap = desProp.stenght - (desProp.stenght * fPart.maxTransportUsed * desProp.damageAccumulation);
+            transCap *= Mathf.Clamp01(0.25f + FracGlobalSettings.transDirInfluenceReduction); 
+            force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
+
+            return force > transCap;
         }
 #endregion HelperFunctions
     }

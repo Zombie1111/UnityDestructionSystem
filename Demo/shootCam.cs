@@ -77,7 +77,7 @@ namespace TrueTrace
                 rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 rb.velocity = plDir * 20.0f;
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
-                rb.mass = 1.0f;
+                rb.mass = 0.01f;
                 debugRb = rb;
                 globalF.OnAddOrUpdateRb(rb, 3.0f);
                 newO.GetComponent<Collider>().hasModifiableContacts = true;

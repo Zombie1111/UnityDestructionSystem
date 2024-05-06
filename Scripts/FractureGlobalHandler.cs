@@ -573,11 +573,31 @@ namespace Zombie1111_uDestruction
         private class ImpPair
         {
             public float impForceTotal;
+
+            /// <summary>
+            /// The velocity of the collision
+            /// </summary>
             public Vector3 impVel;
+
+            /// <summary>
+            /// The destructable object that was hit
+            /// </summary>
             public FractureThis impFrac;
+
+            /// <summary>
+            /// Contains all parts that was hit and the force applied to each of them
+            /// </summary>
             public List<FractureThis.DestructionPoint> impPoints;
+
+            /// <summary>
+            /// The other rigidbody in the collision
+            /// </summary>
             public Rigidbody sourceRb;
-            public HashSet<short> pairIndexes;
+
+            /// <summary>
+            /// impPairsI[X] is the contactPair index impPoints[X] was created from
+            /// </summary>
+            public List<int> impPairsI;
         }
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
@@ -585,6 +605,7 @@ namespace Zombie1111_uDestruction
             //variabels used durring calculations
             Dictionary<int, ImpPair> impIdToImpPair = new();
             ModifiableContactPair pair;
+            int pairI;
             Vector3 rbForceVel;
             Vector3 rbA_forceVel;
             Vector3 rbB_forceVel;
@@ -598,11 +619,9 @@ namespace Zombie1111_uDestruction
             float impBouncyness;
 
             //get all different impacts applied to every destructable object
-            for (int pairI = 0; pairI < pairs.Length; pairI++)
+            for (pairI = 0; pairI < pairs.Length; pairI++)
             {
                 pair = pairs[pairI];
-                //Debug.Log(pair.contactCount);
-
                 CalcImpPair();             
             }
 
@@ -614,21 +633,36 @@ namespace Zombie1111_uDestruction
 
                 //normlize impact forces
                 float maxImp = float.MinValue;
+                int guessedBreakCount = 0;
+                int impCount = iPair.impPoints.Count;
                 int maxImpI = 0;
 
-                for (int i = 0; i < iPair.impPoints.Count; i++)
+                for (int i = 0; i < impCount; i++)
                 {
-                    if (iPair.impPoints[i].force > maxImp)
+                    //get highest impact force
+                    var impP = iPair.impPoints[i];
+
+                    if (impP.force > maxImp)
                     {
-                        maxImp = iPair.impPoints[i].force;
+                        maxImp = impP.force;
                         maxImpI = i;
                     }
 
+                    //Ignore collision if part most likely will break
+                    pair = pairs[iPair.impPairsI[i]];
+                    if (iPair.impFrac.GuessIfForceCanCauseBreaking(impP.force, impP.partI, pair.GetBounciness(0)) == true)
+                    {
+                        guessedBreakCount++;
+                        for (int cI = 0; cI < pair.contactCount; cI++) pair.IgnoreContact(cI);
+                    }
+
+                    //Normlize impact force
                     var desP = iPair.impPoints[i];
                     desP.force /= iPair.impForceTotal;
                     iPair.impPoints[i] = desP;
                 }
 
+                //Multiply normlized impact forces with highest impact force, Because we want more impact points to result in less force at each impact point
                 for (int i = 0; i < iPair.impPoints.Count; i++)
                 {
                     var desP = iPair.impPoints[i];
@@ -636,25 +670,29 @@ namespace Zombie1111_uDestruction
                     iPair.impPoints[i] = desP;
                 }
 
-                //ignore contact if imp will most likely cause break
-                if (iPair.impFrac.GuessIfForceCanCauseBreaking(maxImp, iPair.impPoints[maxImpI].partI) == true)
-                {
-                    Debug.Log("Ignore " + maxImp);
-                    foreach (int pairI in iPair.pairIndexes)
-                    {
-                        for (int conI = 0; conI < pairs[pairI].contactCount; conI++)
-                        {
-                            pairs[pairI].IgnoreContact(conI);
-                        }
-                    }
-                }
-                else
-                {
-                    Debug.Log("Hit " + maxImp);
+                //if only a few impacts most likely caused breaking, mark contacts between source and frac to be ignored the next few physics frames
+                Debug.Log(guessedBreakCount / (float)impCount + " " + maxImp);
+                if (guessedBreakCount / (float)impCount < 0.5f) impIdsToIgnore.TryAdd(impId, 0.1f);
 
-                    //if imp most likely does not cause break, mark contacts between source and frac to be ignored the next few physics frames
-                    impIdsToIgnore.TryAdd(impId, 0.1f);
-                }
+                ////ignore contact if imp will most likely cause break
+                //if (iPair.impFrac.GuessIfForceCanCauseBreaking(maxImp, iPair.impPoints[maxImpI].partI) == true)
+                //{
+                //    Debug.Log("Ignore " + maxImp);
+                //    foreach (int pI in iPair.impPairsI)
+                //    {
+                //        for (int conI = 0; conI < pairs[pI].contactCount; conI++)
+                //        {
+                //            pairs[pI].IgnoreContact(conI);
+                //        }
+                //    }
+                //}
+                //else
+                //{
+                //    Debug.Log("Hit " + maxImp);
+                //
+                //    //if imp most likely does not cause break, mark contacts between source and frac to be ignored the next few physics frames
+                //    impIdsToIgnore.TryAdd(impId, 0.1f);
+                //}
 
                 //notify destructable object about impact
                 iPair.impFrac.RegisterImpact(new()
@@ -669,10 +707,18 @@ namespace Zombie1111_uDestruction
             {
                 //get the destructable object we hit, or return if we did not hit one
                 if (partColsInstanceId.TryGetValue(pair.colliderInstanceID, out GlobalFracData fracD_a) == true
-                    && fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex] < 0) fracD_a = null;
+                    && fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex] < 0)
+                {
+                    if (rbInstancIdToJgrvIndex.TryGetValue(pair.bodyInstanceID, out _) == false) return;
+                    fracD_a = null;
+                }
 
                 if (partColsInstanceId.TryGetValue(pair.otherColliderInstanceID, out GlobalFracData fracD_b) == true
-                                   && fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex] < 0) fracD_b = null;
+                    && fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex] < 0)
+                {
+                    if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out _) == false) return;
+                    fracD_b = null;
+                }
 
                 if (fracD_a == null && fracD_b == null) return;
 
@@ -709,18 +755,19 @@ namespace Zombie1111_uDestruction
                 //for (int contI = 0; contI < pair.contactCount; contI++)
                 {
                     //Get rigidbody velocity
-                    rbA_vel = CalcRigidbodyVel(pair.bodyInstanceID, out int rbI_a, out float norrDiff);
-                    rbA_forceVel = rbA_vel * norrDiff;
+                    rbA_vel = CalcRigidbodyVel(pair.bodyInstanceID, out int rbI_a, out float norrDiffA);
+                    rbA_forceVel = rbA_vel * norrDiffA;
+                    //rbA_forceVel = rbA_vel;
 
-                    rbB_vel = CalcRigidbodyVel(pair.otherBodyInstanceID, out int rbI_b, out norrDiff);
-                    rbB_forceVel = rbB_vel * norrDiff;
+                    rbB_vel = CalcRigidbodyVel(pair.otherBodyInstanceID, out int rbI_b, out float norrDiffB);
+                    rbB_forceVel = rbB_vel * norrDiffB;
+
                     bool rbA_causedImp = false;
                     bool rbB_causedImp = false;
 
                     if (rbA_forceVel.sqrMagnitude > rbB_forceVel.sqrMagnitude)
                     {
-                        rbForceVel = rbA_forceVel - rbB_forceVel;
-                        if (rbForceVel.sqrMagnitude < FracGlobalSettings.minimumImpactVelocity) return;
+                        if ((rbA_forceVel - rbB_forceVel).sqrMagnitude < FracGlobalSettings.minimumImpactVelocity) return;
 
                         rbA_causedImp = true;
                         if (rbB_vel.sqrMagnitude > FracGlobalSettings.minimumImpactVelocity && Vector3.Dot(rbA_vel.normalized, rbB_vel.normalized) < 0.0f)
@@ -730,8 +777,7 @@ namespace Zombie1111_uDestruction
                     }
                     else
                     {
-                        rbForceVel = rbB_forceVel - rbA_forceVel;
-                        if (rbForceVel.sqrMagnitude < FracGlobalSettings.minimumImpactVelocity) return;
+                        if ((rbB_forceVel - rbA_forceVel).sqrMagnitude < FracGlobalSettings.minimumImpactVelocity) return;
 
                         rbB_causedImp = true;
                         if (rbA_vel.sqrMagnitude > FracGlobalSettings.minimumImpactVelocity && Vector3.Dot(rbB_vel.normalized, rbA_vel.normalized) < 0.0f)
@@ -750,24 +796,32 @@ namespace Zombie1111_uDestruction
 
                     if (fracD_a != null)
                     {
-                        //float rbA_forceApplied = Mathf.Min(
-                        //    rbForceVel.magnitude * fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentMass,
-                        //    GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness));
+                        //if rbA caused imp, use self
+                        if (rbA_causedImp == true) rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReductionSelf),
+                            rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReductionSelf));
+                        else rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReduction),
+                            rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
+                        
                         float rbA_forceApplied = Mathf.Min(
                             GuessMaxForceApply(rbForceVel, null, rbI_a, impBouncyness, fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentKinematic > 0),
                             GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, false));
+                        //float rbA_forceApplied = GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, false);
 
                         CalcImpContact(fracD_a, rbA_causedImp == true ? -rbA_vel : rbB_vel, rbA_forceApplied, rbI_b, 0);
                     }
 
                     if (fracD_b != null)
                     {
-                        //float rbB_forceApplied = Mathf.Min(
-                        //    rbForceVel.magnitude * fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentMass,
-                        //    GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness));
+                        //if rbA caused imp, use self
+                        if (rbB_causedImp == true) rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReductionSelf),
+                            rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReductionSelf));
+                        else rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReduction),
+                            rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
+
                         float rbB_forceApplied = Mathf.Min(
                             GuessMaxForceApply(rbForceVel, null, rbI_b, impBouncyness, fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentKinematic > 0),
                             GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness, false));
+                        //float rbB_forceApplied = GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness, false);
 
                         CalcImpContact(fracD_b, rbB_causedImp == true ? -rbB_vel : rbA_vel, rbB_forceApplied, rbI_a, 1);
                     }
@@ -786,19 +840,12 @@ namespace Zombie1111_uDestruction
                             impPos, fixedDeltatime
                             );
 
-                    norDiff = Vector3.Dot(impNormal, rbVel.normalized) + FracGlobalSettings.normalInfluenceReduction;
                     //Normals are bad for fast moving objects (Unless using continues collision) This is because collision does
-                    //not happen until obj is inside frac causing it to use normals from the inside
-                    //may be worth looking into alternative method, at least option to change normal influense.
-                    //Maybe get a plane from all impact points and use plane normal?
-                    if (norDiff < 0.0f)
-                    {
-                        //if (norDiff < -0.1f) norDiff = -69.0f;//make sure it stays <0.0f when adding friction
-                        //else norDiff = 0.0f;
-                        //norDiff = 0.0f;
-                        norDiff *= -1.0f;//reverse it since it is impossible for X to move forward and hit a wall that is pointing in the same dir
-                    }
-
+                    //not happen until obj is inside frac causing it to use normals from the inside.
+                    //Dont think it will cause and significant issues and its not really possible to fix??
+                    norDiff = Vector3.Dot(impNormal, rbVel.normalized);
+                    if (norDiff < 0.0f) norDiff *= -1.0f;//reverse normal since it is impossible for X to move forward and hit a wall that is pointing in the same dir
+                    
                     Debug.DrawLine(impPos, impPos + impNormal, Color.blue, 0.5f);
                     norDiff = Mathf.Clamp01(norDiff + (impFriction * norDiff));
                 }
@@ -817,6 +864,10 @@ namespace Zombie1111_uDestruction
                 //Ignore impact if too weak
                 if (forceApplied < FracGlobalSettings.minimumImpactForce) return;
 
+                //Potential issue cause, feels like they can get mixed when two destructable objects collide
+                ////return if no parent
+                //if (fracD.fracThis.jCDW_job.partsParentI[fracD.partIndex] < 0) return;
+
                 //get or create impPair
                 int thisImpId = pair.bodyInstanceID + pair.otherBodyInstanceID + idOffset;
                 if (impIdsToIgnore.ContainsKey(thisImpId) == true) return;//return if imp should be ignored
@@ -829,14 +880,15 @@ namespace Zombie1111_uDestruction
                         impForceTotal = 0.0f,
                         impFrac = fracD.fracThis,
                         impPoints = new(),
-                        pairIndexes = new(),
+                        impPairsI = new(),
                         impVel = Vector3.zero,
                         sourceRb = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI].rb
                     };
                 }
 
                 if (impPair.impVel.sqrMagnitude < impactVel.sqrMagnitude) impPair.impVel = impactVel;
-                impPair.impPoints.Add(new() { partI = fracD.partIndex, force = forceApplied } );
+                impPair.impPoints.Add(new() { partI = fracD.partIndex, force = forceApplied } );//partIndex some times does not have a parent, wtf??
+                impPair.impPairsI.Add(pairI);
                 impPair.impForceTotal += forceApplied;
 
                 impIdToImpPair[thisImpId] = impPair;
