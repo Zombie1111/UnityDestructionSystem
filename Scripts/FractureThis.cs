@@ -28,6 +28,7 @@ using System.Security;
 namespace Zombie1111_uDestruction
 {
     [ExecuteInEditMode]
+    [DefaultExecutionOrder(0)]
     public class FractureThis : MonoBehaviour
     {
 
@@ -490,7 +491,12 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 
-            MarkParentAsModified(0);//There is always 1 parent when loading
+            //Update defualt parent, There is always 1 parent when loading
+            fracInstanceId = this.GetInstanceID();
+            if (allParents[0].parentRb != null) allParents[0].parentRbId = allParents[0].parentRb.GetInstanceID();
+            MarkParentAsModified(0);
+
+            //update renderer
             SyncFracRendData();
             return true;
         }
@@ -740,6 +746,7 @@ namespace Zombie1111_uDestruction
             /// The parents rigidbody. mass = (childPartCount * massDensity * phyMainOptions.massMultiplier), isKinematic is updated based on phyMainOptions.MainPhysicsType
             /// </summary>
             public Rigidbody parentRb;
+            public int parentRbId;
             public List<int> partIndexes;
 
             /// <summary>
@@ -1577,6 +1584,7 @@ namespace Zombie1111_uDestruction
                 }
 
                 gpuIsReady = true;
+                wantToApplyDeformation = true;
             }
 
             void SetModifiedParts()
@@ -2195,6 +2203,7 @@ namespace Zombie1111_uDestruction
                 newRb.angularDrag = phyPartsOptions.angularDrag;
                 newRb.useGravity = phyPartsOptions.useGravity;
                 newRb.velocity = losePartVelocity;
+                //newRb.gameObject.SetActive(false);//debug remove later
             }
 
             void FromNoParentToParent()
@@ -2252,6 +2261,7 @@ namespace Zombie1111_uDestruction
                 {
                     parentTrans = transToUse,
                     parentRb = parentRb,
+                    parentRbId = parentRb == null ? 0 : parentRb.GetInstanceID(),
                     partIndexes = new(),
                     parentMass = 0.0f
                 });
@@ -2293,8 +2303,8 @@ namespace Zombie1111_uDestruction
             Rigidbody parentRb = allParents[parentI].parentRb;
             if (parentRb != null)
             {
-                float newRbMass = allParents[parentI].parentMass * phyPartsOptions.massMultiplier
-                    * (allParents[parentI].partIndexes.Count * phyMainOptions.massMultiplier >= 1.0f ? phyMainOptions.massMultiplier : 1.0f);
+                float newRbMass = allParents[parentI].parentMass
+                    * (allParents[parentI].partIndexes.Count * phyMainOptions.massMultiplier > 1.0f ? phyMainOptions.massMultiplier : 1.0f);
                 parentRb.mass = newRbMass;
                 parentRb.isKinematic = allParents[parentI].parentKinematic > 0;
 
@@ -3296,7 +3306,8 @@ namespace Zombie1111_uDestruction
             public void Execute(int index, TransformAccess transform)
             {
                 //If fracRend bone trans has moved, add to hasMoved queue
-                float newLocValue = transform.position.sqrMagnitude + FractureHelperFunc.QuaternionSqrMagnitude(transform.rotation);
+                //float newLocValue = transform.position.sqrMagnitude + FractureHelperFunc.QuaternionSqrMagnitude(transform.rotation) + transform.localScale.sqrMagnitude;
+                float newLocValue = transform.worldToLocalMatrix.GetHashCode();
                 if (newLocValue - fracBonesLocValue[index] != 0.0f)//Should it be more sensitive?
                 {
                     //get fracRend bone lToW matrix and its world pos
@@ -3377,12 +3388,21 @@ namespace Zombie1111_uDestruction
                 }
             }
 
+            foreach (var pa in destructionPairs)
+            {
+                foreach (var paa in pa.Value)
+                {
+                    if (paa.partI > 400 || paa.partI < 0) Debug.Log(paa.partI);
+                }
+            }
+
             destructionSources.Clear();
             destructionBodies.Clear();
             destructionPairs.Clear();//The nativeArrays will be disposed later by the worker
 
             //update bone matrixes
             jCDW_job.bonesLToW = jGTD_job.fracBonesLToW.AsReadOnly();
+            jCDW_job.fixedDeltaTime = Time.fixedDeltaTime;
 
             //run the job
             jCDW_jobIsActive = true;
@@ -3430,8 +3450,11 @@ namespace Zombie1111_uDestruction
                     newParentIToParentI.Add(newParentKeys[i], newPD.sourceParentI);
                 }
 
-                Debug.Log(newPD.sourceParentI);
-                if (allParents[newPD.sourceParentI].parentRb != null) allParents[newPD.sourceParentI].parentRb.AddForceAtPosition(newPD.velocity, newPD.velPos, ForceMode.VelocityChange);
+                if (allParents[newPD.sourceParentI].parentRb != null)
+                {
+                    Debug.Log(newPD.velocity.magnitude + " " + this.transform.name + " " + newPD.sourceParentI);
+                    allParents[newPD.sourceParentI].parentRb.AddForceAtPosition(newPD.velocity, newPD.velPos, ForceMode.VelocityChange);
+                }
             }
             
             //set parts to their new parents
@@ -3492,6 +3515,7 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public NativeArray<Matrix4x4> boneBindsLToW;
             public int partBoneOffset;
+            public float fixedDeltaTime;
 
             public unsafe void Execute()
             {
@@ -3507,6 +3531,7 @@ namespace Zombie1111_uDestruction
                 var _parentPartCount = parentPartCount;
                 var _partsNewParentI = partsNewParentI;
                 var _optMainPhyType = optMainPhyType;
+                var _fixedDeltaTime = fixedDeltaTime;
 
                 //Allocate global used variabels
                 _partsToBreak.Clear();
@@ -3795,6 +3820,8 @@ namespace Zombie1111_uDestruction
                     int nextLayerI = 1;//We must start at 1 since defualt is 0 and we must know if it has been assigned
                     DestructionPoint desPoint;
                     float totForceOgklk = 0.0f;
+                    Vector3 velDir = desSource.impVel.normalized;
+                    NativeArray<Vector3> partsVelDir = new(partCount, Allocator.Temp);
 
                     for (int impI = 0; impI < desPoints.Length; impI++)
                     {
@@ -3808,6 +3835,7 @@ namespace Zombie1111_uDestruction
                             orderIToPartI[nextOrderI] = desPoint.partI;
                             nextOrderI++;
 
+                            partsVelDir[desPoint.partI] = velDir;
                             partIToLayerI[desPoint.partI] = nextLayerI;
                             totForceOgklk += desPoint.force;
                         }
@@ -3823,8 +3851,10 @@ namespace Zombie1111_uDestruction
 
                         while (oI < innerLoopStop)
                         {
-
-                            FracStruct fPart = _fStructs[orderIToPartI[oI]];
+                            int partI = orderIToPartI[oI];
+                            FracStruct fPart = _fStructs[partI];
+                            Vector3 partVelDir = partsVelDir[partI].normalized;
+                            Vector3 partWPos = partsWPos[partI];
                             oI++;
                             
                             for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
@@ -3832,10 +3862,14 @@ namespace Zombie1111_uDestruction
                                 int npI = fPart.neighbourPartI[nI];
 
                                 if (partIToLayerI[npI] != 0 || _partsParentI[npI] != desSource.parentI || _partsToBreak.ContainsKey(npI) == true) continue;
+
+                                partsVelDir[npI] += partVelDir + (partsWPos[npI] - partWPos).normalized;
                                 partIToLayerI[npI] = nextLayerI;
                                 orderIToPartI[nextOrderI] = npI;
                                 nextOrderI++;
                             }
+
+                            partsVelDir[partI] = partVelDir;
                         }
                     }
 
@@ -3845,7 +3879,6 @@ namespace Zombie1111_uDestruction
                     NativeList<int> usedTPI = new(usedStartCount, Allocator.Temp);
                     NativeHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
                     float velDis = desSource.impVel.magnitude;
-                    Vector3 velDir = desSource.impVel.normalized;
                     bool alwaysKin = (desSource.parentI == 0 && _optMainPhyType == OptMainPhysicsType.orginalIsKinematic) || _optMainPhyType == OptMainPhysicsType.alwaysKinematic;
 
                     for (oI = partCount - 1; oI >= 0; oI--)
@@ -3916,16 +3949,15 @@ namespace Zombie1111_uDestruction
 
                             if (usedNeighbourCount == 0) continue;
 
-                            //float forceRequired = totForceOgklk * Mathf.Clamp01((pTransCap / totTransCap) * (usedTPI.Length / 2.0f));
                             float forceRequired = totForceOgklk * Mathf.Clamp01((pTransCap / totTransCap) * Mathf.Max(1.0f, usedTPI.Length / 2.0f));
                             forceRequired = Mathf.Min((velDis * partsMoveMass[pI]) + (forceRequired - (forceRequired * Mathf.Clamp01(desProp.chockResistance * layerI))), forceRequired);
                             forceRequired -= forceRequired * Mathf.Clamp01((layerI - 1) * desProp.falloff);
 
                             //transDir /= usedNeighbourCount;
                             transDir.Normalize();//Maybe we should use the best dir instead of avg?
-                            pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(velDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
-
-
+                            //pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(velDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
+                            Vector3 partVelDir = partsVelDir[pI];
+                            pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(partVelDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
 
                             if (pTransCap <= forceRequired)
                             {
@@ -3936,7 +3968,8 @@ namespace Zombie1111_uDestruction
                                 {
                                     partI = pI,
                                     velForce = pTransCap,
-                                    velTarget = velDir * velDis,
+                                    //velTarget = (velDir * velDis) + FractureHelperFunc.GetObjectVelocityAtPoint(desSource.parentWToL_prev, desSource.parentLToW_now, partWPos, _fixedDeltaTime),
+                                    velTarget = (partVelDir * velDis) + FractureHelperFunc.GetObjectVelocityAtPoint(desSource.parentWToL_prev, desSource.parentLToW_now, partWPos, _fixedDeltaTime),
                                     layerI = layerI,
                                     forceLeft = forceRequired - pTransCap
                                 };
@@ -4089,6 +4122,9 @@ namespace Zombie1111_uDestruction
             /// The index of the parent all parts in this source has
             /// </summary>
             public int parentI;
+
+            public Matrix4x4 parentLToW_now;
+            public Matrix4x4 parentWToL_prev;
         }
 
         public struct DestructionPoint
@@ -4100,14 +4136,23 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Applies force as damage to the object the next physics frame
         /// </summary>
-        /// <param name="impactPoints">The nativeArray must have a Persistent allocator, it will be disposed by the destruction system. DO NOT DISPOSE IT ANYWHERE ELSE</param>
+        /// <param name="impactPoints">The nativeArray must have a Persistent allocator, it will be disposed by the destructableObject. DO NOT DISPOSE IT ANYWHERE ELSE</param>
         /// <param name="sourceRb">The rb that caused the impact, null if caused by self or misc</param>
         /// <param name="impactId">Used to identify different impact sources, if == 0 a unique id will be generated</param>
         /// <param name="canOverwrite">If impactId already exists, true == overwrite existing source, false == merge with existing source</param>
         public unsafe void RegisterImpact(DestructionSource impactData, NativeArray<DestructionPoint> impactPoints, Rigidbody sourceRb, int impactId = 0, bool canOverwrite = false)
         {
+            //Get stuff that does not need to be assigned when calling register function
             impactData.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impactPoints);
             impactData.desPoints_lenght = impactPoints.Length;
+
+            if (globalHandler.rbInstancIdToJgrvIndex.TryGetValue(allParents[impactData.parentI].parentRbId, out int rbI) == true)
+            {
+                var parentRbData = globalHandler.jGRV_job.rb_posData[rbI];
+                impactData.parentWToL_prev = parentRbData.rbWToLPrev;//Do we really wanna get these here, we could just get them when starting the job
+                impactData.parentLToW_now = parentRbData.rbLToWNow;
+            }
+            else Debug.LogError("The parent rigidbody has not been registered by the globalHandler, unexpected behavior may occure!");
 
             lock (destructionPairs)
             {
@@ -4121,12 +4166,9 @@ namespace Zombie1111_uDestruction
                         destructionSources.TryGetValue(impactId, out DestructionSource impD);
                         destructionPairs.TryGetValue(impactId, out NativeArray<DestructionPoint> impP);
 
-                        //impP can sometimes be [writeOnly] and [readOnly] but im never declaring anything writeOnly. Spent hours debugging and still no idea
                         int ogLenght = impP.Length;
                         impP.ResizeArray(impP.Length + impactPoints.Length);
                         impactPoints.CopyTo(impP.GetSubArray(ogLenght, impactPoints.Length));
-
-
                         float tempTotalForce = impD.impForceTotal + impactData.impForceTotal;
 
                         if (impactData.impForceTotal > impD.impForceTotal)
@@ -4204,6 +4246,8 @@ namespace Zombie1111_uDestruction
         /// The global handler, must always exists if it is fractured
         /// </summary>
         [SerializeField] private FractureGlobalHandler globalHandler;
+
+        [System.NonSerialized] public int fracInstanceId;
 
         [System.Serializable]
         public class IntList
@@ -4452,31 +4496,28 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public float GuessMaxForceApplied(Vector3 velocity, short partI, float bouncyness = 0.0f)
         {
-            //Fix later, These needs rethinking since we have redesigned how destruction works
             int parentI = jCDW_job.partsParentI[partI];
-            DestructionMaterial desMat = GetDesMatFromIntId(allParts[partI].groupIdInt);
+            DestructionMaterial.DesProperties desProp = GetDesMatFromIntId(allParts[partI].groupIdInt).desProps;
             float velSpeed = velocity.magnitude;
             if (parentI < 0)
             {
                 //if no parent, it cant break so it has infinit stenght
                 if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) return float.MaxValue;
 
-                velSpeed *= desMat.desProps.mass;
+                velSpeed *= desProp.mass;
                 velSpeed -= velSpeed * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
-                return velSpeed - (velSpeed * desMat.desProps.falloff);
+                return velSpeed;
             }
 
-            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : velSpeed * (allParents[parentI].parentMass - desMat.desProps.mass);
+            float impForce = allParents[parentI].parentKinematic > 0 ? float.MaxValue : (velSpeed * allParents[parentI].parentMass);
+            FracStruct fStruct = jCDW_job.fStructs[partI];
 
-            int parentPartCount = allParents[parentI].partIndexes.Count;
-            impForce -= impForce * (allParents[parentI].totalStiffness / parentPartCount);
+            float transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation)) * GetPartConnectionCount(ref fStruct, parentI);
+            //transCap /= Mathf.Clamp01(0.25f + FracGlobalSettings.transDirInfluenceReduction);
+            if (impForce > transCap) impForce = transCap;
 
-            float totalTransportCap = desMat.desProps.stenght * jCDW_job.fStructs[partI].neighbourPartI_lenght;
-            if (impForce > totalTransportCap) impForce = totalTransportCap;//We currently do not consider transportMaxDamage, we probably wanna do to that
-
-            impForce += velSpeed * desMat.desProps.mass;
             impForce -= impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
-            return impForce - (impForce * (allParents[parentI].totalTransportCoEfficiency / parentPartCount));
+            return impForce;
         }
 
         /// <summary>
@@ -4490,8 +4531,6 @@ namespace Zombie1111_uDestruction
         public bool GuessIfForceCanCauseBreaking(float force, int partI, float bouncyness = 0.0f)
         {
             //fix later, we have changed what stiffness does
-            int parentI = jCDW_job.partsParentI[partI];
-            int parentPartCount = allParents[parentI].partIndexes.Count;
             FracStruct fPart = jCDW_job.fStructs[partI];
             DestructionMaterial.DesProperties desProp = destructionMaterials[fPart.desMatI].desProps;
 
@@ -4501,6 +4540,23 @@ namespace Zombie1111_uDestruction
 
             return force > transCap;
         }
+
+        /// <summary>
+        /// Returns how many neighbours of fStruct has parentI as parent, if two parts has the same parent they are connected
+        /// </summary>
+        private unsafe int GetPartConnectionCount(ref FracStruct fStruct, int parentI)
+        {
+            int connectionCount = 0;
+
+            for (int nI = 0; nI < fStruct.neighbourPartI_lenght; nI++)
+            {
+                if (jCDW_job.partsParentI[fStruct.neighbourPartI[nI]] != parentI) continue;
+                connectionCount++;
+            }
+
+            return connectionCount;
+        }
+
 #endregion HelperFunctions
     }
 }

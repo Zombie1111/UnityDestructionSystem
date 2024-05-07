@@ -22,6 +22,7 @@ using UnityEngine.Jobs;
 
 namespace Zombie1111_uDestruction
 {
+    [DefaultExecutionOrder(-10)]
     public class FractureGlobalHandler : MonoBehaviour
     {
         #region InstanceIds
@@ -336,8 +337,8 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private List<GlobalRbData> jGRV_rb_mass;
         private JobHandle jGRV_handle;
-        private GetRbVelocities_work jGRV_job;
-        private Dictionary<int, int> rbInstancIdToJgrvIndex = new();
+        public GetRbVelocities_work jGRV_job;
+        public Dictionary<int, int> rbInstancIdToJgrvIndex = new();
         private bool jGRV_jobIsActive = false;
 
         private class GlobalRbData
@@ -485,7 +486,7 @@ namespace Zombie1111_uDestruction
         }
 
         [BurstCompile]
-        private struct GetRbVelocities_work : IJobParallelForTransform
+        public struct GetRbVelocities_work : IJobParallelForTransform
         {
             [NativeDisableContainerSafetyRestriction]
             public NativeList<RbPosData> rb_posData;
@@ -564,7 +565,6 @@ namespace Zombie1111_uDestruction
             //wait for late fix update
             yield return new WaitForFixedUpdate();
             GetRbVelocities_start();
-
         }
 
         private float fixedDeltatime = 0.01f;
@@ -612,11 +612,15 @@ namespace Zombie1111_uDestruction
             Vector3 rbA_vel;
             Vector3 rbB_vel;
             Vector3 impNormal;
-            Vector3[] impNormals = new Vector3[3];
             Vector3 impPos;
-            Vector3[] impPoss = new Vector3[3];
+            Vector3[] impPoss;
+#pragma warning disable CS0162
+            if (FracGlobalSettings.canGetImpactNormalFromPlane == true) impPoss = new Vector3[3];
+#pragma warning restore CS0162
+
             float impFriction;
             float impBouncyness;
+            NativeArray<int> tempInputIds = new(3, Allocator.Temp);
 
             //get all different impacts applied to every destructable object
             for (pairI = 0; pairI < pairs.Length; pairI++)
@@ -653,7 +657,7 @@ namespace Zombie1111_uDestruction
                     if (iPair.impFrac.GuessIfForceCanCauseBreaking(impP.force, impP.partI, pair.GetBounciness(0)) == true)
                     {
                         guessedBreakCount++;
-                        for (int cI = 0; cI < pair.contactCount; cI++) pair.IgnoreContact(cI);
+                        //for (int cI = 0; cI < pair.contactCount; cI++) pair.IgnoreContact(cI);
                     }
 
                     //Normlize impact force
@@ -671,7 +675,7 @@ namespace Zombie1111_uDestruction
                 }
 
                 //if only a few impacts most likely caused breaking, mark contacts between source and frac to be ignored the next few physics frames
-                Debug.Log(guessedBreakCount / (float)impCount + " " + maxImp);
+                //Debug.Log(guessedBreakCount / (float)impCount + " " + maxImp);
                 if (guessedBreakCount / (float)impCount < 0.5f) impIdsToIgnore.TryAdd(impId, 0.1f);
 
                 ////ignore contact if imp will most likely cause break
@@ -869,7 +873,11 @@ namespace Zombie1111_uDestruction
                 //if (fracD.fracThis.jCDW_job.partsParentI[fracD.partIndex] < 0) return;
 
                 //get or create impPair
-                int thisImpId = pair.bodyInstanceID + pair.otherBodyInstanceID + idOffset;
+                //int thisImpId = pair.bodyInstanceID + pair.otherBodyInstanceID + fracD.fracThis.fracInstanceId;
+                tempInputIds[0] = pair.bodyInstanceID;
+                tempInputIds[1] = pair.otherBodyInstanceID;
+                tempInputIds[2] = fracD.fracThis.fracInstanceId;
+                int thisImpId = FractureHelperFunc.GetHashFromInts(ref tempInputIds);
                 if (impIdsToIgnore.ContainsKey(thisImpId) == true) return;//return if imp should be ignored
 
                 Debug.DrawLine(impPos, impPos + impactVel, Color.red, 0.1f);
@@ -883,6 +891,7 @@ namespace Zombie1111_uDestruction
                         impPairsI = new(),
                         impVel = Vector3.zero,
                         sourceRb = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI].rb
+                        
                     };
                 }
 

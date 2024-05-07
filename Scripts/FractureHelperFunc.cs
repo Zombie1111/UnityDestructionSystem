@@ -13,6 +13,8 @@ using Unity.VisualScripting;
 using System.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.Experimental.Rendering;
+using Unity.Burst;
+
 
 
 
@@ -1827,6 +1829,7 @@ namespace Zombie1111_uDestruction
             return new Vector3(q.x * gain, q.y * gain, q.z * gain);
         }
 
+        [BurstCompile]
         public static Vector3 GetObjectVelocityAtPoint(Matrix4x4 objWToLPrev, Matrix4x4 objLToWNow, Vector3 point, float deltatime)
         {
             //for what ever reason transforming (point - velOffset) seems to give slightly better result at the cost of 2 extra transformations??
@@ -1835,6 +1838,28 @@ namespace Zombie1111_uDestruction
 
             //The one below is faster and in theory it should be more accurate but it aint???
             //return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point) / deltatime;
+        }
+
+        /// <summary>
+        /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN NativeArray WILL BE MODIFIED!
+        /// </summary>
+        /// <param name="inputInts"></param>
+        /// <returns></returns>
+        [BurstCompile]
+        public static int GetHashFromInts(ref NativeArray<int> inputInts)
+        {
+            inputInts.Sort();
+
+            unchecked
+            {
+                int hash = 17;
+                foreach (int inputInt in inputInts)
+                {
+                    hash = hash * 31 + inputInt.GetHashCode();
+                }
+
+                return hash;
+            }
         }
 
         public static void ClampMagnitude(ref Vector3 vector, float maxLength)
