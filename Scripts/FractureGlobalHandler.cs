@@ -573,6 +573,7 @@ namespace Zombie1111_uDestruction
         private class ImpPair
         {
             public float impForceTotal;
+            public float sourceTransCapTotal;
 
             /// <summary>
             /// The velocity of the collision
@@ -636,72 +637,64 @@ namespace Zombie1111_uDestruction
                 ImpPair iPair = impIdToImpPair[impId];
 
                 //normlize impact forces
-                float maxImp = float.MinValue;
-                int guessedBreakCount = 0;
-                int impCount = iPair.impPoints.Count;
+                float maxImpF = float.MinValue;
                 int maxImpI = 0;
+                int impCount = iPair.impPoints.Count;
 
                 for (int i = 0; i < impCount; i++)
                 {
                     //get highest impact force
                     var impP = iPair.impPoints[i];
 
-                    if (impP.force > maxImp)
+                    if (impP.force > maxImpF)
                     {
-                        maxImp = impP.force;
+                        maxImpF = impP.force;
                         maxImpI = i;
-                    }
-
-                    //Ignore collision if part most likely will break
-                    pair = pairs[iPair.impPairsI[i]];
-                    if (iPair.impFrac.GuessIfForceCanCauseBreaking(impP.force, impP.partI, pair.GetBounciness(0)) == true)
-                    {
-                        guessedBreakCount++;
-                        //for (int cI = 0; cI < pair.contactCount; cI++) pair.IgnoreContact(cI);
                     }
 
                     //Normlize impact force
                     var desP = iPair.impPoints[i];
                     desP.force /= iPair.impForceTotal;
                     iPair.impPoints[i] = desP;
+
                 }
 
+                if (iPair.sourceTransCapTotal > 0.0f && maxImpF > iPair.sourceTransCapTotal) maxImpF = iPair.sourceTransCapTotal;
+
                 //Multiply normlized impact forces with highest impact force, Because we want more impact points to result in less force at each impact point
+                bool somethingLikelyBreaks = false;
+                
                 for (int i = 0; i < iPair.impPoints.Count; i++)
                 {
                     var desP = iPair.impPoints[i];
-                    desP.force *= maxImp;
+                    desP.force *= maxImpF;
                     iPair.impPoints[i] = desP;
+
+                    //Ignore collisions if part most likely will break
+                    if (somethingLikelyBreaks == true) continue;
+
+                    pair = pairs[iPair.impPairsI[i]];
+                    if (iPair.impFrac.GuessIfForceCauseBreaking(desP.force, desP.partI, pair.GetBounciness(0)) == true)
+                    {
+                        somethingLikelyBreaks = true;
+
+                        foreach (int pI in iPair.impPairsI)
+                        {
+                            for (int conI = 0; conI < pairs[pI].contactCount; conI++)
+                            {
+                                pairs[pI].IgnoreContact(conI);
+                            }
+                        }
+                    }
                 }
 
-                //if only a few impacts most likely caused breaking, mark contacts between source and frac to be ignored the next few physics frames
-                //Debug.Log(guessedBreakCount / (float)impCount + " " + maxImp);
-                if (guessedBreakCount / (float)impCount < 0.5f) impIdsToIgnore.TryAdd(impId, 0.1f);
-
-                ////ignore contact if imp will most likely cause break
-                //if (iPair.impFrac.GuessIfForceCanCauseBreaking(maxImp, iPair.impPoints[maxImpI].partI) == true)
-                //{
-                //    Debug.Log("Ignore " + maxImp);
-                //    foreach (int pI in iPair.impPairsI)
-                //    {
-                //        for (int conI = 0; conI < pairs[pI].contactCount; conI++)
-                //        {
-                //            pairs[pI].IgnoreContact(conI);
-                //        }
-                //    }
-                //}
-                //else
-                //{
-                //    Debug.Log("Hit " + maxImp);
-                //
-                //    //if imp most likely does not cause break, mark contacts between source and frac to be ignored the next few physics frames
-                //    impIdsToIgnore.TryAdd(impId, 0.1f);
-                //}
+                //if no impact is likely to cause breaking, mark contacts between source and frac to be ignored the next few physics frames
+                if (somethingLikelyBreaks == false) impIdsToIgnore.TryAdd(impId, 0.1f);
 
                 //notify destructable object about impact
                 iPair.impFrac.RegisterImpact(new()
                 {
-                    impForceTotal = maxImp,
+                    impForceTotal = maxImpF,
                     impVel = iPair.impVel,
                     parentI = iPair.impFrac.jCDW_job.partsParentI[iPair.impPoints[maxImpI].partI]
                 }, iPair.impPoints.ToNativeArray(Allocator.Persistent), iPair.sourceRb, impId, false);
@@ -807,11 +800,11 @@ namespace Zombie1111_uDestruction
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
                         
                         float rbA_forceApplied = Mathf.Min(
-                            GuessMaxForceApply(rbForceVel, null, rbI_a, impBouncyness, fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentKinematic > 0),
-                            GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, false));
+                            GuessMaxForceApply(rbForceVel, null, rbI_a, impBouncyness, out _, fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentKinematic > 0),
+                            GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, out float transCap, false));
                         //float rbA_forceApplied = GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, false);
 
-                        CalcImpContact(fracD_a, rbA_causedImp == true ? -rbA_vel : rbB_vel, rbA_forceApplied, rbI_b, 0);
+                        CalcImpContact(fracD_a, rbA_causedImp == true ? -rbA_vel : rbB_vel, rbA_forceApplied, rbI_b, transCap);
                     }
 
                     if (fracD_b != null)
@@ -823,11 +816,11 @@ namespace Zombie1111_uDestruction
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
 
                         float rbB_forceApplied = Mathf.Min(
-                            GuessMaxForceApply(rbForceVel, null, rbI_b, impBouncyness, fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentKinematic > 0),
-                            GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness, false));
+                            GuessMaxForceApply(rbForceVel, null, rbI_b, impBouncyness, out _, fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentKinematic > 0),
+                            GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness, out float transCap, false));
                         //float rbB_forceApplied = GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness, false);
 
-                        CalcImpContact(fracD_b, rbB_causedImp == true ? -rbB_vel : rbA_vel, rbB_forceApplied, rbI_a, 1);
+                        CalcImpContact(fracD_b, rbB_causedImp == true ? -rbB_vel : rbA_vel, rbB_forceApplied, rbI_a, transCap);
                     }
                 }
             }
@@ -863,7 +856,7 @@ namespace Zombie1111_uDestruction
                 return rbVel;
             }
 
-            void CalcImpContact(GlobalFracData fracD, Vector3 impactVel, float forceApplied, int otherRbI, byte idOffset)
+            void CalcImpContact(GlobalFracData fracD, Vector3 impactVel, float forceApplied, int otherRbI, float sourceTransCap)
             {
                 //Ignore impact if too weak
                 if (forceApplied < FracGlobalSettings.minimumImpactForce) return;
@@ -886,19 +879,20 @@ namespace Zombie1111_uDestruction
                     impPair = new()
                     {
                         impForceTotal = 0.0f,
+                        sourceTransCapTotal = 0.0f,
                         impFrac = fracD.fracThis,
                         impPoints = new(),
                         impPairsI = new(),
                         impVel = Vector3.zero,
                         sourceRb = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI].rb
-                        
                     };
                 }
 
                 if (impPair.impVel.sqrMagnitude < impactVel.sqrMagnitude) impPair.impVel = impactVel;
-                impPair.impPoints.Add(new() { partI = fracD.partIndex, force = forceApplied } );//partIndex some times does not have a parent, wtf??
+                impPair.impPoints.Add(new() { partI = fracD.partIndex, force = forceApplied, impPosW = impPos } );//partIndex some times does not have a parent, wtf??
                 impPair.impPairsI.Add(pairI);
                 impPair.impForceTotal += forceApplied;
+                impPair.sourceTransCapTotal += sourceTransCap;
 
                 impIdToImpPair[thisImpId] = impPair;
             }
@@ -914,11 +908,13 @@ namespace Zombie1111_uDestruction
                 return forceConsume + (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
             }
 
-            float GuessMaxForceApply(Vector3 forceVel, GlobalFracData fracD_hit, int rbI_hit, float bouncyness, bool rbIsKinematic = false)
+            float GuessMaxForceApply(Vector3 forceVel, GlobalFracData fracD_hit, int rbI_hit, float bouncyness, out float transCap, bool rbIsKinematic = false)
             {
-                if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceApplied(forceVel, fracD_hit.partIndex, bouncyness);
+                if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceApplied(forceVel, fracD_hit.partIndex, out transCap, bouncyness);
 
                 //if the opposite object is not destructable it has infinit stenght
+                transCap = 0.0f;
+
                 if (rbI_hit < 0 || rbIsKinematic == true) return float.MaxValue;
                 float forceConsume = forceVel.magnitude * Mathf.Abs(jGRV_rb_mass[rbI_hit].mass);
                 return forceConsume - (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);

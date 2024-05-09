@@ -67,6 +67,7 @@ namespace Zombie1111_uDestruction
             public List<int> saved_fr_verToPartI = new();
             public FractureThis.FracStruct[] saved_fracStructs = new FractureThis.FracStruct[0];
             public List<short> saved_parentPartCount = new();
+            public int[] saved_partIToDesMatI = new int[0];
 
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
@@ -196,6 +197,12 @@ namespace Zombie1111_uDestruction
                 fracSavedData.saved_fracStructs[i] = saveFrom.jCDW_job.fStructs[i];
             }
 
+            fracSavedData.saved_partIToDesMatI = new int[saveFrom.jCDW_job.partIToDesMatI.Length];
+            for (int i = 0; i < fracSavedData.saved_partIToDesMatI.Length; i++)
+            {
+                fracSavedData.saved_partIToDesMatI[i] = saveFrom.jCDW_job.partIToDesMatI[i];
+            }
+
             fracSavedData.saved_rendVertexCount = saveFrom.fracFilter.sharedMesh.vertexCount;
             fracSavedData.saved_structs_posL = new();
             foreach (Vector3 pos in saveFrom.jCDW_job.structPosL)
@@ -290,6 +297,7 @@ namespace Zombie1111_uDestruction
                 partsParentI = fracSavedData.saved_structs_parentI.ToNativeList(Allocator.Persistent),
                 kinematicPartIndexes = new(fracSavedData.saved_kinematicPartsStatus.Count, Allocator.Persistent),
                 fStructs = new(fracSavedData.saved_fracStructs.Length, Allocator.Persistent),
+                partIToDesMatI = new(fracSavedData.saved_partIToDesMatI.Length, Allocator.Persistent),
                 parentPartCount = fracSavedData.saved_parentPartCount.ToNativeList(Allocator.Persistent) 
             };
 
@@ -316,6 +324,11 @@ namespace Zombie1111_uDestruction
             foreach (FractureThis.FracStruct fStruct in fracSavedData.saved_fracStructs)
             {
                 loadTo.jCDW_job.fStructs.Add(fStruct);
+            }
+
+            foreach (int desMatI in fracSavedData.saved_partIToDesMatI)
+            {
+                loadTo.jCDW_job.partIToDesMatI.Add(desMatI);
             }
 
             loadTo.allParts = fracSavedData.saved_allParts.ToList();

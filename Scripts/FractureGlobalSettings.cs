@@ -64,5 +64,8 @@ namespace Zombie1111_uDestruction
 
         //How many parts a parent must have for it to be created when destoying stuff, used to prevent hundreds of tiny parents from potentially being created when destroying stuff
         public const byte minParentPartCount = 3;
+
+        //The maxDepenetrationVelocity for all destructable rigidbodies
+        public const float desRbMaxDepenetrationVelocity = 20.0f;
     }
 }

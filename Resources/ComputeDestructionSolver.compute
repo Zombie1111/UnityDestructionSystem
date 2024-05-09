@@ -24,8 +24,22 @@ struct MeshData
 {
     float3 vertexL;
     float3 normalL;
-    int fracWeightI;
     int verToPartI;
+};
+
+struct BendProperties
+{
+    float bendyness;
+    float bendStrenght;
+    float bendFalloff;
+    float bendPower;
+};
+
+struct DefPoint
+{
+    float3 defPos;
+    float3 defVel;
+    int parentI;
 };
 
 inline float4x4 inverse(float4x4 m)
@@ -68,20 +82,22 @@ inline float4x4 inverse(float4x4 m)
     return ret;
 }
 
-//stuff we can combine, (Must have the same lenght and be set at the same time)
-//fr_normalsL, fr_verticsL, fr_fracWeightsI and fr_verToPartI
-
-RWStructuredBuffer<FracWeight> desWeights; //Weights used for deformation
-RWStructuredBuffer<float3> structs_posL;
-RWStructuredBuffer<float3> structs_posLPrev;
-RWStructuredBuffer<int> structs_parentI; //The parent struct X has
-
+//skinning stuff
 int partBoneOffset; //allFracBonesLToW[partI + partBoneOffset] is the LToW matrix for the part
 int fracRendVerCount; //The number of vertics in the frac mesh
 float4x4 fracRendWToL; //The WToL matrix for the frac mesh
 RWStructuredBuffer<float4x4> allFracBonesLToW; //The LToW matrix for every bone
 RWStructuredBuffer<BoneWeight> fr_boneWeightsCurrent; //The bone weight for every vertex in frac mesh
 RWStructuredBuffer<MeshData> fr_meshData;
+
+//bend stuff
+int defPointsLenght = 0;
+float defBendForce = 0.0f;
+RWStructuredBuffer<DefPoint> defPoints;
+RWStructuredBuffer<BendProperties> bendProperties;
+RWStructuredBuffer<int> partIToBendPropI;
+RWStructuredBuffer<int> partIToParentI; //The parent part X has
+
 
 #pragma kernel ComputeSkinDef
 #define VERTEX_32BIT_STRIDE 6 // float3 position, float3 normal, 
@@ -105,28 +121,54 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     
     //deform mesh
     MeshData meshD = fr_meshData[id.x];
-    int requiredParentI = structs_parentI[meshD.verToPartI];
     
-    if (requiredParentI >= 0)
+    if (defPointsLenght > 0)
     {
-        //get current and prev offset pos
-        float3 cPosW = float3(0.0f, 0.0f, 0.0f);
-        float3 pPosW = float3(0.0f, 0.0f, 0.0f);
-        int nearPartI;
-        FracWeight verFW = desWeights[meshD.fracWeightI];
+        float3 offsetW = float3(0.0f, 0.0f, 0.0f);
+        int parentI = partIToParentI[meshD.verToPartI];
+        BendProperties bendProp = bendProperties[partIToBendPropI[meshD.verToPartI]];
         
-        for (int i = 0; i < verFW.stWe_lenght; i++)
+        for (int dpI = 0; dpI < defPointsLenght; dpI++)
         {
-            nearPartI = verFW.structsI[i];
-            if (structs_parentI[nearPartI] != requiredParentI) continue;
-            
-            cPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posL[nearPartI], 1.0f)).xyz * verFW.weights[i];
-            pPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posLPrev[nearPartI], 1.0f)).xyz * verFW.weights[i];
-        }
+            DefPoint defPoint = defPoints[dpI];
         
-        meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), cPosW - pPosW);
+            if (defPoint.parentI != parentI) continue;
+            
+            float3 disVel = mul(boneMatrixLToW, float4(meshD.vertexL, 1.0)).xyz - defPoint.defPos;
+            float falloffX = sqrt(dot(disVel, disVel)) * bendProp.bendFalloff;
+            falloffX += falloffX * (falloffX * bendProp.bendPower);
+            if (falloffX > defBendForce) continue;
+
+            offsetW += bendProp.bendyness * clamp((defBendForce - falloffX) / (bendProp.bendStrenght * sqrt(dot(defPoint.defVel, defPoint.defVel))), 0.0f, 1.0f) * defPoint.defVel;
+            //offsetW += bendProp.bendyness * defPoint.defVel * 0.1f;
+        }
+    
+        meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), offsetW);
         fr_meshData[id.x] = meshD;
     }
+
+    //int requiredParentI = structs_parentI[meshD.verToPartI];
+    //
+    //if (requiredParentI >= 0)
+    //{
+    //    //get current and prev offset pos
+    //    float3 cPosW = float3(0.0f, 0.0f, 0.0f);
+    //    float3 pPosW = float3(0.0f, 0.0f, 0.0f);
+    //    int nearPartI;
+    //    FracWeight verFW = desWeights[meshD.fracWeightI];
+    //    
+    //    for (int i = 0; i < verFW.stWe_lenght; i++)
+    //    {
+    //        nearPartI = verFW.structsI[i];
+    //        if (structs_parentI[nearPartI] != requiredParentI) continue;
+    //        
+    //        cPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posL[nearPartI], 1.0f)).xyz * verFW.weights[i];
+    //        pPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posLPrev[nearPartI], 1.0f)).xyz * verFW.weights[i];
+    //    }
+    //    
+    //    meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), cPosW - pPosW);
+    //    fr_meshData[id.x] = meshD;
+    //}
     
     //Idea for later, rope mode. Do by having a offset in structs_posL space and when moving a part transform add the move amount to structs_posL and the opposite move amount to the new offset
     //Write updated vertics and normals to mesh
