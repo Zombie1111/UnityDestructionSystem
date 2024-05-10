@@ -62,8 +62,6 @@ namespace Zombie1111_uDestruction
             public int saved_rendVertexCount = -1;
             public List<Vector3> saved_structs_posL = new();
             public List<int> saved_structs_parentI = new();
-            public List<FractureThis.FracWeight> saved_desWeights = new();
-            public List<int> saved_fracWeightsI = new();
             public List<int> saved_fr_verToPartI = new();
             public FractureThis.FracStruct[] saved_fracStructs = new FractureThis.FracStruct[0];
             public List<short> saved_parentPartCount = new();
@@ -222,8 +220,6 @@ namespace Zombie1111_uDestruction
                 fracSavedData.saved_parentPartCount.Add(partCount);
             }
 
-            fracSavedData.saved_desWeights = saveFrom.desWeights.ToList();
-            fracSavedData.saved_fracWeightsI = saveFrom.fr_fracWeightsI.ToList();
             fracSavedData.saved_fr_verToPartI = saveFrom.fr_verToPartI.ToList();
 
             //save mesh stuff if prefab
@@ -332,8 +328,6 @@ namespace Zombie1111_uDestruction
             }
 
             loadTo.allParts = fracSavedData.saved_allParts.ToList();
-            loadTo.desWeights = fracSavedData.saved_desWeights.ToList();
-            loadTo.fr_fracWeightsI = fracSavedData.saved_fracWeightsI.ToList();
 
             //load fracRend mesh if was prefab
             if (fracSavedData.saved_rendMesh.IsValidMeshSaved() == true)

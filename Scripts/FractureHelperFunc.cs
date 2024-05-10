@@ -2324,6 +2324,46 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns current lerped towards target by t and moved current towards target by at least min distance (Cant move past target)
+        /// </summary>
+        [BurstCompile]
+        public static Vector3 Vec3LerpMin(Vector3 current, Vector3 target, float t, float min, out bool reachedTarget)
+        {
+            float dis = (target - current).magnitude;
+            if (dis <= min)
+            {
+                reachedTarget = true;
+                return target;
+            }
+
+            dis *= t;
+            if (dis < min) dis = min;
+
+            reachedTarget = false;
+            return Vector3.MoveTowards(current, target, dis);
+        }
+
+        /// <summary>
+        /// Returns current lerped towards target by t and rotated current towards target by at least min degrees (Cant rotate past target)
+        /// </summary>
+        [BurstCompile]
+        public static Quaternion QuatLerpMin(Quaternion current, Quaternion target, float t, float min, out bool reachedTarget)
+        {
+            float ang = Quaternion.Angle(current, target);
+            if (ang <= min)
+            {
+                reachedTarget = true;
+                return target;
+            }
+
+            ang *= t;
+            if (ang < min) ang = min;
+
+            reachedTarget = false;
+            return Quaternion.RotateTowards(current, target, ang);
+        }
+
+        /// <summary>
         /// Returns true if transToLookFor is a parent of transToSearchFrom (Includes indirect parents like transform.parent.parent)
         /// </summary>
         public static bool GetIfTransformIsAnyParent(Transform transToLookFor, Transform transToSearchFrom)

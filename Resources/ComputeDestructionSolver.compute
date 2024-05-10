@@ -98,7 +98,6 @@ RWStructuredBuffer<BendProperties> bendProperties;
 RWStructuredBuffer<int> partIToBendPropI;
 RWStructuredBuffer<int> partIToParentI; //The parent part X has
 
-
 #pragma kernel ComputeSkinDef
 #define VERTEX_32BIT_STRIDE 6 // float3 position, float3 normal, 
 #define NORMAL_OFFSET 3 // float3 position, 
@@ -134,12 +133,15 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
         
             if (defPoint.parentI != parentI) continue;
             
+            float bendStrenght = bendProp.bendStrenght;
+            float bendForce = defBendForce > bendStrenght ? bendStrenght : defBendForce;
+            
             float3 disVel = mul(boneMatrixLToW, float4(meshD.vertexL, 1.0)).xyz - defPoint.defPos;
             float falloffX = sqrt(dot(disVel, disVel)) * bendProp.bendFalloff;
             falloffX += falloffX * (falloffX * bendProp.bendPower);
-            if (falloffX > defBendForce) continue;
+            if (falloffX > bendForce) continue;
 
-            offsetW += bendProp.bendyness * clamp((defBendForce - falloffX) / (bendProp.bendStrenght * sqrt(dot(defPoint.defVel, defPoint.defVel))), 0.0f, 1.0f) * defPoint.defVel;
+            offsetW += bendProp.bendyness * clamp((bendForce - falloffX) / (bendStrenght * sqrt(dot(defPoint.defVel, defPoint.defVel))), 0.0f, 1.0f) * defPoint.defVel;
             //offsetW += bendProp.bendyness * defPoint.defVel * 0.1f;
         }
     
@@ -174,5 +176,16 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     //Write updated vertics and normals to mesh
     verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
     verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
+}
+
+RWStructuredBuffer<MeshData> og_frMeshData; //The MeshData values we had at start
+RWStructuredBuffer<bool> partIWannaRestore; //if partIWannaRestore[partI] is true, partI should be restored
+
+#pragma kernel RestoreSkinDef
+
+[numthreads(128, 1, 1)]
+void RestoreSkinDef(uint3 id : SV_DispatchThreadID)
+{
+    
 }
 
