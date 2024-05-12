@@ -82,6 +82,24 @@ inline float4x4 inverse(float4x4 m)
     return ret;
 }
 
+inline float3 vec3LerpMin(float3 current, float3 target, float t, float min, out bool reachedTarget)
+{
+    //Does not seem to work
+    float3 vel = target - current;
+    float dis = sqrt(dot(vel, vel));
+    if (dis <= min)
+    {
+        reachedTarget = true;
+        return target;
+    }
+
+    dis *= t;
+    if (dis < min) dis = min;
+
+    reachedTarget = false;
+    return current + (normalize(vel) * dis);
+}
+
 //skinning stuff
 int partBoneOffset; //allFracBonesLToW[partI + partBoneOffset] is the LToW matrix for the part
 int fracRendVerCount; //The number of vertics in the frac mesh
@@ -142,10 +160,10 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
             if (falloffX > bendForce) continue;
 
             offsetW += bendProp.bendyness * clamp((bendForce - falloffX) / (bendStrenght * sqrt(dot(defPoint.defVel, defPoint.defVel))), 0.0f, 1.0f) * defPoint.defVel;
-            //offsetW += bendProp.bendyness * defPoint.defVel * 0.1f;
         }
     
         meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), offsetW);
+        //meshD.normalL is currently not deformed, we probably also need mesh triangels to be able to calculate new normal??
         fr_meshData[id.x] = meshD;
     }
 
@@ -172,20 +190,40 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     //    fr_meshData[id.x] = meshD;
     //}
     
-    //Idea for later, rope mode. Do by having a offset in structs_posL space and when moving a part transform add the move amount to structs_posL and the opposite move amount to the new offset
     //Write updated vertics and normals to mesh
     verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
     verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
 }
 
 RWStructuredBuffer<MeshData> og_frMeshData; //The MeshData values we had at start
-RWStructuredBuffer<bool> partIWannaRestore; //if partIWannaRestore[partI] is true, partI should be restored
+RWStructuredBuffer<int> partIWannaRestore; //if partIWannaRestore[partI] is true, partI should be restored
+//RWStructuredBuffer<int> isRepairDone;
+//float repairSpeedDelta;
 
 #pragma kernel RestoreSkinDef
 
 [numthreads(128, 1, 1)]
 void RestoreSkinDef(uint3 id : SV_DispatchThreadID)
 {
+    //return if out of bounds
+    if (id.x >= (uint) fracRendVerCount) return;
     
+    //return if dont wanna restore
+    MeshData meshD = fr_meshData[id.x];
+    if (partIWannaRestore[meshD.verToPartI] == 0) return;
+
+    MeshData meshDOg = og_frMeshData[id.x];
+    
+    //bool doneA;
+    //meshD.vertexL = vec3LerpMin(meshD.vertexL, meshDOg.vertexL, repairSpeedDelta, repairSpeedDelta * 2.0f, doneA);
+    //
+    //bool doneB;
+    //meshD.normalL = vec3LerpMin(meshD.normalL, meshDOg.normalL, repairSpeedDelta, repairSpeedDelta * 2.0f, doneB);
+    
+    meshD.vertexL = meshDOg.vertexL;
+    meshD.normalL = meshDOg.normalL;
+    
+    fr_meshData[id.x] = meshD;
+    partIWannaRestore[meshD.verToPartI] = false;
 }
 
