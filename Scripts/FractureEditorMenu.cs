@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using Unity.EditorCoroutines.Editor;
-using Unity.VisualScripting.FullSerializer;
 using UnityEditor.SearchService;
 using System.Runtime.InteropServices;
 

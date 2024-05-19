@@ -12,7 +12,6 @@ namespace Zombie1111_uDestruction
 {
     public class FractureSavedState : ScriptableObject
     {
-#if UNITY_EDITOR
 
         [System.Serializable]
         public class FloatList
@@ -143,8 +142,10 @@ namespace Zombie1111_uDestruction
             if (setupRendResult != null) preS_setupRendResult = setupRendResult;
             if (setupRealSkin != null) preS_setupRealSkinResult = setupRealSkin;
 
+#if UNITY_EDITOR
             //mark dirty
             EditorUtility.SetDirty(this);
+#endif
         }
 
         /// <summary>
@@ -158,9 +159,12 @@ namespace Zombie1111_uDestruction
             preS_setupRealSkinResult = null;
         }
 
+#if UNITY_EDITOR
         [MenuItem("Tools/Fracture/CreateSaveStateAsset")]
+#endif
         public static FractureSavedState CreateSaveStateAsset()
         {
+#if UNITY_EDITOR
             //get current selected folder (To make it open the panel there)
             UnityEngine.Object[] selection = Selection.GetFiltered(typeof(UnityEngine.Object), SelectionMode.Assets);
 
@@ -182,8 +186,10 @@ namespace Zombie1111_uDestruction
             ScriptableObject fracSaveAsset = ScriptableObject.CreateInstance<FractureSavedState>();
             AssetDatabase.CreateAsset((FractureSavedState)fracSaveAsset, path);
             return (FractureSavedState)fracSaveAsset;
-        }
+#else
+            return null;
 #endif
+        }
     }
 
 #if UNITY_EDITOR

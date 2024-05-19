@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 18ef0937c7e74464fb0c1d5cc7909130, type: 3}
+  m_Name: tempFracSaveAsset 12
+  m_EditorClassIdentifier: 
+  fracSavedData:
+    id: -1
+    saved_allParts: []
+    saved_kinematicPartsStatus: 
+    saved_rendVertexCount: -1
+    saved_structs_posL: []
+    saved_structs_parentI: 
+    saved_fr_verToPartI: 
+    saved_fracStructs: []
+    saved_parentPartCount: 
+    saved_partIToDesMatI: 
+    saved_rendMesh:
+      sMesh_boneWeights: []
+      sMesh_bindposes: []
+      sMesh_vertics: []
+      sMesh_triangels: []
+      sMesh_uvs: []
+    sMesh_colsVers: []
+    saved_nonSkinnedBoneWe: []

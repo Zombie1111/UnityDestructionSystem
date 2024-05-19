@@ -1,22 +1,18 @@
-using g3;
-using OpenCover.Framework.Model;
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net.Http.Headers;
-using System.Reflection;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
-using Unity.VisualScripting;
+#if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.Compilation;
-using UnityEditor.SceneManagement;
+#endif
 using UnityEngine;
 using UnityEngine.Jobs;
 
@@ -214,6 +210,9 @@ namespace Zombie1111_uDestruction
 
 
         #region MainUpdate and Editor
+        [Header("Global Settings")]
+        [Tooltip("The layers raycasts should hit")] public LayerMask groundLayers = Physics.DefaultRaycastLayers;
+
 #if UNITY_EDITOR
         [Space(10)]
         [Header("Debug")]
@@ -259,6 +258,8 @@ namespace Zombie1111_uDestruction
             public FractureThis fracThis;
         }
 
+#endif
+
         /// <summary>
         /// Creates a temporary saveAsset and assigns it to createFor (The asset will be destroyed automatically if createFor is no longer using it) Editor only
         /// </summary>
@@ -266,6 +267,7 @@ namespace Zombie1111_uDestruction
         /// <returns>False if unable to create a new temp saveAsset</returns>
         public bool TryCreateTempSaveAsset(FractureThis createFor)
         {
+#if UNITY_EDITOR
             //verify that the given fracture is valid
             if (createFor == null || createFor.saveAsset != null) return false;
 
@@ -287,8 +289,11 @@ namespace Zombie1111_uDestruction
             createFor.saveAsset = fracSaveAsset;
 
             return true;
-        }
+#else
+            return false;
 #endif
+        }
+
 
         private float syncTime = 0.0f;
         private int syncFrames = 0;
@@ -517,7 +522,7 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        #endregion MainUpdate and Editor
+#endregion MainUpdate and Editor
 
 
 
@@ -594,6 +599,7 @@ namespace Zombie1111_uDestruction
             /// The other rigidbody in the collision
             /// </summary>
             public Rigidbody sourceRb;
+            public float sourceRbVirtualMass;
 
             /// <summary>
             /// impPairsI[X] is the contactPair index impPoints[X] was created from
@@ -603,6 +609,16 @@ namespace Zombie1111_uDestruction
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
         {
+            //foreach (var pa in pairs)
+            //{
+            //    for (int i = 0; i < pa.contactCount; i++)
+            //    {
+            //        pa.SetTargetVelocity(i, Vector3.zero);
+            //    }
+            //    //Debug.Log("mS1: " + pa.massProperties.inverseMassScale + " iS1: " + pa.massProperties.inverseInertiaScale + " mS2: " + pa.massProperties.otherInverseMassScale + " iS2: " + pa.massProperties.otherInverseInertiaScale);
+            //}
+
+            //return;
             //variabels used durring calculations
             Dictionary<int, ImpPair> impIdToImpPair = new();
             ModifiableContactPair pair;
@@ -696,7 +712,8 @@ namespace Zombie1111_uDestruction
                 {
                     impForceTotal = maxImpF,
                     impVel = iPair.impVel,
-                    parentI = iPair.impFrac.jCDW_job.partsParentI[iPair.impPoints[maxImpI].partI]
+                    parentI = iPair.impFrac.jCDW_job.partsParentI[iPair.impPoints[maxImpI].partI],
+                    sourceRbVirtualMass = iPair.sourceRbVirtualMass
                 }, iPair.impPoints.ToNativeArray(Allocator.Persistent), iPair.sourceRb, impId, false);
             }
 
@@ -876,6 +893,8 @@ namespace Zombie1111_uDestruction
                 Debug.DrawLine(impPos, impPos + impactVel, Color.red, 0.1f);
                 if (impIdToImpPair.TryGetValue(thisImpId, out ImpPair impPair) == false)
                 {
+                    GlobalRbData sourceRbData = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI];
+
                     impPair = new()
                     {
                         impForceTotal = 0.0f,
@@ -884,7 +903,8 @@ namespace Zombie1111_uDestruction
                         impPoints = new(),
                         impPairsI = new(),
                         impVel = Vector3.zero,
-                        sourceRb = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI].rb
+                        sourceRb = otherRbI < 0 ? null : sourceRbData.rb,
+                        sourceRbVirtualMass = otherRbI < 0 ? -1.0f : sourceRbData.mass
                     };
                 }
 
@@ -993,6 +1013,6 @@ namespace Zombie1111_uDestruction
             return false;
         }
 #endif
-        #endregion EditorMemoryCleanup
+#endregion EditorMemoryCleanup
     }
 }

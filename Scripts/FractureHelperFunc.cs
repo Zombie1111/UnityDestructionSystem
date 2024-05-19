@@ -2,29 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using System.Collections.Concurrent;
 using System.Threading.Tasks;
-using Unity.VisualScripting.FullSerializer;
 using UnityEngine.Rendering;
-using g3;
-using OpenCover.Framework.Model;
 using Unity.Collections;
-using Unity.VisualScripting;
-using System.Collections;
-using Unity.Collections.LowLevel.Unsafe;
-using UnityEngine.Experimental.Rendering;
 using Unity.Burst;
-
-
-
-
-
-
-
-
-
-
-
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -34,6 +15,33 @@ namespace Zombie1111_uDestruction
 {
     public static class FractureHelperFunc
     {
+        public static void AddRange<T>(this ICollection<T> collection, IEnumerable<T> items)
+        {
+            foreach (var item in items)
+            {
+                collection.Add(item);
+            }
+        }
+
+        /// <summary>
+        /// Resizes a native array. If an empty native array is passed, it will create a new one.
+        /// </summary>
+        /// <typeparam name="T">The type of the array</typeparam>
+        /// <param name="array">Target array to resize</param>
+        /// <param name="capacity">New size of native array to resize</param>
+        public static void ResizeArray<T>(this ref NativeArray<T> array, int capacity) where T : struct
+        {
+            var newArray = new NativeArray<T>(capacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+            if (array.IsCreated)
+            {
+                NativeArray<T>.Copy(array, newArray, array.Length);
+                array.Dispose();
+            }
+
+            array = newArray;
+        }
+
         public static void SetVelocityAtPosition(Vector3 targetVelocity, Vector3 positionOfForce, Rigidbody rb)
         {
             //rb.AddForceAtPosition(rb.mass * (targetVelocity - rb.velocity) / Time.fixedDeltaTime, positionOfForce, ForceMode.Force);
@@ -54,6 +62,13 @@ namespace Zombie1111_uDestruction
         public static T GetOrAddComponent<T>(this GameObject go) where T : Component
         {
             return GetOrAddComponent(go, typeof(T)) as T;
+        }
+
+        public static void SetRbMass(ref Rigidbody rb, float newMass)
+        {
+            if (newMass > FracGlobalSettings.rbMaxMass) rb.mass = FracGlobalSettings.rbMaxMass;
+            else if (newMass < FracGlobalSettings.rbMinMass) rb.mass = FracGlobalSettings.rbMinMass;
+            else rb.mass = newMass;
         }
 
         private static float SignedVolumeOfTriangle(Vector3 p1, Vector3 p2, Vector3 p3)
@@ -455,6 +470,17 @@ namespace Zombie1111_uDestruction
             list.Insert(newIndex, item);
         }
 
+        public static void SetVelocityUsingForce(Vector3 targetVelocity, Rigidbody rb)
+        {
+            rb.AddForce(rb.mass * (targetVelocity - rb.velocity) / Time.fixedDeltaTime, ForceMode.Force);
+        }
+
+        public static void SetAngularVelocityUsingTorque(Vector3 targetAngularVelocity, Rigidbody rb)
+        {
+            Vector3 torque = Vector3.Scale(rb.inertiaTensor, (targetAngularVelocity - rb.angularVelocity) / Time.fixedDeltaTime);
+            rb.AddTorque(torque, ForceMode.Force);
+        }
+
         public static List<T> NativeListToList<T>(NativeList<T> nativeList) where T : unmanaged
         {
             // Create a new List<T> to hold the converted elements
@@ -802,12 +828,18 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 
-            if (checkIfValidHull == false) return true;
-            return HasValidHull(mesh.vertices.ToList());
+            if (mesh.bounds.extents.magnitude < EPSILON * 3) return false;
 
-            bool HasValidHull(List<Vector3> points)
+            if (checkIfValidHull == false) return true;
+            NativeArray<Vector3> mVertics = new(mesh.vertices, Allocator.Persistent);
+            bool isValid = HasValidHull(mVertics);
+            mVertics.Dispose();
+            return isValid;
+
+            [BurstCompile]
+            bool HasValidHull(NativeArray<Vector3> points)
             {
-                var count = points.Count;
+                var count = points.Length;
 
                 for (int i0 = 0; i0 < count - 3; i0++)
                 {
@@ -816,13 +848,15 @@ namespace Zombie1111_uDestruction
                         var p0 = points[i0];
                         var p1 = points[i1];
 
-                        if (AreCoincident(p0, p1)) continue;
+                        //if (AreCoincident(p0, p1)) continue;
+                        if ((p0 - p1).magnitude <= EPSILON) continue;
 
                         for (int i2 = i1 + 1; i2 < count - 1; i2++)
                         {
                             var p2 = points[i2];
 
-                            if (AreCollinear(p0, p1, p2)) continue;
+                            //if (AreCollinear(p0, p1, p2)) continue;
+                            if (Cross(p2 - p0, p2 - p1).magnitude <= EPSILON) continue;
 
                             for (int i3 = i2 + 1; i3 < count - 0; i3++)
                             {
@@ -839,11 +873,13 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 
+            [BurstCompile]
             bool AreCollinear(Vector3 a, Vector3 b, Vector3 c)
             {
                 return Cross(c - a, c - b).magnitude <= EPSILON;
             }
 
+            [BurstCompile]
             Vector3 Cross(Vector3 a, Vector3 b)
             {
                 return new Vector3(
@@ -852,6 +888,7 @@ namespace Zombie1111_uDestruction
                     a.x * b.y - a.y * b.x);
             }
 
+            [BurstCompile]
             bool AreCoplanar(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
             {
                 var n1 = Cross(c - a, c - b);
@@ -865,11 +902,6 @@ namespace Zombie1111_uDestruction
                     || AreCollinear(Vector3.zero,
                         (1.0f / m1) * n1,
                         (1.0f / m2) * n2);
-            }
-
-            bool AreCoincident(Vector3 a, Vector3 b)
-            {
-                return (a - b).magnitude <= EPSILON;
             }
         }
 
@@ -903,6 +935,12 @@ namespace Zombie1111_uDestruction
             }
 
             // Verify mesh properties and handle mismatches if necessary
+            if (oCols.Length != oVerts.Length)
+            {
+                Debug.LogWarning(oMesh.name + " vertex colors has not been setup properly");
+                oCols = new Color[oVerts.Length];
+            }
+
             if (oUvs.Length != oVerts.Length)
             {
                 Debug.LogWarning("The uvs for the mesh " + oMesh.name + " may not be valid");
@@ -2153,7 +2191,8 @@ namespace Zombie1111_uDestruction
                 | UnityEngine.Rendering.MeshUpdateFlags.DontResetBoneBounds
                 | UnityEngine.Rendering.MeshUpdateFlags.DontNotifyMeshUsers
                 | UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
-
+                mCol.enabled = false;
+                mCol.enabled = true;
                 extents = col.bounds.extents;
             }
             else if (col is BoxCollider bCol)

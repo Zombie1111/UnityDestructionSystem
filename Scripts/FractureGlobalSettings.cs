@@ -58,18 +58,33 @@ namespace Zombie1111_uDestruction
         //maxDeformationBones IN UltimateFracture/Resources/ComputeGlobalSettings.cginc MUST ALSO BE THE SAME!!!
         public const byte maxDeformationBones = 64;
 
-        //If collision deformation is enabled, it has to sync all colliders with the deformed mesh.
+        //If deformation is enabled, it has to sync all colliders with the deformed mesh.
         //Modifying a collider aint very fast, this limits how many colliders each destructable object can sync per frame
         public const byte maxColliderUpdatesPerFrame = 2;
+
+        //For performance reasons it only syncs a collider if its mesh has been deformed.
+        //If false it may sync too few colliders, if true it may sync too many colliders
+        public const bool sensitiveColliderSync = false;
 
         //How many parts a parent must have for it to be created when destoying stuff, used to prevent hundreds of tiny parents from potentially being created when destroying stuff
         public const byte minParentPartCount = 3;
 
         //The maxDepenetrationVelocity for all destructable rigidbodies
-        public const float desRbMaxDepenetrationVelocity = 20.0f;
+        public const float desRbMaxDepenetrationVelocity = 1000.0f;
 
         //If false, parts that are kinematic wont break from impacts (Kinematic parts are usually parts that are overlapping with other geometry if
         //MainPhysicsType == OverlappingIsKinematic)
         public const bool kinematicPartsCanBreak = true;
+
+        //The min&max mass a rigidbody created by the destruction system can have,
+        //due to limitations in the physics engine if two rigidbodies with largly different masses collide unexpected behavior may occure.
+        public const float rbMinMass = 1.0f;
+        public const float rbMaxMass = 5.0f;
+
+        //If true, it will try to prevent a mesh from being deformed through another object. (Comes at a performance cost)
+        public const bool doDeformationCollision = true;
+
+        //If true, it will try to prevent kinematic parts from being deformed (Not very accurate)
+        public const bool preventKinematicDeformation = false;
     }
 }

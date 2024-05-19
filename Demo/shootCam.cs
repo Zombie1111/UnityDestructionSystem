@@ -19,6 +19,8 @@ namespace TrueTrace
 
         //I made a small change so that I can turn off movement by pressing t
         public bool doMoveCam = true;
+        public bool canShoot = true;
+        public bool canSlowTime = true;
         float mainSpeed = 1.0f; //regular speed
         float shiftAdd = 25.0f; //multiplied by how long shift is held.  Basically running
         float maxShift = 1000.0f; //Maximum speed when holdin gshift
@@ -55,14 +57,14 @@ namespace TrueTrace
             }
                 //if (debugRb != null) print(debugRb.velocity.magnitude);
 
-                // Get mouse wheel input
-                float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
+            // Get mouse wheel input
+            float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
 
             // Adjust speed based on mouse wheel input
-            Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);
+            if (canSlowTime == true) Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);
 
 
-            if (Input.GetKeyDown(KeyCode.Mouse0) == true)
+            if (Input.GetKeyDown(KeyCode.Mouse0) == true && canShoot == true)
             {
                 doShoot = true;
             }

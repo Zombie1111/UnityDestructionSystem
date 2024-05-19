@@ -39,7 +39,9 @@ struct DefPoint
 {
     float3 defPos;
     float3 defVel;
+    float disToWall;
     int parentI;
+    int partI;
 };
 
 inline float4x4 inverse(float4x4 m)
@@ -193,6 +195,7 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     //Write updated vertics and normals to mesh
     verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
     verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
+    //verNors.Store2(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET + NORMAL_OFFSET) << 2, float2(0.0, 0.0));
 }
 
 RWStructuredBuffer<MeshData> og_frMeshData; //The MeshData values we had at start
