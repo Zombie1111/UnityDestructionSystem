@@ -6,6 +6,10 @@ using System.Threading.Tasks;
 using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Burst;
+using UnityEngine.UIElements;
+using Unity.Properties;
+
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -905,6 +909,135 @@ namespace Zombie1111_uDestruction
             }
         }
 
+        private class NewFracSource
+        {
+            public List<List<int>> subTris = new();
+            public List<Material> subMat = new();
+            public Dictionary<int, int> ogSubToSub = new();
+
+            public List<Vector3> mVerts = new();
+            public List<Vector3> mNors = new();
+            public List<Vector2> mUvs = new();
+            public List<BoneWeight> mBones = new();
+            public List<Color> mCols = new();
+        }
+
+        /// <summary>
+        /// Splits ogMeshD so all triangels in the new meshes has the same ogTrisId, all meshes in the returned list combined is equal to ogMeshD
+        /// </summary>
+        /// <param name="ogMeshD">Only ogMeshD.meshW and ogMeshD.mMats must be assigned</param>
+        /// <param name="ogTrisId">Must have the same lenght as ogMeshW.triangles.lengt / 3</param>
+        /// <param name="triIdToGroupId">All different values that exist in ogTrisId must exist as key in triIdToGroupId</param>
+        public static List<FractureThis.FracSource> SplitMeshByTrisIds(FractureThis.FracSource ogMeshD, int[] ogTrisId, Dictionary<int, List<float>> triIdToGroupId)
+        {
+            //Get source mesh data
+            Mesh ogMeshW = ogMeshD.meshW;
+            int[] ogTris = ogMeshW.triangles;
+            Vector3[] omVerts = ogMeshW.vertices;
+            Vector3[] omNors = ogMeshW.normals;
+            Vector2[] omUvs = ogMeshW.uv;
+            BoneWeight[] omBones = ogMeshW.boneWeights;
+            Color[] omCols = ogMeshW.colors;
+
+            int ogTrisICount = ogMeshW.triangles.Length;
+            int[] ogTrisSubI = GetTrisSubMeshI(ogMeshW);
+            Dictionary<int, NewFracSource> idToNew = new(2);
+
+            // Verify mesh properties and handle mismatches if necessary
+            if (omCols.Length != omVerts.Length)
+            {
+                if (omCols.Length > 0) Debug.LogWarning(ogMeshW.name + " vertex colors has not been setup properly");
+                omCols = new Color[omVerts.Length];//Some people may not need vertexColors, is memory saved by not having them be worth the cost of adding checks if they are assigned?
+            }
+
+            if (omBones.Length != omVerts.Length)
+            {
+                if (omBones.Length > 0) Debug.LogWarning(ogMeshW.name + " boneWeights has not been setup properly");
+                omBones = new BoneWeight[omVerts.Length];
+            }
+
+            if (omUvs.Length != omVerts.Length)
+            {
+                Debug.LogWarning("The uvs for the mesh " + ogMeshW.name + " may not be valid");
+                omUvs = new Vector2[omVerts.Length];
+            }
+
+            if (omNors.Length != omVerts.Length)
+            {
+                Debug.LogWarning("The normals for the mesh " + ogMeshW.name + " may not be valid");
+                omNors = new Vector3[omVerts.Length];
+            }
+
+            //Split mesh, so all tris in each new mesh had the same ogTrisId
+            for (int ogTrisI = 0; ogTrisI < ogTrisICount; ogTrisI += 3)
+            {
+                //Get if any new mesh already has this trisId
+                if (idToNew.TryGetValue(ogTrisId[ogTrisI / 3], out NewFracSource fracSource) == false)
+                {
+                    fracSource = new();
+                    idToNew.Add(ogTrisId[ogTrisI / 3], fracSource);
+                }
+
+                //Get what new subMeshIndex this triangel should use
+                if (fracSource.ogSubToSub.TryGetValue(ogTrisSubI[ogTrisI], out int tSubI) == false)
+                {
+                    tSubI = fracSource.ogSubToSub.Count;
+                    fracSource.subTris.Add(new());
+                    fracSource.subMat.Add(ogMeshD.mMats[ogTrisSubI[ogTrisI]]);
+                    fracSource.ogSubToSub.Add(ogTrisSubI[ogTrisI], tSubI);
+                }
+
+                //Add new tris
+                int newVerI = fracSource.mVerts.Count;
+                fracSource.subTris[tSubI].Add(newVerI);
+                fracSource.subTris[tSubI].Add(newVerI + 1);
+                fracSource.subTris[tSubI].Add(newVerI + 2);
+
+                //Add new vertex data
+                AddVerDataFromOgVerI(ogTris[ogTrisI]);
+                AddVerDataFromOgVerI(ogTris[ogTrisI + 1]);
+                AddVerDataFromOgVerI(ogTris[ogTrisI + 2]);
+
+                void AddVerDataFromOgVerI(int ogVerI)
+                {
+                    fracSource.mVerts.Add(omVerts[ogVerI]);
+                    fracSource.mNors.Add(omNors[ogVerI]);
+                    fracSource.mUvs.Add(omUvs[ogVerI]);
+                    fracSource.mBones.Add(omBones[ogVerI]);
+                    fracSource.mCols.Add(omCols[ogVerI]);
+                }
+            }
+
+            //Create new meshes
+            List<FractureThis.FracSource> newSources = new();
+
+            foreach (var idNew in idToNew)
+            {
+                NewFracSource newS = idNew.Value;
+                Mesh newM = new();
+                newM.SetVertices(newS.mVerts);
+                newM.SetNormals(newS.mNors);
+                newM.SetUVs(0, newS.mUvs);
+                newM.SetColors(newS.mCols);
+                newM.boneWeights = newS.mBones.ToArray();//newM.SetBoneWeights uses nativeArray, faster to just assign boneWeights and use .ToArray()
+                newM.subMeshCount = newS.subTris.Count;
+
+                for (int subI = 0; subI < newS.subTris.Count; subI++)
+                {
+                    newM.SetTriangles(newS.subTris[subI], subI);
+                }
+
+                newSources.Add(new()
+                {
+                    meshW = newM,
+                    mMats = newS.subMat,
+                    mGroupId = triIdToGroupId[idNew.Key]
+                });
+            }
+
+            return newSources;
+        }
+
         /// <summary>
         /// Returns 2 meshes, [0] is the one containing vertexIndexesToSplit. May remove tris at split edges if some tris vertics are in vertexIndexesToSplit and some not
         /// </summary>
@@ -1172,6 +1305,96 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns all triangels connected to the given triangelIndex
+        /// </summary>
+        /// <param name="verDisTol">All vertics within this radius will count as the same vertex</param>
+        public static HashSet<int> GetConnectedTriangels(Vector3[] vers, int[] tris, int triangelIndex, float verDisTol = 0.0001f)
+        {
+            //setup
+            HashSet<int> usedVerts = new();
+            int trisL = tris.Length / 3;
+            List<int> trisToSearch = new();
+            HashSet<int> usedFaces = new() { triangelIndex };
+            GetAllTrisAtPos(vers[tris[triangelIndex]]);
+            GetAllTrisAtPos(vers[tris[triangelIndex + 1]]);
+            GetAllTrisAtPos(vers[tris[triangelIndex + 2]]);
+
+            //get all connected, potential performance gain, add all vertex at pos to already searched
+            for (int i = 0; i < trisToSearch.Count; i++)
+            {
+                int vI = tris[trisToSearch[i]];
+                if (usedVerts.Contains(vI) == false) GetAllTrisAtPos(vers[vI]);
+
+                vI = tris[trisToSearch[i] + 1];
+                if (usedVerts.Contains(vI) == false) GetAllTrisAtPos(vers[vI]);
+
+                vI = tris[trisToSearch[i] + 2];
+                if (usedVerts.Contains(vI) == false) GetAllTrisAtPos(vers[vI]);
+            }
+
+            return usedFaces;
+
+            void GetAllTrisAtPos(Vector3 pos)
+            {
+                Parallel.For(0, trisL, i =>
+                {
+                    int tI = i * 3;
+                    bool didFind = false;
+
+                    if ((vers[tris[tI]] - pos).sqrMagnitude < verDisTol)
+                    {
+                        lock (usedVerts)
+                        {
+                            usedVerts.Add(tris[tI]);
+                        }
+
+                        didFind = true;
+                    }
+
+                    if ((vers[tris[tI + 1]] - pos).sqrMagnitude < verDisTol)
+                    {
+                        lock (usedVerts)
+                        {
+                            usedVerts.Add(tris[tI + 1]);
+                        }
+
+                        didFind = true;
+                    }
+
+                    if ((vers[tris[tI + 2]] - pos).sqrMagnitude < verDisTol)
+                    {
+                        lock (usedVerts)
+                        {
+                            usedVerts.Add(tris[tI + 2]);
+                        }
+
+                        didFind = true;
+                    }
+
+                    if (didFind == true)
+                    {
+                        lock (trisToSearch)
+                        {
+                            if (usedFaces.Add(tI) == true) trisToSearch.Add(tI);
+                        }
+                    }
+                });
+            }
+        }
+
+        public static HashSet<int> GetAllTriangels(int trisL)
+        {
+            HashSet<int> trisI = new(trisL / 3);
+
+            for (int tI = 0; tI < trisL; tI += 3)
+            {
+                trisI.Add(tI);
+            }
+
+            return trisI;
+        }
+
+        /// <summary>
         /// Returns all vertics that is close to the given position. (Always excluding vertex index vIndexToIgnore)
         /// </summary>
         public static List<int> GetAllVertexIndexesAtPos(Vector3[] vertics, Vector3 pos, float verDisTol = 0.0001f, int vIndexToIgnore = -1)
@@ -1377,6 +1600,22 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns the index of all triangels that has the given id
+        /// </summary>
+        public static HashSet<int> Gd_getAllTriangelsInId(Color[] verColors, int[] tris, List<float> id)
+        {
+            HashSet<int> trisInId = new();
+            int trisL = tris.Length;
+
+            for (int tI = 0; tI < trisL; tI += 3)
+            {
+                if (Gd_isIdInColor(id, verColors[tris[tI]]) == true) trisInId.Add(tI);
+            }
+
+            return trisInId;
+        }
+
+        /// <summary>
         /// Returns the index of all vertices that has the given id and exists inside the potentialVertices hashset
         /// </summary>
         public static HashSet<int> Gd_getSomeVerticesInId(Color[] verColors, List<float> id, HashSet<int> potentialVertices)
@@ -1389,6 +1628,21 @@ namespace Zombie1111_uDestruction
             }
 
             return verInId;
+        }
+
+        /// <summary>
+        /// Returns the index of all triangels that has the given id and exists inside the potentialTriangels hashset
+        /// </summary>
+        public static HashSet<int> Gd_getSomeTriangelsInId(Color[] verColors, int[] tris, List<float> id, HashSet<int> potentialTriangels)
+        {
+            HashSet<int> trisInId = new();
+
+            foreach (int tI in potentialTriangels)
+            {
+                if (Gd_isIdInColor(id, verColors[tris[tI]]) == true) trisInId.Add(tI);
+            }
+
+            return trisInId;
         }
 
         /// <summary>
@@ -1407,6 +1661,7 @@ namespace Zombie1111_uDestruction
             {
                 // Convert each float to an integer by multiplying by 2^32
                 int intValue = (int)(value * int.MaxValue);
+
                 // XOR the integer representation of each float to the hash code
                 hashCode ^= intValue;
             }
@@ -1571,6 +1826,8 @@ namespace Zombie1111_uDestruction
             convexMeshW.SetTriangles(tris, 0);
             convexMeshW.SetNormals(normals);
 
+            //Potential improvement, just store source tris ids in normals (Since normals are kept after fracturing,
+            //I can then use those ids to get source face(No, normals for new inside faces are not created from input??)
             GetMostSimilarTris(convexMeshW, sourceMeshW, out int[] cVersBestSVer, out int[] cTrisBestSTri, worldScale);
             //if (GetMostSimilarTris_reversed(convexMeshW, sourceMeshW, out int[] cVersBestSVer, out int[] cTrisBestSTri) == false) return convexMeshW;
 
@@ -2403,7 +2660,7 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns true if transToLookFor is a parent of transToSearchFrom (Includes indirect parents like transform.parent.parent)
+        /// Returns true if transToLookFor is a parent of transToSearchFrom (Includes self and indirect parents like transform.parent.parent)
         /// </summary>
         public static bool GetIfTransformIsAnyParent(Transform transToLookFor, Transform transToSearchFrom)
         {
@@ -2416,6 +2673,14 @@ namespace Zombie1111_uDestruction
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Returns true if the given transform has a uniform lossyScale (If lossyScale XYZ are all the same)
+        /// </summary>
+        public static bool TransformHasUniformScale(Transform trans)
+        {
+            return (trans.lossyScale - (Vector3.one * trans.lossyScale.x)).magnitude < 0.001f;
         }
 
         /// <summary>
@@ -2475,7 +2740,7 @@ namespace Zombie1111_uDestruction
 
         public static void Debug_createMeshRend(Mesh meshW, Material mat = null)
         {
-            GameObject newO = new();
+            GameObject newO = new("Debug_meshRend");
             MeshFilter meshF = newO.AddComponent<MeshFilter>();
             MeshRenderer meshR = newO.AddComponent<MeshRenderer>();
             
@@ -2580,6 +2845,122 @@ namespace Zombie1111_uDestruction
             Debug.DrawLine(corners[1], corners[5], color, duration, doOcclusion);
             Debug.DrawLine(corners[2], corners[6], color, duration, doOcclusion);
             Debug.DrawLine(corners[3], corners[7], color, duration, doOcclusion);
+        }
+
+        public static Joint CopyJoint(Joint source, GameObject destination, Rigidbody connectedBody, Vector3 anchorPosition)
+        {
+            if (source is HingeJoint ogHinge)
+            {
+                var newJoint = destination.AddComponent<HingeJoint>();
+                SetGlobalProperties(source, newJoint);
+
+                newJoint.useSpring = ogHinge.useSpring;
+                newJoint.spring = ogHinge.spring;
+                newJoint.limits = ogHinge.limits;
+                newJoint.motor = ogHinge.motor;
+                newJoint.useLimits = ogHinge.useLimits;
+                newJoint.useMotor = ogHinge.useMotor;
+                newJoint.useAcceleration = ogHinge.useAcceleration;
+                newJoint.useSpring = ogHinge.useSpring;
+                newJoint.extendedLimits = ogHinge.extendedLimits;
+                return newJoint;
+            }
+
+            if (source is SpringJoint ogSpring)
+            {
+                var newJoint = destination.AddComponent<SpringJoint>();
+                SetGlobalProperties(source, newJoint);
+
+                newJoint.spring = ogSpring.spring;
+                newJoint.damper = ogSpring.damper;
+                newJoint.minDistance = ogSpring.minDistance;
+                newJoint.maxDistance = ogSpring.maxDistance;
+                newJoint.tolerance = ogSpring.tolerance;
+                return newJoint;
+            }
+
+            if (source is CharacterJoint ogCharacter)
+            {
+                var newJoint = destination.AddComponent<CharacterJoint>();
+                SetGlobalProperties(source, newJoint);
+
+                newJoint.swingAxis = ogCharacter.swingAxis;
+                newJoint.twistLimitSpring = ogCharacter.twistLimitSpring;
+                newJoint.lowTwistLimit = ogCharacter.lowTwistLimit;
+                newJoint.highTwistLimit = ogCharacter.highTwistLimit;
+                newJoint.swingLimitSpring = ogCharacter.swingLimitSpring;
+                newJoint.swing1Limit = ogCharacter.swing1Limit;
+                newJoint.swing2Limit = ogCharacter.swing2Limit;
+                newJoint.enableProjection = ogCharacter.enableProjection;
+                newJoint.projectionDistance = ogCharacter.projectionDistance;
+                newJoint.projectionAngle = ogCharacter.projectionAngle;
+                return newJoint;
+            }
+
+            if (source is FixedJoint)
+            {
+                var newJoint = destination.AddComponent<FixedJoint>();
+                SetGlobalProperties(source, newJoint);
+
+                return newJoint;
+            }
+
+            if (source is ConfigurableJoint ogConfigurable)
+            {
+                var newJoint = destination.AddComponent<ConfigurableJoint>();
+                SetGlobalProperties(source, newJoint);
+
+                newJoint.secondaryAxis = ogConfigurable.secondaryAxis;
+                newJoint.xMotion = ogConfigurable.xMotion;
+                newJoint.yMotion = ogConfigurable.yMotion;
+                newJoint.zMotion = ogConfigurable.zMotion;
+                newJoint.angularXMotion = ogConfigurable.angularXMotion;
+                newJoint.angularYMotion = ogConfigurable.angularYMotion;
+                newJoint.angularZMotion = ogConfigurable.angularZMotion;
+                newJoint.linearLimitSpring = ogConfigurable.linearLimitSpring;
+                newJoint.linearLimit = ogConfigurable.linearLimit;
+                newJoint.angularXLimitSpring = ogConfigurable.angularXLimitSpring;
+                newJoint.lowAngularXLimit = ogConfigurable.lowAngularXLimit;
+                newJoint.highAngularXLimit = ogConfigurable.highAngularXLimit;
+                newJoint.angularYZLimitSpring = ogConfigurable.angularYZLimitSpring;
+                newJoint.angularYLimit = ogConfigurable.angularYLimit;
+                newJoint.angularZLimit = ogConfigurable.angularZLimit;
+                newJoint.targetPosition = ogConfigurable.targetPosition;
+                newJoint.targetVelocity = ogConfigurable.targetVelocity;
+                newJoint.xDrive = ogConfigurable.xDrive;
+                newJoint.yDrive = ogConfigurable.yDrive;
+                newJoint.zDrive = ogConfigurable.zDrive;
+                newJoint.targetRotation = ogConfigurable.targetRotation;
+                newJoint.targetAngularVelocity = ogConfigurable.targetAngularVelocity;
+                newJoint.rotationDriveMode = ogConfigurable.rotationDriveMode;
+                newJoint.angularXDrive = ogConfigurable.angularXDrive;
+                newJoint.angularYZDrive = ogConfigurable.angularYZDrive;
+                newJoint.slerpDrive = ogConfigurable.slerpDrive;
+                newJoint.projectionMode = ogConfigurable.projectionMode;
+                newJoint.projectionDistance = ogConfigurable.projectionDistance;
+                newJoint.projectionAngle = ogConfigurable.projectionAngle;
+                newJoint.configuredInWorldSpace = ogConfigurable.configuredInWorldSpace;
+                newJoint.swapBodies = ogConfigurable.swapBodies;
+                return newJoint;
+            }
+
+            throw new Exception("Copying " + source.GetType() + "s has not been implemented!");
+            
+            void SetGlobalProperties(Joint ogJoint, Joint newJoint)
+            {
+                newJoint.anchor = anchorPosition;
+                //newJoint.connectedAnchor = connectedAnchorPosition;
+                newJoint.connectedBody = connectedBody;
+                newJoint.connectedAnchor = ogJoint.connectedAnchor;
+                newJoint.autoConfigureConnectedAnchor = ogJoint.autoConfigureConnectedAnchor;
+                newJoint.breakForce = ogJoint.breakForce;
+                newJoint.breakTorque = ogJoint.breakTorque;
+                newJoint.connectedMassScale = ogJoint.connectedMassScale;
+                newJoint.enableCollision = ogJoint.enableCollision;
+                newJoint.enablePreprocessing = ogJoint.enablePreprocessing;
+                newJoint.massScale = ogJoint.massScale;
+                newJoint.axis = ogJoint.axis;
+            }
         }
 #endif
     }

@@ -14,6 +14,8 @@ using UnityEngine.Rendering;
 using System.Collections.Concurrent;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.SceneManagement;
+using Mono.Cecil.Cil;
+
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -1059,7 +1061,7 @@ namespace Zombie1111_uDestruction
 
                 //setup fracture renderer
                 if (UpdateProgressBar("Creating renderer") == false) return CancelFracturing();
-                Gen_setupFracRend(meshesToFracW[0], skinRendSource);
+                Gen_setupFracRend(meshesToFracW, skinRendSource);
 
                 //create fracObjects and add them to the destruction
                 if (UpdateProgressBar("Creating destruction structure") == false) return CancelFracturing();
@@ -1073,6 +1075,9 @@ namespace Zombie1111_uDestruction
                 SaveOrLoadAsset(true);
 
                 //log result when done, log when done
+                if (UpdateProgressBar("Verifying") == false) return CancelFracturing();
+
+                if (GetConnectedPartCount(0, out int missingPart) != allParts.Count) Debug.LogWarning("Not all parts in " + transform.name + " are connected with each other, part " + missingPart + " is not connected");
                 if (fr_bones.Count > 500) Debug.LogWarning(transform.name + " has " + fr_bones.Count + " bones (skinnedMeshRenderers seems to have a limitation of ~500 bones before it breaks)");
                 if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.LogWarning(transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
                 if (transform.TryGetComponent<Rigidbody>(out _) == true) Debug.LogWarning(transform.name + " has a rigidbody and it may cause issues. Its recommended to remove it and use the fracture physics options instead");
@@ -1087,6 +1092,35 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 
+            unsafe int GetConnectedPartCount(int partI, out int missingPart)
+            {
+                int partCount = allParts.Count;
+                List<int> partsToSearch = new(partCount) { partI };
+                HashSet<int> searchedParts = new(partCount) { partI };
+
+                for (int i = 0; i < partsToSearch.Count; i++)
+                {
+                    FracStruct fPart = jCDW_job.fStructs[partsToSearch[i]];
+
+                    for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                    {
+                        int nPI = fPart.neighbourPartI[nI];
+                        if (searchedParts.Add(nPI) == false) continue;
+                        partsToSearch.Add(nPI);
+                    }
+                }
+
+                missingPart = -1;
+                for (int pI = 0; pI <= partCount; pI++)
+                {
+                    if (searchedParts.Contains(pI) == true) continue;
+
+                    missingPart = pI;
+                    break;
+                }
+
+                return searchedParts.Count;
+            }
 
             bool UpdateProgressBar(string message)
             {
@@ -1166,6 +1200,11 @@ namespace Zombie1111_uDestruction
             public Collider col;
             public List<float> groupId;
             public HashSet<float> groupLinks;
+
+            /// <summary>
+            /// The parent the object should have when the part is not broken
+            /// </summary>
+            public Transform defualtParent;
         }
 
         /// <summary>
@@ -1320,7 +1359,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Sets fracRend defualt values so its ready to get parts added to it, returns true if valid fracRend
         /// </summary>
-        private bool Gen_setupFracRend(FracSource mainFracSource = null, SkinSourceData skinRendSource = null)
+        private bool Gen_setupFracRend(List<FracSource> fracSources, SkinSourceData skinRendSource = null)
         {
             //return if no fracRend
             if (fracRend == null)
@@ -1360,27 +1399,34 @@ namespace Zombie1111_uDestruction
             SyncFracRendData();
 
             //create defualt parent
-            Transform defualtParentTrans = null;
-            if (mainFracSource != null)
+            Transform bestChild = null;
+ 
+            if (skinRendSource != null) bestChild = skinRendSource.rootBone;
+            else
             {
-                if (skinRendSource != null) defualtParentTrans = skinRendSource.rootBone;
-                else
-                {
-                    defualtParentTrans = mainFracSource.sRend.transform;
-                    int loopCount;
+                int bestCount = -1;
 
-                    for (loopCount = 0; loopCount < 10; loopCount++)
+                for (int childI = 0; childI < transform.childCount; childI++)
+                {
+                    Transform thisChild = transform.GetChild(childI);
+                    if (FractureHelperFunc.TransformHasUniformScale(thisChild) == false) continue;
+
+                    int thisCount = 0;
+
+                    foreach (FracSource source in fracSources)
                     {
-                        if ((defualtParentTrans.lossyScale - (Vector3.one * defualtParentTrans.lossyScale.x)).magnitude < 0.00001f
-                            || defualtParentTrans == transform) break;
-                        defualtParentTrans = defualtParentTrans.parent;
+                        if (source.sRend == null || FractureHelperFunc.GetIfTransformIsAnyParent(thisChild, source.sRend.transform) == false) continue;
+                        thisCount++;
                     }
-                  
-                    if (loopCount != 0) Debug.LogWarning(mainFracSource.sRend.transform.name + " cant be used as base parent because it does not have a uniform lossy scale, " + defualtParentTrans.name + " will be used as base parent instead!");
+
+                    if (thisCount <= bestCount) continue;
+
+                    bestCount = thisCount;
+                    bestChild = thisChild;
                 }
             }
-
-            CreateNewParent(defualtParentTrans == transform ? null : defualtParentTrans);
+            
+            CreateNewParent(bestChild == transform ? null : bestChild);
 
             return true;
         }
@@ -1453,9 +1499,9 @@ namespace Zombie1111_uDestruction
 
             //set the renderer
             fracRend.SetSharedMaterials(fr_materials);
-            fracFilter.sharedMesh.SetVertices(fr_verticesL);
-            fracFilter.sharedMesh.SetNormals(fr_normalsL);
-            fracFilter.sharedMesh.SetUVs(0, fr_uvs);
+            fracFilter.sharedMesh.SetVertices(fr_verticesL, 0, fr_verticesL.Count, MeshUpdateFlags.DontValidateIndices);
+            fracFilter.sharedMesh.SetNormals(fr_normalsL, 0, fr_normalsL.Count, MeshUpdateFlags.DontValidateIndices);
+            fracFilter.sharedMesh.SetUVs(0, fr_uvs, 0, fr_uvs.Count, MeshUpdateFlags.DontValidateIndices);
             FractureHelperFunc.SetListLenght(ref skinnedVerticsW, fr_verticesL.Count);
 
             //set rend submeshes
@@ -1465,6 +1511,10 @@ namespace Zombie1111_uDestruction
             {
                 fracFilter.sharedMesh.SetTriangles(fr_subTris[subI], subI);
             }
+
+            //fracFilter.sharedMesh.RecalculateNormals();
+            fracFilter.sharedMesh.RecalculateTangents(MeshUpdateFlags.DontValidateIndices);
+            fracFilter.sharedMesh.RecalculateUVDistributionMetric(0);
 
             //sync data with gpu
             SyncWithGpu();
@@ -1580,9 +1630,15 @@ namespace Zombie1111_uDestruction
             //create the fObject
             FracObject fObj = new();
             Transform pTrans = new GameObject("Part(unusedPart)_" + transform.name).transform;
-            pTrans.gameObject.layer = fMesh.sourceM.sRend.gameObject.layer;
-            pTrans.gameObject.tag = fMesh.sourceM.sRend.gameObject.tag;
-            pTrans.position = FractureHelperFunc.GetGeometricCenterOfPositions(fMesh.meshW.vertices);
+            Transform sourceTrans = fMesh.sourceM.sRend.transform;
+
+            pTrans.gameObject.layer = sourceTrans.gameObject.layer;
+            pTrans.gameObject.tag = sourceTrans.gameObject.tag;
+            fObj.defualtParent = GetDefualtParent(sourceTrans);
+            pTrans.SetPositionAndRotation(
+                FractureHelperFunc.GetGeometricCenterOfPositions(fMesh.meshW.vertices),
+                fObj.defualtParent != null ? fObj.defualtParent.rotation : sourceTrans.rotation);
+
             fObj.meshW = fMesh.meshW;
             fObj.col = Gen_createPartCollider(pTrans, fObj.meshW, GetDesMatFromIntId(FractureHelperFunc.Gd_getIntIdFromId(fMesh.groupId)).phyMat);
 
@@ -1623,6 +1679,17 @@ namespace Zombie1111_uDestruction
 
             //return the new fObject
             return fObj;
+
+            Transform GetDefualtParent(Transform trans)
+            {
+                while (trans != null && FractureHelperFunc.TransformHasUniformScale(trans) == false)
+                {
+                    trans = trans.parent;
+                }
+
+                if (trans == null || FractureHelperFunc.GetIfTransformIsAnyParent(allParents[0].parentTrans, trans) == false) return null;
+                return trans;
+            }
         }
 
         /// <summary>
@@ -1684,6 +1751,7 @@ namespace Zombie1111_uDestruction
             };
 
             Transform newTrans = fObj.col.transform;
+
             short newPartI = (short)allParts.Count;
             newTrans.name = newTrans.name.Replace("unusedPart", newPartI.ToString());
 
@@ -1701,6 +1769,7 @@ namespace Zombie1111_uDestruction
                     SceneManager.MoveGameObjectToScene(fObj.col.gameObject, gameObject.scene);
             }
 
+            partsDefualtParentTrans.Add(fObj.defualtParent);
             allParts.Add(newPart);
             fr_bones.Add(newTrans);
             saved_allPartsCol.Add(fObj.col);
@@ -1859,7 +1928,6 @@ namespace Zombie1111_uDestruction
                     || partGroupD.isKinematic == true) SetPartKinematicStatus(newPartI, true);
 
                 //get what nearPartIndexes is actually valid neighbours and create structure for the new part
-                //jCDW_job.structPosL.Add(fr_bones[newPartI + partBoneOffset].worldToLocalMatrix.MultiplyPoint(GetPartWorldPosition(newPartI)));
                 foreach (short nearPartI in nearPartIndexes)
                 {
                     //ignore if this neighbour part is invalid
@@ -1948,6 +2016,9 @@ namespace Zombie1111_uDestruction
             }
         }
 
+        public delegate void Event_OnPartParentChanged(int partI, int oldParentI, int newParentI);
+        public event Event_OnPartParentChanged OnPartParentChanged;
+
         /// <summary>
         /// Sets the given parts parent to newParentI, if -1 the part will become lose
         /// </summary>
@@ -1955,8 +2026,8 @@ namespace Zombie1111_uDestruction
         {
             if (repairIsSetup == true && jGTD_job.repair_partIWannaRestore[partI] == 1) return;//Not allowed to set parent of parts that are currently being repaired
 
-            int partParentI = jCDW_job.partsParentI[partI];
-            if (partParentI == newParentI) return;
+            int oldParentI = jCDW_job.partsParentI[partI];
+            if (oldParentI == newParentI) return;
 
             //Verify part count
             if (jCDW_job.parentPartCount.Length != allParents.Count) RecreateParentPartCount();
@@ -1966,16 +2037,16 @@ namespace Zombie1111_uDestruction
             DestructionMaterial partDesMat = GetDesMatFromIntId(allParts[partI].groupIdInt);
 
             //remove part from previous parent
-            if (partParentI >= 0)
+            if (oldParentI >= 0)
             {
-                jCDW_job.parentPartCount[partParentI]--;
-                allParents[partParentI].partIndexes.RemoveSwapBack(partI);
-                allParents[partParentI].parentMass -= partDesMat.desProps.mass;
-                allParents[partParentI].totalStiffness -= partDesMat.bendProps.bendyness;
-                allParents[partParentI].totalTransportCoEfficiency -= partDesMat.desProps.falloff;
-                if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[partParentI].parentKinematic--;
+                jCDW_job.parentPartCount[oldParentI]--;
+                allParents[oldParentI].partIndexes.RemoveSwapBack(partI);
+                allParents[oldParentI].parentMass -= partDesMat.desProps.mass;
+                allParents[oldParentI].totalStiffness -= partDesMat.bendProps.bendyness;
+                allParents[oldParentI].totalTransportCoEfficiency -= partDesMat.desProps.falloff;
+                if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[oldParentI].parentKinematic--;
 
-                MarkParentAsModified(partParentI);
+                MarkParentAsModified(oldParentI);
             }
             else FromNoParentToParent();
 
@@ -1985,11 +2056,12 @@ namespace Zombie1111_uDestruction
             if (newParentI < 0)
             {
                 FromParentToNoParent();
+                OnPartParentChanged?.Invoke(partI, oldParentI, newParentI);
                 return;
             }
 
             //if want to change parent
-            fr_bones[partBoneI].SetParent(newParentI > 0 || partsDefualtParentTrans.Count == 0 ? allParents[newParentI].parentTrans : partsDefualtParentTrans[partI]);
+            fr_bones[partBoneI].SetParent(newParentI > 0 || partsDefualtParentTrans.Count == 0 || partsDefualtParentTrans[partI] == null ? allParents[newParentI].parentTrans : partsDefualtParentTrans[partI]);
             jCDW_job.parentPartCount[newParentI]++;
             allParents[newParentI].partIndexes.Add(partI);
             allParents[newParentI].parentMass += partDesMat.desProps.mass;
@@ -1997,6 +2069,8 @@ namespace Zombie1111_uDestruction
             allParents[newParentI].totalTransportCoEfficiency += partDesMat.desProps.falloff;
             if (jCDW_job.kinematicPartIndexes.Contains(partI) == true) allParents[newParentI].parentKinematic++;
             MarkParentAsModified(newParentI);
+
+            OnPartParentChanged?.Invoke(partI, oldParentI, newParentI);
 
             void FromParentToNoParent()
             {
@@ -2029,6 +2103,14 @@ namespace Zombie1111_uDestruction
                 saved_allPartsCol[partI].hasModifiableContacts = true;
                 //remove rigidbody
                 if (saved_allPartsCol[partI].attachedRigidbody != null) Destroy(saved_allPartsCol[partI].attachedRigidbody);
+            }
+        }
+
+        private void RealizeDestructionJoints()
+        {
+            foreach (var desJoint in allParents[0].parentTrans.GetComponentsInChildren<destructionJoint>())
+            {
+                desJoint.SetupJoints(this);
             }
         }
 
@@ -2430,7 +2512,7 @@ namespace Zombie1111_uDestruction
                     }
 
                     fractureTool.finalizeFracturing();
-
+    
                     //extract mesh chunks from nvBlast
                     int meshCount = fractureTool.getChunkCount();
                     for (var i = 1; i < meshCount; i++)
@@ -2625,6 +2707,7 @@ namespace Zombie1111_uDestruction
                 return meshesToFrac;
             }
 
+            //Debug fix later, splitDisconnectedFaces causes textures/uvs to break (SplitMeshInTwo() seems to be cause of issue!?)
             //split meshes into chunks
             List<FracSource> splittedMeshes;
             for (int i = meshesToFrac.Count - 1; i >= 0; i--)
@@ -2639,7 +2722,7 @@ namespace Zombie1111_uDestruction
                 if (splittedMeshes == null) return null;
 
                 //add split result
-                for (int ii = 0; ii < splittedMeshes.Count; ii += 1)
+                for (int ii = 0; ii < splittedMeshes.Count; ii++)
                 {
                     meshesToFrac.Add(new()
                     {
@@ -2717,50 +2800,85 @@ namespace Zombie1111_uDestruction
         /// <returns></returns>
         private List<FracSource> Gen_splitMeshIntoChunks(FracSource meshToSplit, bool doBones, float worldScaleDis = 0.0001f)
         {
-            int maxLoops = 200;
-            List<FracSource> splittedMeshes = new();
-            List<FracSource> tempM;
-            Color[] verCols;
-            List<float> tempG;
+            if (useGroupIds == false && splitDisconnectedFaces == false) return new() { meshToSplit };
 
-            while (maxLoops > 0)
+            int[] tris = meshToSplit.meshW.triangles;
+            Vector3[] vers = meshToSplit.meshW.vertices;
+            Color[] cols = meshToSplit.meshW.colors;
+            int trisL = tris.Length;
+            int[] trisIds = new int[trisL / 3];
+            NativeArray<int> triId = new(2, Allocator.Temp);
+            Dictionary<int, List<float>> triIdToGroupId = new();
+            if (cols.Length != vers.Length) cols = new Color[vers.Length];
+
+            for (int tI = 0; tI < trisL; tI += 3)
             {
-                maxLoops--;
-                if (meshToSplit.meshW.vertexCount < 4) break;
+                if (trisIds[tI / 3] != 0) continue;
+                HashSet<int> conTris = splitDisconnectedFaces == false ? FractureHelperFunc.GetAllTriangels(trisL) :
+                    FractureHelperFunc.GetConnectedTriangels(vers, tris, tI, worldScaleDis);
 
-                verCols = meshToSplit.meshW.colors;
-                bool useVerCols = verCols.Length == meshToSplit.meshW.vertexCount;
-
-                if (splitDisconnectedFaces == false && (useGroupIds == false || useVerCols == false))
+                foreach (int ctI in conTris)
                 {
-                    splittedMeshes.Add(new() { meshW = meshToSplit.meshW, mGroupId = null, mMats = meshToSplit.sRend.sharedMaterials.ToList() });
+                    if (trisIds[ctI / 3] != 0) continue;
 
-                    return splittedMeshes;
+                    List<float> groupId = FractureHelperFunc.Gd_getIdFromColor(cols[tris[ctI]]);
+                    triId[0] = tI;
+                    triId[1] = FractureHelperFunc.Gd_getIntIdFromId(groupId);
+                    int tId = FractureHelperFunc.GetHashFromInts(ref triId);
+                    if (triIdToGroupId.ContainsKey(tId) == false)
+                    {
+                        triIdToGroupId.Add(tId, groupId);
+                    }
+
+                    foreach (int ltI in FractureHelperFunc.Gd_getSomeTriangelsInId(cols, tris, groupId, conTris))
+                    {
+                        trisIds[ltI / 3] = tId;
+                    }
                 }
-
-                tempG = useVerCols == true ? FractureHelperFunc.Gd_getIdFromColor(verCols[0]) : null;
-                HashSet<int> vertsToSplit;
-
-                if (splitDisconnectedFaces == true)
-                {
-                    vertsToSplit = FractureHelperFunc.GetConnectedVertics(meshToSplit.meshW, 0, worldScaleDis);
-                    if (useVerCols == true) vertsToSplit = FractureHelperFunc.Gd_getSomeVerticesInId(verCols, tempG, vertsToSplit);
-                }
-                else
-                {
-                    vertsToSplit = FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG);
-                }
-
-                tempM = FractureHelperFunc.SplitMeshInTwo(vertsToSplit, meshToSplit, doBones);
-
-                if (tempM == null) return null;
-                if (tempM[0].meshW.vertexCount >= 4) splittedMeshes.Add(new() { meshW = tempM[0].meshW, mGroupId = tempG, mMats = tempM[0].mMats });
-                meshToSplit = tempM[1];
             }
 
-            if (meshToSplit.meshW.vertexCount >= 4) splittedMeshes.Add(meshToSplit);
+            return FractureHelperFunc.SplitMeshByTrisIds(meshToSplit, trisIds, triIdToGroupId);
 
-            return splittedMeshes;
+            //while (maxLoops > 0)
+            //{
+            //    maxLoops--;
+            //    if (meshToSplit.meshW.vertexCount < 4) break;
+            //
+            //    verCols = meshToSplit.meshW.colors;
+            //    bool useVerCols = verCols.Length == meshToSplit.meshW.vertexCount;
+            //
+            //    if (splitDisconnectedFaces == false && (useGroupIds == false || useVerCols == false))
+            //    {
+            //        splittedMeshes.Add(new() { meshW = meshToSplit.meshW, mGroupId = null, mMats = meshToSplit.sRend.sharedMaterials.ToList() });
+            //
+            //        return splittedMeshes;
+            //    }
+            //
+            //    tempG = useVerCols == true ? FractureHelperFunc.Gd_getIdFromColor(verCols[0]) : null;
+            //    HashSet<int> vertsToSplit;
+            //    
+            //    if (splitDisconnectedFaces == true)
+            //    {
+            //        vertsToSplit = FractureHelperFunc.GetConnectedVertics(meshToSplit.meshW, 0, worldScaleDis);
+            //        if (useVerCols == true) vertsToSplit = FractureHelperFunc.Gd_getSomeVerticesInId(verCols, tempG, vertsToSplit);
+            //    }
+            //    else
+            //    {
+            //        vertsToSplit = FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG);
+            //    }
+            //
+            //    //Only meshW, mMats and sRend is assigned in meshToSplit
+            //    tempM = FractureHelperFunc.SplitMeshInTwo(vertsToSplit, meshToSplit, doBones);
+            //
+            //    if (tempM == null) return null;
+            //
+            //    if (tempM[0].meshW.vertexCount >= 4) splittedMeshes.Add(new() { meshW = tempM[0].meshW, mGroupId = tempG, mMats = tempM[0].mMats });
+            //    meshToSplit = tempM[1];
+            //}
+            //
+            //if (meshToSplit.meshW.vertexCount >= 4) splittedMeshes.Add(meshToSplit);
+            //
+            //return splittedMeshes;
         }
 
 #endregion GenerateFractureSystem
@@ -2846,6 +2964,9 @@ namespace Zombie1111_uDestruction
             //setup gpu readback
             gpuMeshVertexData = new GpuMeshVertex[allParts.Count];
             gpuMeshBonesLToW = new Matrix4x4[fr_bones.Count];
+
+            //Add destruction joints
+            RealizeDestructionJoints();
         }
 
         private void Update()
