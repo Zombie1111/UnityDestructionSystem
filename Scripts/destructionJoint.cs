@@ -1,8 +1,6 @@
-using Autodesk.Fbx;
+
 using System.Collections;
 using System.Collections.Generic;
-using System.ComponentModel.Design;
-using UnityEditor.Rendering.LookDev;
 using UnityEngine;
 
 namespace Zombie1111_uDestruction
@@ -157,7 +155,7 @@ namespace Zombie1111_uDestruction
 
                     Rigidbody rbA = colA.attachedRigidbody;
 
-                    dJoint.joint = FractureHelperFunc.CopyJoint(
+                    dJoint.joint = FracHelpFunc.CopyJoint(
                         sourceJoint,
                         rbA.gameObject,
                         rbB,

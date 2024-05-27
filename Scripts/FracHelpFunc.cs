@@ -17,13 +17,32 @@ using UnityEditor;
 
 namespace Zombie1111_uDestruction
 {
-    public static class FractureHelperFunc
+#if !FRAC_NO_BURST
+    [BurstCompile]
+#endif
+    public static class FracHelpFuncBurst
     {
-        public static void AddRange<T>(this ICollection<T> collection, IEnumerable<T> items)
+        /// <summary>
+        /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN NativeArray WILL BE MODIFIED!
+        /// </summary>
+        /// <param name="inputInts"></param>
+        /// <returns></returns>
+#if !FRAC_NO_BURST
+        [BurstCompile]
+#endif
+        public static int GetHashFromInts(ref NativeArray<int> inputInts)
         {
-            foreach (var item in items)
+            inputInts.Sort();
+
+            unchecked
             {
-                collection.Add(item);
+                int hash = 17;
+                foreach (int inputInt in inputInts)
+                {
+                    hash = hash * 31 + inputInt.GetHashCode();
+                }
+
+                return hash;
             }
         }
 
@@ -33,6 +52,9 @@ namespace Zombie1111_uDestruction
         /// <typeparam name="T">The type of the array</typeparam>
         /// <param name="array">Target array to resize</param>
         /// <param name="capacity">New size of native array to resize</param>
+#if !FRAC_NO_BURST
+        [BurstCompile]
+#endif
         public static void ResizeArray<T>(this ref NativeArray<T> array, int capacity) where T : struct
         {
             var newArray = new NativeArray<T>(capacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -45,11 +67,121 @@ namespace Zombie1111_uDestruction
 
             array = newArray;
         }
+    }
+
+    public static class FracHelpFunc
+    {
+        /// <summary>
+        /// Returns how much the given point has moved in the last second between objWToLPrev and objLToWNow
+        /// </summary>
+        public static Vector3 GetObjectVelocityAtPoint(Matrix4x4 objWToLPrev, Matrix4x4 objLToWNow, Vector3 point, float deltatime)
+        {
+            //for what ever reason transforming (point - velOffset) seems to give slightly better result at the cost of 2 extra transformations??
+            //Vector3 velOffset = point - (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point);
+            //return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(velOffset)) - velOffset) / deltatime;
+
+            //The one below is faster and in theory it should be more accurate but it aint???
+            return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point) / deltatime;
+        }
+
+        /// <summary>
+        /// Returns current lerped towards target by t and moved current towards target by at least min distance (Cant move past target)
+        /// </summary>
+        public static Vector3 Vec3LerpMin(Vector3 current, Vector3 target, float t, float min, out bool reachedTarget)
+        {
+            float dis = (target - current).magnitude;
+            if (dis <= min)
+            {
+                reachedTarget = true;
+                return target;
+            }
+
+            dis *= t;
+            if (dis < min) dis = min;
+
+            reachedTarget = false;
+            return Vector3.MoveTowards(current, target, dis);
+        }
+
+        /// <summary>
+        /// Returns current lerped towards target by t and rotated current towards target by at least min degrees (Cant rotate past target)
+        /// </summary>
+        public static Quaternion QuatLerpMin(Quaternion current, Quaternion target, float t, float min, out bool reachedTarget)
+        {
+            float ang = Quaternion.Angle(current, target);
+            if (ang <= min)
+            {
+                reachedTarget = true;
+                return target;
+            }
+
+            ang *= t;
+            if (ang < min) ang = min;
+
+            reachedTarget = false;
+            return Quaternion.RotateTowards(current, target, ang);
+        }
+
+        public static Vector3 Min(this Vector3 vectorA, Vector3 vectorB)
+        {
+            return Vector3.Min(vectorA, vectorB);
+        }
+
+        public static Vector3 Max(this Vector3 vectorA, Vector3 vectorB)
+        {
+            return Vector3.Max(vectorA, vectorB);
+        }
+
+        public static Bounds ConvertBoundsWithMatrix(Bounds bounds, Matrix4x4 matrix)
+        {
+            Vector3 center = matrix.MultiplyPoint(bounds.center);
+            Vector3 size = matrix.MultiplyVector(bounds.size);
+
+            return new Bounds(center, size);
+        }
+
+        public static Bounds GetCompositeMeshBounds(Mesh[] meshes)
+        {
+            var bounds = meshes
+                .Select(mesh =>
+                {
+                    return mesh.bounds;
+                })
+                .Where(b => b.size != Vector3.zero)
+                .ToArray();
+
+            if (bounds.Length == 0)
+                return new Bounds();
+
+            if (bounds.Length == 1)
+                return bounds[0];
+
+            var compositeBounds = bounds[0];
+
+            for (var i = 1; i < bounds.Length; i++)
+            {
+                compositeBounds.Encapsulate(bounds[i]);
+            }
+
+            return compositeBounds;
+        }
+
+        public static void AddRange<T>(this ICollection<T> collection, IEnumerable<T> items)
+        {
+            foreach (var item in items)
+            {
+                collection.Add(item);
+            }
+        }
 
         public static void SetVelocityAtPosition(Vector3 targetVelocity, Vector3 positionOfForce, Rigidbody rb)
         {
             //rb.AddForceAtPosition(rb.mass * (targetVelocity - rb.velocity) / Time.fixedDeltaTime, positionOfForce, ForceMode.Force);
+#if UNITY_2023_1_OR_NEWER
+            rb.AddForceAtPosition(targetVelocity - rb.linearVelocity, positionOfForce, ForceMode.VelocityChange);
+#else
             rb.AddForceAtPosition(targetVelocity - rb.velocity, positionOfForce, ForceMode.VelocityChange);
+#endif
         }
 
         public static T GetOrAddComponent<T>(this Component c) where T : Component
@@ -101,7 +233,10 @@ namespace Zombie1111_uDestruction
             return Mathf.Abs(volume);
         }
 
-        public static Vector3[] GetVertices(this Bounds bounds) => new[]
+        /// <summary>
+        /// Returns 8 positions, a position for each corner of the bounds
+        /// </summary>
+        public static Vector3[] GetBoundsVertics(this Bounds bounds) => new[]
         {
             new Vector3(bounds.center.x, bounds.center.y, bounds.center.z) + new Vector3(-bounds.extents.x, -bounds.extents.y, -bounds.extents.z),
             new Vector3(bounds.center.x, bounds.center.y, bounds.center.z) + new Vector3(bounds.extents.x, -bounds.extents.y, -bounds.extents.z),
@@ -112,16 +247,6 @@ namespace Zombie1111_uDestruction
             new Vector3(bounds.center.x, bounds.center.y, bounds.center.z) + new Vector3(-bounds.extents.x, bounds.extents.y, bounds.extents.z),
             new Vector3(bounds.center.x, bounds.center.y, bounds.center.z) + new Vector3(bounds.extents.x, bounds.extents.y, bounds.extents.z),
         };
-
-        public static Vector3 Min(this Vector3 vectorA, Vector3 vectorB)
-        {
-            return Vector3.Min(vectorA, vectorB);
-        }
-
-        public static Vector3 Max(this Vector3 vectorA, Vector3 vectorB)
-        {
-            return Vector3.Max(vectorA, vectorB);
-        }
 
         public static Bounds ToBounds(this Vector3[] vertices)
         {
@@ -150,52 +275,9 @@ namespace Zombie1111_uDestruction
 
         public static Bounds TransformBounds(this Transform from, Transform to, Bounds bounds)
         {
-            return bounds.GetVertices()
+            return bounds.GetBoundsVertics()
                 .Select(bv => from.transform.TransformPoint(bv, to.transform))
                 .ToBounds();
-        }
-
-        public static Bounds ConvertBoundsWithMatrix(Bounds bounds, Matrix4x4 matrix)
-        {
-            Vector3 center = matrix.MultiplyPoint(bounds.center);
-            Vector3 size = matrix.MultiplyVector(bounds.size);
-
-            return new Bounds(center, size);
-
-            //Vector3[] vertices = bounds.GetVertices();
-            //
-            //for (int i = 0; i < vertices.Length; i++)
-            //{
-            //    vertices[i] = matrix.MultiplyPoint3x4(vertices[i]);
-            //}
-            //
-            //return vertices.ToBounds();
-        }
-
-        public static Bounds GetCompositeMeshBounds(Mesh[] meshes)
-        {
-            var bounds = meshes
-                .Select(mesh =>
-                {
-                    return mesh.bounds;
-                })
-                .Where(b => b.size != Vector3.zero)
-                .ToArray();
-
-            if (bounds.Length == 0)
-                return new Bounds();
-
-            if (bounds.Length == 1)
-                return bounds[0];
-
-            var compositeBounds = bounds[0];
-
-            for (var i = 1; i < bounds.Length; i++)
-            {
-                compositeBounds.Encapsulate(bounds[i]);
-            }
-
-            return compositeBounds;
         }
 
         public static Vector3[] ConvertPositionsWithMatrix(Vector3[] localPoss, Matrix4x4 lTwMat)
@@ -476,7 +558,11 @@ namespace Zombie1111_uDestruction
 
         public static void SetVelocityUsingForce(Vector3 targetVelocity, Rigidbody rb)
         {
+#if UNITY_2023_1_OR_NEWER
+            rb.AddForce(rb.mass * (targetVelocity - rb.linearVelocity) / Time.fixedDeltaTime, ForceMode.Force);
+#else
             rb.AddForce(rb.mass * (targetVelocity - rb.velocity) / Time.fixedDeltaTime, ForceMode.Force);
+#endif
         }
 
         public static void SetAngularVelocityUsingTorque(Vector3 targetAngularVelocity, Rigidbody rb)
@@ -505,7 +591,7 @@ namespace Zombie1111_uDestruction
        where TValue : unmanaged
         {
             // Create a new Dictionary<TKey, TValue> to hold the converted elements
-            Dictionary<TKey, TValue> dictionary = new(nativeHashMap.Count);
+            Dictionary<TKey, TValue> dictionary = new(nativeHashMap.Count());
 
             foreach (var pair in nativeHashMap)
             {
@@ -840,7 +926,9 @@ namespace Zombie1111_uDestruction
             mVertics.Dispose();
             return isValid;
 
+#if !FRAC_NO_BURST
             [BurstCompile]
+#endif
             bool HasValidHull(NativeArray<Vector3> points)
             {
                 var count = points.Length;
@@ -877,13 +965,17 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 
+#if !FRAC_NO_BURST
             [BurstCompile]
+#endif
             bool AreCollinear(Vector3 a, Vector3 b, Vector3 c)
             {
                 return Cross(c - a, c - b).magnitude <= EPSILON;
             }
 
+#if !FRAC_NO_BURST
             [BurstCompile]
+#endif
             Vector3 Cross(Vector3 a, Vector3 b)
             {
                 return new Vector3(
@@ -892,7 +984,9 @@ namespace Zombie1111_uDestruction
                     a.x * b.y - a.y * b.x);
             }
 
+#if !FRAC_NO_BURST
             [BurstCompile]
+#endif
             bool AreCoplanar(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
             {
                 var n1 = Cross(c - a, c - b);
@@ -1740,7 +1834,7 @@ namespace Zombie1111_uDestruction
             {
                 int tI = i * 3;
 
-                closeOTris[i] = FractureHelperFunc.GetClosestTriOnMesh(
+                closeOTris[i] = FracHelpFunc.GetClosestTriOnMesh(
                     sVers,
                     sTris,
                     new Vector3[3] { nVers[nTris[tI]], nVers[nTris[tI + 1]], nVers[nTris[tI + 2]] },
@@ -1759,7 +1853,7 @@ namespace Zombie1111_uDestruction
                 {
                     if (closeOVer[nTris[tI]] < 0)
                     {
-                        closeOVer[nTris[tI]] = sTris[closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                        closeOVer[nTris[tI]] = sTris[closeOTris[i] + FracHelpFunc.GetClosestPointInArray(
                           oTrisPoss,
                           nVers[nTris[tI]])];
 
@@ -1768,7 +1862,7 @@ namespace Zombie1111_uDestruction
 
                     if (closeOVer[nTris[tI + 1]] < 0)
                     {
-                        closeOVer[nTris[tI + 1]] = sTris[closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                        closeOVer[nTris[tI + 1]] = sTris[closeOTris[i] + FracHelpFunc.GetClosestPointInArray(
                           oTrisPoss,
                           nVers[nTris[tI + 1]])];
 
@@ -1777,7 +1871,7 @@ namespace Zombie1111_uDestruction
 
                     if (closeOVer[nTris[tI + 2]] < 0)
                     {
-                        closeOVer[nTris[tI + 2]] = sTris[closeOTris[i] + FractureHelperFunc.GetClosestPointInArray(
+                        closeOVer[nTris[tI + 2]] = sTris[closeOTris[i] + FracHelpFunc.GetClosestPointInArray(
                           oTrisPoss,
                           nVers[nTris[tI + 2]])];
 
@@ -2124,39 +2218,6 @@ namespace Zombie1111_uDestruction
             return new Vector3(q.x * gain, q.y * gain, q.z * gain);
         }
 
-        [BurstCompile]
-        public static Vector3 GetObjectVelocityAtPoint(Matrix4x4 objWToLPrev, Matrix4x4 objLToWNow, Vector3 point, float deltatime)
-        {
-            //for what ever reason transforming (point - velOffset) seems to give slightly better result at the cost of 2 extra transformations??
-            Vector3 velOffset = point - (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point);
-            return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(velOffset)) - velOffset) / deltatime;
-
-            //The one below is faster and in theory it should be more accurate but it aint???
-            //return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point) / deltatime;
-        }
-
-        /// <summary>
-        /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN NativeArray WILL BE MODIFIED!
-        /// </summary>
-        /// <param name="inputInts"></param>
-        /// <returns></returns>
-        [BurstCompile]
-        public static int GetHashFromInts(ref NativeArray<int> inputInts)
-        {
-            inputInts.Sort();
-
-            unchecked
-            {
-                int hash = 17;
-                foreach (int inputInt in inputInts)
-                {
-                    hash = hash * 31 + inputInt.GetHashCode();
-                }
-
-                return hash;
-            }
-        }
-
         public static void ClampMagnitude(ref Vector3 vector, float maxLength)
         {
             float num = vector.sqrMagnitude;
@@ -2391,7 +2452,7 @@ namespace Zombie1111_uDestruction
                 // Copy properties from the original collider to the new collider
                 newMeshCol.convex = ogMeshCol.convex;
                 newMeshCol.cookingOptions = ogMeshCol.cookingOptions;
-                newMeshCol.sharedMesh = new() { vertices = FractureHelperFunc.ConvertPositionsWithMatrix(FractureHelperFunc.ConvertPositionsWithMatrix(ogMeshCol.sharedMesh.vertices, ogCol.transform.localToWorldMatrix), targetTrans.worldToLocalMatrix) };
+                newMeshCol.sharedMesh = new() { vertices = FracHelpFunc.ConvertPositionsWithMatrix(FracHelpFunc.ConvertPositionsWithMatrix(ogMeshCol.sharedMesh.vertices, ogCol.transform.localToWorldMatrix), targetTrans.worldToLocalMatrix) };
                 newCollider = newMeshCol;
             }
             else if (ogCol is BoxCollider originalBoxCollider)
@@ -2454,8 +2515,8 @@ namespace Zombie1111_uDestruction
             }
             else if (col is BoxCollider bCol)
             {
-                bCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
-                possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
+                bCol.center = FracHelpFunc.GetGeometricCenterOfPositions(possLocal);
+                possLocal = FracHelpFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
 
                 extents = Vector3.one * 0.001f;
                 float cDis;
@@ -2466,11 +2527,11 @@ namespace Zombie1111_uDestruction
 
                 foreach (Vector3 wPos in possLocal)
                 {
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
                     if (cDis > extents.x) extents.x = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
@@ -2479,8 +2540,8 @@ namespace Zombie1111_uDestruction
             }
             else if (col is SphereCollider sCol)
             {
-                sCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
-                possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
+                sCol.center = FracHelpFunc.GetGeometricCenterOfPositions(possLocal);
+                possLocal = FracHelpFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
 
                 extents = Vector3.one * 0.001f;
                 float cDis;
@@ -2491,11 +2552,11 @@ namespace Zombie1111_uDestruction
 
                 foreach (Vector3 wPos in possLocal)
                 {
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
                     if (cDis > extents.x) extents.x = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
@@ -2505,8 +2566,8 @@ namespace Zombie1111_uDestruction
             }
             else if (col is CapsuleCollider cCol)
             {
-                cCol.center = FractureHelperFunc.GetGeometricCenterOfPositions(possLocal);
-                possLocal = FractureHelperFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
+                cCol.center = FracHelpFunc.GetGeometricCenterOfPositions(possLocal);
+                possLocal = FracHelpFunc.ConvertPositionsWithMatrix(possLocal, colTrans.localToWorldMatrix);
 
                 extents = Vector3.one * 0.001f;
                 float cDis;
@@ -2517,11 +2578,11 @@ namespace Zombie1111_uDestruction
 
                 foreach (Vector3 wPos in possLocal)
                 {
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tFor), tPos);
                     if (cDis > extents.z) extents.z = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tSide), tPos);
                     if (cDis > extents.x) extents.x = cDis;
-                    cDis = Vector3.Distance(FractureHelperFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
+                    cDis = Vector3.Distance(FracHelpFunc.ClosestPointOnLineInfinit(wPos, tPos, tUp), tPos);
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
@@ -2588,6 +2649,16 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Returns false if the given vector has a axis that is either NaN or Infinity
+        /// </summary>
+        public static bool IsVectorValid(Vector3 vector)
+        {
+            if (float.IsNaN(vector.x) || float.IsNaN(vector.y) || float.IsNaN(vector.z)) return false;
+            if (float.IsInfinity(vector.x) || float.IsInfinity(vector.y) || float.IsInfinity(vector.z)) return false;
+            return true;
+        }
+
+        /// <summary>
         /// Subtracts the given vector lenght by amount
         /// </summary>
         public static Vector3 SubtractMagnitude(Vector3 vector, float amount)
@@ -2617,46 +2688,6 @@ namespace Zombie1111_uDestruction
         public static float QuaternionSqrMagnitude(Quaternion quaternion)
         {
             return quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z + quaternion.w * quaternion.w;
-        }
-
-        /// <summary>
-        /// Returns current lerped towards target by t and moved current towards target by at least min distance (Cant move past target)
-        /// </summary>
-        [BurstCompile]
-        public static Vector3 Vec3LerpMin(Vector3 current, Vector3 target, float t, float min, out bool reachedTarget)
-        {
-            float dis = (target - current).magnitude;
-            if (dis <= min)
-            {
-                reachedTarget = true;
-                return target;
-            }
-
-            dis *= t;
-            if (dis < min) dis = min;
-
-            reachedTarget = false;
-            return Vector3.MoveTowards(current, target, dis);
-        }
-
-        /// <summary>
-        /// Returns current lerped towards target by t and rotated current towards target by at least min degrees (Cant rotate past target)
-        /// </summary>
-        [BurstCompile]
-        public static Quaternion QuatLerpMin(Quaternion current, Quaternion target, float t, float min, out bool reachedTarget)
-        {
-            float ang = Quaternion.Angle(current, target);
-            if (ang <= min)
-            {
-                reachedTarget = true;
-                return target;
-            }
-
-            ang *= t;
-            if (ang < min) ang = min;
-
-            reachedTarget = false;
-            return Quaternion.RotateTowards(current, target, ang);
         }
 
         /// <summary>

@@ -8,6 +8,7 @@ namespace Zombie1111_uDestruction
 
         FRAC_NO_WARNINGS //If defined, no warnings will be logged to console + minor performance boost
         FRAC_NO_VERIFICATION //If defined, no verify saving before fracturing and no notices
+        FRAC_NO_BURST //If defined, burst wont be used in Zombie1111_uDestruction namespace
     */
 
     public static class FracGlobalSettings
@@ -48,8 +49,8 @@ namespace Zombie1111_uDestruction
         //0 == never recalculate, 1 == only recalculate for prefab instances, 2 == always recalculate
         public const byte recalculateKinematicPartsOnLoad = 1;
 
-        //How much weaker a material can be depending on the difference between force direction and structure direction.
-        public const float transDirInfluenceReduction = 0.5f;
+        //How much weaker a material can be depending on the difference between force direction and structure direction
+        public const float transDirInfluenceReduction = 1.0f;//Seems to cause inconsistant destruction so we keep it at 1.0f
 
         //How many neighbours any part can have at most. Neighbours uses fixed buffers so it cant be dynamic. Higher = more memory, keep it as low as possible and look for warnings in console if its too low
         public const byte maxPartNeighbourCount = 32;

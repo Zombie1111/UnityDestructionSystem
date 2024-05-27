@@ -39,7 +39,11 @@ namespace GameLogic
             newO.layer = 5;
             Rigidbody rb = newO.AddComponent<Rigidbody>();
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+#if UNITY_2023_1_OR_NEWER
+            rb.linearVelocity = shootDir * bulletMoveSpeed;
+#else
             rb.velocity = shootDir * bulletMoveSpeed;
+#endif
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.mass = rbMass;
 
@@ -85,8 +89,8 @@ namespace GameLogic
             Vector3 holdPos = camTrans.position + (camTrans.forward * currentHDis);
 
             Vector3 velToGive = Vector3.ClampMagnitude(holdPos - objPos, 20.0f) * 8.0f;
-            Zombie1111_uDestruction.FractureHelperFunc.SetVelocityUsingForce(velToGive, grabbedRb);
-            Zombie1111_uDestruction.FractureHelperFunc.SetAngularVelocityUsingTorque(grabbedRb.angularVelocity * 0.5f, grabbedRb);
+            Zombie1111_uDestruction.FracHelpFunc.SetVelocityUsingForce(velToGive, grabbedRb);
+            Zombie1111_uDestruction.FracHelpFunc.SetAngularVelocityUsingTorque(grabbedRb.angularVelocity * 0.5f, grabbedRb);
         }
     }
 }

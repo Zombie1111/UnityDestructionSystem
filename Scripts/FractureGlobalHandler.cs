@@ -544,18 +544,46 @@ namespace Zombie1111_uDestruction
 
         private void FixedUpdate()
         {
-            //update stored fixedDeltatime and ignore timers
+            //Get fixed deltaTime
             fixedDeltatime = Time.fixedDeltaTime;
-            foreach (int impId in impIdsToIgnore.Keys)
-            {
-                impIdsToIgnore.TryGetValue(impId, out float ignoreTime);
-                if (ignoreTime <= 0.0f)
-                {
-                    impIdsToIgnore.TryRemove(impId, out _);
-                    continue;
-                }
 
-                impIdsToIgnore.TryUpdate(impId, ignoreTime - fixedDeltatime, ignoreTime);
+            //Update ignored ids
+            if (impIdsToIgnore.Count > 0)
+            {
+                //This feels extremely overcomplicated and slow, but everything else I have tried causes collection was modified error
+                //Get keys to update or remove
+                HashSet<int> keysToRemove = new();
+                List<int> keysToUpdate = new();
+                List<IgnoredImpIdData> updatedData = new();
+                
+                foreach (var kvp in impIdsToIgnore)
+                {
+                    var impId = kvp.Key;
+                    var ignoreData = kvp.Value;
+                
+                    if (ignoreData.timeLeft <= 0.0f)
+                    {
+                        keysToRemove.Add(impId);
+                    }
+                    else
+                    {
+                        ignoreData.timeLeft -= fixedDeltatime;
+                        keysToUpdate.Add(impId);
+                        updatedData.Add(ignoreData);
+                    }
+                }
+                
+                //Remove keys
+                foreach (var key in keysToRemove)
+                {
+                    impIdsToIgnore.Remove(key);
+                }
+                
+                //Update keys
+                for (int i = 0; i < keysToUpdate.Count; i++)
+                {
+                    impIdsToIgnore[keysToUpdate[i]] = updatedData[i];
+                }
             }
 
             //end get rb velocities
@@ -573,7 +601,14 @@ namespace Zombie1111_uDestruction
         }
 
         private float fixedDeltatime = 0.01f;
-        private ConcurrentDictionary<int, float> impIdsToIgnore = new();
+        private Dictionary<int, IgnoredImpIdData> impIdsToIgnore = new();
+        private readonly object toIgnoreLock = new();
+
+        private class IgnoredImpIdData
+        {
+            public float timeLeft;
+            public Vector3 velDir;
+        }
 
         private class ImpPair
         {
@@ -679,7 +714,8 @@ namespace Zombie1111_uDestruction
 
                 //Multiply normlized impact forces with highest impact force, Because we want more impact points to result in less force at each impact point
                 bool somethingLikelyBreaks = false;
-                
+                float transCap = 0.0f;
+
                 for (int i = 0; i < iPair.impPoints.Count; i++)
                 {
                     var desP = iPair.impPoints[i];
@@ -689,10 +725,11 @@ namespace Zombie1111_uDestruction
                     //Ignore collisions if part most likely will break
                     if (somethingLikelyBreaks == true) continue;
 
-                    pair = pairs[iPair.impPairsI[i]];
-                    if (iPair.impFrac.GuessIfForceCauseBreaking(desP.force, desP.partI, pair.GetBounciness(0)) == true)
+                    var tempPair = pairs[iPair.impPairsI[i]];
+                    if (iPair.impFrac.GuessIfForceCauseBreaking(desP.force, desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
                     {
                         somethingLikelyBreaks = true;
+                        Debug.Log("Breaks yes " + somethingLikelyBreaks);
 
                         foreach (int pI in iPair.impPairsI)
                         {
@@ -702,10 +739,31 @@ namespace Zombie1111_uDestruction
                             }
                         }
                     }
+
+                    if (thisTransCap > transCap) transCap = thisTransCap;
                 }
 
+                //Debug.Log("Breaks? " + somethingLikelyBreaks + " force " + maxImpF);
+
                 //if no impact is likely to cause breaking, mark contacts between source and frac to be ignored the next few physics frames
-                if (somethingLikelyBreaks == false) impIdsToIgnore.TryAdd(impId, 0.1f);
+                if (somethingLikelyBreaks == false)
+                {
+                    //Add to ids to ignore
+                    lock (toIgnoreLock)
+                    {
+                        impIdsToIgnore.TryAdd(impId, new() { timeLeft = 0.1f, velDir = iPair.impVel.normalized });
+                    }
+
+                    transCap /= iPair.impPairsI.Count;
+
+                    foreach (int pI in iPair.impPairsI)
+                    {
+                        for (int conI = 0; conI < pairs[pI].contactCount; conI++)
+                        {
+                            pairs[pI].SetMaxImpulse(conI, transCap);
+                        }
+                    }
+                }
 
                 //notify destructable object about impact
                 iPair.impFrac.RegisterImpact(new()
@@ -713,7 +771,6 @@ namespace Zombie1111_uDestruction
                     impForceTotal = maxImpF,
                     impVel = iPair.impVel,
                     parentI = iPair.impFrac.jCDW_job.partsParentI[iPair.impPoints[maxImpI].partI],
-                    sourceRbVirtualMass = iPair.sourceRbVirtualMass
                 }, iPair.impPoints.ToNativeArray(Allocator.Persistent), iPair.sourceRb, impId, false);
             }
 
@@ -811,9 +868,9 @@ namespace Zombie1111_uDestruction
                     if (fracD_a != null)
                     {
                         //if rbA caused imp, use self
-                        if (rbA_causedImp == true) rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReductionSelf),
+                        if (rbA_causedImp == true) rbForceVel = FracHelpFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReductionSelf),
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReductionSelf));
-                        else rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReduction),
+                        else rbForceVel = FracHelpFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReduction),
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
                         
                         float rbA_forceApplied = Mathf.Min(
@@ -827,9 +884,9 @@ namespace Zombie1111_uDestruction
                     if (fracD_b != null)
                     {
                         //if rbA caused imp, use self
-                        if (rbB_causedImp == true) rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReductionSelf),
+                        if (rbB_causedImp == true) rbForceVel = FracHelpFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReductionSelf),
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReductionSelf));
-                        else rbForceVel = FractureHelperFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReduction),
+                        else rbForceVel = FracHelpFunc.GetRelativeVelocity(rbA_vel * Mathf.Clamp01(norrDiffA + FracGlobalSettings.normalInfluenceReduction),
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
 
                         float rbB_forceApplied = Mathf.Min(
@@ -848,7 +905,7 @@ namespace Zombie1111_uDestruction
 
                 if (rbInstancIdToJgrvIndex.TryGetValue(bodyId, out rbI) == true)
                 {
-                    rbVel = FractureHelperFunc.GetObjectVelocityAtPoint(
+                    rbVel = FracHelpFunc.GetObjectVelocityAtPoint(
                             jGRV_job.rb_posData[rbI].rbWToLPrev,
                             jGRV_job.rb_posData[rbI].rbLToWNow,
                             impPos, fixedDeltatime
@@ -878,18 +935,23 @@ namespace Zombie1111_uDestruction
                 //Ignore impact if too weak
                 if (forceApplied < FracGlobalSettings.minimumImpactForce) return;
 
-                //Potential issue cause, feels like they can get mixed when two destructable objects collide
-                ////return if no parent
-                //if (fracD.fracThis.jCDW_job.partsParentI[fracD.partIndex] < 0) return;
-
-                //get or create impPair
-                //int thisImpId = pair.bodyInstanceID + pair.otherBodyInstanceID + fracD.fracThis.fracInstanceId;
+                //Get impact id
                 tempInputIds[0] = pair.bodyInstanceID;
                 tempInputIds[1] = pair.otherBodyInstanceID;
                 tempInputIds[2] = fracD.fracThis.fracInstanceId;
-                int thisImpId = FractureHelperFunc.GetHashFromInts(ref tempInputIds);
-                if (impIdsToIgnore.ContainsKey(thisImpId) == true) return;//return if imp should be ignored
+                int thisImpId = FracHelpFuncBurst.GetHashFromInts(ref tempInputIds);
 
+                //Get if id is ignored
+                lock (toIgnoreLock)
+                {
+                    if (impIdsToIgnore.TryGetValue(thisImpId, out IgnoredImpIdData ignoreData) == true)
+                    {
+                        impactVel = ignoreData.velDir * impactVel.magnitude;
+                    }
+                }
+                //if (impIdsToIgnore.ContainsKey(thisImpId) == true) return;//return if imp should be ignored
+
+                //Get impact from dictorary
                 Debug.DrawLine(impPos, impPos + impactVel, Color.red, 0.1f);
                 if (impIdToImpPair.TryGetValue(thisImpId, out ImpPair impPair) == false)
                 {
@@ -908,6 +970,7 @@ namespace Zombie1111_uDestruction
                     };
                 }
 
+                //Modify impact data
                 if (impPair.impVel.sqrMagnitude < impactVel.sqrMagnitude) impPair.impVel = impactVel;
                 impPair.impPoints.Add(new() { partI = fracD.partIndex, force = forceApplied, impPosW = impPos } );//partIndex some times does not have a parent, wtf??
                 impPair.impPairsI.Add(pairI);

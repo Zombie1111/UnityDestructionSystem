@@ -29,7 +29,12 @@ namespace TrueTrace
         private float totalRun = 1.0f;
         private bool StopMovement = true;
         private bool IsPressingT = false;
+#if UNITY_2023_1_OR_NEWER
+        public PhysicsMaterial phyMat;
+#else
         public PhysicMaterial phyMat;
+#endif
+
         //private bool IsLocked = true;
 
         private FractureGlobalHandler globalF;
@@ -77,7 +82,11 @@ namespace TrueTrace
                 newO.transform.position = plPos;
                 Rigidbody rb = newO.AddComponent<Rigidbody>();
                 rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+#if UNITY_2023_1_OR_NEWER
+                rb.linearVelocity = plDir * 20.0f;
+#else
                 rb.velocity = plDir * 20.0f;
+#endif
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
                 rb.mass = 1.0f;
                 debugRb = rb;
