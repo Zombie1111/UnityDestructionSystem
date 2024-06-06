@@ -25,8 +25,6 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN NativeArray WILL BE MODIFIED!
         /// </summary>
-        /// <param name="inputInts"></param>
-        /// <returns></returns>
 #if !FRAC_NO_BURST
         [BurstCompile]
 #endif
@@ -71,6 +69,25 @@ namespace Zombie1111_uDestruction
 
     public static class FracHelpFunc
     {
+        /// <summary>
+        /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN Array WILL BE MODIFIED!
+        /// </summary>
+        public static int GetHashFromInts(ref int[] inputInts)
+        {
+            Array.Sort(inputInts);
+
+            unchecked
+            {
+                int hash = 17;
+                foreach (int inputInt in inputInts)
+                {
+                    hash = hash * 31 + inputInt.GetHashCode();
+                }
+
+                return hash;
+            }
+        }
+
         /// <summary>
         /// Returns how much the given point has moved in the last second between objWToLPrev and objLToWNow
         /// </summary>
