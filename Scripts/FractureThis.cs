@@ -3629,6 +3629,15 @@ namespace Zombie1111_uDestruction
                 computeDestructionSolver.SetBuffer(cpKernelId_ComputeSkinDef, "defPoints", buf_defPoints);
             }
 
+            //defPoints can somehow sometimes contain nan values, lazy fix
+            for (int i = jCDW_job.defPoints.Length - 1; i >= 0; i--)
+            {
+                var defP = jCDW_job.defPoints[i];
+                if (FracHelpFunc.IsVectorValid(defP.defVel) == true && FracHelpFunc.IsVectorValid(defP.defPos) == true) continue;
+
+                jCDW_job.defPoints.RemoveAtSwapBack(i);
+            }
+
             buf_defPoints.SetData(jCDW_job.defPoints.AsArray());
             computeDestructionSolver.SetInt("defPointsLenght", jCDW_job.defPoints.Length);
             computeDestructionSolver.SetFloat("defBendForce", jCDW_job.defBendForce.Value);
@@ -3885,6 +3894,7 @@ namespace Zombie1111_uDestruction
                             _defOffsetW[pI] += newOffset;
                         }
 
+                        Debug.Log(oVel);
                         defPoint.defVel = oVel;
                         _defPoints[opI] = defPoint;
                     }
@@ -4210,6 +4220,7 @@ namespace Zombie1111_uDestruction
                             partsVelDir[desPoint.partI] = velDir;
                             partIToLayerI[desPoint.partI] = nextLayerI;
                             totForceOgklk += desPoint.force;
+                            Debug.Log(desSource.impVel);
                             _defPoints.Add(new()
                             {
                                 defPos = desPoint.impPosW,
