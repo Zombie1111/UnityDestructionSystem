@@ -66,6 +66,10 @@ namespace Zombie1111_uDestruction
             public List<short> saved_parentPartCount = new();
             public int[] saved_partIToDesMatI = new int[0];
 
+            public int[] saved_partsLocalParentPath = new int[0];
+            public int[] saved_localPathToRbIndex_keys = new int[0];
+            public int[] saved_localPathToRbIndex_values = new int[0];
+
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
             public VecArray[] sMesh_colsVers = null;
@@ -221,6 +225,9 @@ namespace Zombie1111_uDestruction
 
             fracSavedData.saved_fr_verToPartI = saveFrom.fr_verToPartI.ToList();
 
+            fracSavedData.saved_partsLocalParentPath = saveFrom.partsLocalParentPath.ToArray();
+            FracHelpFunc.DictoraryToArrays<int, int>(saveFrom.localPathToRbIndex, out fracSavedData.saved_localPathToRbIndex_keys, out fracSavedData.saved_localPathToRbIndex_values);
+
             //save mesh stuff if prefab
             if (saveFrom.fracPrefabType > 0)
             {
@@ -345,6 +352,11 @@ namespace Zombie1111_uDestruction
                     };
                 }
             }
+
+            //load local paths
+            loadTo.partsLocalParentPath = fracSavedData.saved_partsLocalParentPath.ToList();
+            loadTo.localPathToRbIndex = FracHelpFunc.CreateDictionaryFromArrays<int, int>(fracSavedData.saved_localPathToRbIndex_keys, fracSavedData.saved_localPathToRbIndex_values);
+            Debug.Log(loadTo.localPathToRbIndex.Count);
 
             //restore fr_[] variabels from fracRend mesh
             Mesh fracRendMesh = loadTo.fracFilter.sharedMesh;

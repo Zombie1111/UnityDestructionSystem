@@ -6,10 +6,7 @@ using System.Threading.Tasks;
 using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Burst;
-using UnityEngine.UIElements;
-using Unity.Properties;
-
-
+using g3;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -237,16 +234,26 @@ namespace Zombie1111_uDestruction
 
         public static float Volume(this Mesh mesh)
         {
-            float volume = 0;
+            float volume = 0.0f;
             Vector3[] vertices = mesh.vertices;
             int[] triangles = mesh.triangles;
-            for (int i = 0; i < triangles.Length; i += 3)
+            object lockObject = new();
+
+            Parallel.For(0, triangles.Length / 3, i =>
             {
-                var p1 = vertices[triangles[i + 0]];
-                var p2 = vertices[triangles[i + 1]];
-                var p3 = vertices[triangles[i + 2]];
-                volume += SignedVolumeOfTriangle(p1, p2, p3);
-            }
+                int index = i * 3;
+                var p1 = vertices[triangles[index + 0]];
+                var p2 = vertices[triangles[index + 1]];
+                var p3 = vertices[triangles[index + 2]];
+                float signedVolume = SignedVolumeOfTriangle(p1, p2, p3);
+                if (signedVolume < 0.0f) signedVolume *= -1.0f;
+
+                lock (lockObject)
+                {
+                    volume += signedVolume;
+                }
+            });
+
             return Mathf.Abs(volume);
         }
 
@@ -1793,27 +1800,93 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns a float for each mesh that is each mesh size compared to each other. All floats added = 1.0f
+        /// Returns a float for each mesh that is each mesh rough size compared to each other. All floats added = 1.0f
         /// </summary>
-        /// <param name="useMeshBounds">If true, Mesh.bounds is used to get scales (Much faster)</param>
-        public static List<float> GetPerMeshScale(Mesh[] meshes, bool useMeshBounds = true)
+        /// <param name="getAccurateScales">If true, a more accurate but much slower algorythm will be used</param>
+        public static float[] GetPerMeshScale(Mesh[] meshes, bool getAccurateScales = true)
         {
-            List<float> meshVolumes = new();
+            int lengt = meshes.Length;
+            float[] meshVolumes = new float[lengt];
             float totalVolume = 0.0f;
-            for (int i = 0; i < meshes.Length; i += 1)
+
+            for (int i = 0; i < lengt; i++)
             {
-                if (useMeshBounds == false) meshVolumes.Add(meshes[i].Volume());
-                else meshVolumes.Add(GetBoundingBoxVolume(meshes[i].bounds));
+                //if (getAccurateScales == true) meshVolumes[i] = GetAccuratePointsVolume(meshes[i].vertices);
+                if (getAccurateScales == true)
+                {
+                    //meshVolumes[i] = (GetBoundingBoxVolume(meshes[i].bounds) + meshes[i].Volume()) / 2.0f;
+                    meshVolumes[i] = meshes[i].Volume();
+                }
+                else meshVolumes[i] = GetBoundingBoxVolume(meshes[i].bounds);
                 totalVolume += meshVolumes[i];
             }
 
             float perMCost = 1.0f / totalVolume;
-            for (int i = 0; i < meshes.Length; i += 1)
+            for (int i = 0; i < lengt; i++)
             {
                 meshVolumes[i] = perMCost * meshVolumes[i];
             }
 
             return meshVolumes;
+        }
+
+        /// <summary>
+        /// Generates a oriented bounding box containing the given points and then returns its volume
+        /// </summary>
+        public static float GetAccuratePointsVolume(Vector3[] points)
+        {
+            //Convert unity vec3 to g3
+            var points3d = new Vector3d[points.Length];
+            int i = 0;
+
+            foreach (var point in points)
+            {
+                //points3d[i] = point;
+                points3d[i] = point;
+                i++;
+            }
+
+            //Generate oriented bounding box using g3
+            var orientedBoundingBox = new ContOrientedBox3(points3d);
+            //if (orientedBoundingBox.ResultValid == false)//Seems to always be false even when its working
+            //{
+            //    Debug.LogError("Failed to generate oriented bounding box");
+            //    return 0.0f;
+            //}
+
+            var center = (Vector3)orientedBoundingBox.Box.Center;
+
+            var axisX = (Vector3)orientedBoundingBox.Box.AxisX;
+            var axisY = (Vector3)orientedBoundingBox.Box.AxisY;
+            var axisZ = (Vector3)orientedBoundingBox.Box.AxisZ;
+            var extends = (Vector3)orientedBoundingBox.Box.Extent;
+
+            // Now we can simply calculate our 8 vertices of the bounding box
+            var A = center - extends.z * axisZ - extends.x * axisX - axisY * extends.y;
+            var B = center - extends.z * axisZ + extends.x * axisX - axisY * extends.y;
+            var C = center - extends.z * axisZ + extends.x * axisX + axisY * extends.y;
+            var D = center - extends.z * axisZ - extends.x * axisX + axisY * extends.y;
+
+            var E = center + extends.z * axisZ - extends.x * axisX - axisY * extends.y;
+            var F = center + extends.z * axisZ + extends.x * axisX - axisY * extends.y;
+            var G = center + extends.z * axisZ + extends.x * axisX + axisY * extends.y;
+            var H = center + extends.z * axisZ - extends.x * axisX + axisY * extends.y;
+
+            // And finally visualize it
+            Debug.DrawLine(A, B, Color.red, 5.0f, false);
+            Debug.DrawLine(B, C, Color.red, 5.0f, false);
+            Debug.DrawLine(C, D, Color.red, 5.0f, false);
+            Debug.DrawLine(D, A, Color.red, 5.0f, false);
+            Debug.DrawLine(E, F, Color.red, 5.0f, false);
+            Debug.DrawLine(F, G, Color.red, 5.0f, false);
+            Debug.DrawLine(G, H, Color.red, 5.0f, false);
+            Debug.DrawLine(H, E, Color.red, 5.0f, false);
+            Debug.DrawLine(A, E, Color.red, 5.0f, false);
+            Debug.DrawLine(B, F, Color.red, 5.0f, false);
+            Debug.DrawLine(D, H, Color.red, 5.0f, false);
+            Debug.DrawLine(C, G, Color.red, 5.0f, false);
+
+            return (float)orientedBoundingBox.Box.Volume;
         }
 
         /// <summary>
@@ -2732,6 +2805,26 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Sets the world position+rotation+layer of each child in transform A to the same values as the children in transform B
+        /// </summary>
+        /// <param name="A"></param>
+        /// <param name="B"></param>
+        public static void MatchChildTransforms(Transform A, Transform B)
+        {
+            int childCount = Mathf.Min(A.childCount, B.childCount);
+            
+            for (int i = 0; i < childCount; i++)
+            {
+                Transform childA = A.GetChild(i);
+                Transform childB = B.GetChild(i);
+
+                childA.SetPositionAndRotation(childB.position, childB.rotation);
+                childA.gameObject.layer = childB.gameObject.layer;//Is layer really worth the cost, it will only be changed if user has manually assigned a new layer at runtime
+                MatchChildTransforms(childA, childB);
+            }
+        }
+
+        /// <summary>
         /// Assigns each axis of vecA with vecB if the same vecB axis is lower
         /// </summary>
         public static void GetEachAxisMin(ref Vector3 vecA, Vector3 vecB)
@@ -2893,6 +2986,110 @@ namespace Zombie1111_uDestruction
             Debug.DrawLine(corners[1], corners[5], color, duration, doOcclusion);
             Debug.DrawLine(corners[2], corners[6], color, duration, doOcclusion);
             Debug.DrawLine(corners[3], corners[7], color, duration, doOcclusion);
+        }
+
+        public static Rigidbody CopyRigidbody(Rigidbody source, GameObject destination)
+        {
+            Rigidbody newRb = destination.GetOrAddComponent<Rigidbody>();
+
+            newRb.isKinematic = source.isKinematic;
+            newRb.inertiaTensor = source.inertiaTensor;
+            newRb.includeLayers = source.includeLayers;
+            newRb.useGravity = source.useGravity;
+            newRb.interpolation = source.interpolation;
+            newRb.mass = source.mass;
+            newRb.maxAngularVelocity = source.maxAngularVelocity;
+            newRb.maxLinearVelocity = source.maxLinearVelocity;
+            newRb.maxDepenetrationVelocity = source.maxDepenetrationVelocity;
+            newRb.angularDrag = source.angularDrag;
+            newRb.drag = source.drag;
+            newRb.freezeRotation = source.freezeRotation;
+            newRb.constraints = source.constraints;
+            if (newRb.isKinematic == false)
+            {
+                newRb.velocity = source.velocity;
+                newRb.angularVelocity = source.angularVelocity;
+            }
+            newRb.collisionDetectionMode = source.collisionDetectionMode;
+
+            return newRb;
+        }
+
+        public static int EncodeHierarchyPath(Transform child, Transform parent)
+        {
+            if (child == parent) return -1;
+            
+            int path = 0;
+            int shift = 0;
+            Transform current = child;
+
+            while (current != parent)
+            {
+                Transform parentTransform = current.parent;
+                if (parentTransform == null) return -1;
+
+                int index = current.GetSiblingIndex();
+                path |= (index + 1) << shift; // Store index + 1 to avoid issues with 0 index
+                shift += 5; // Assuming a maximum of 32 children, 5 bits are enough (2^5 = 32)
+
+                current = parentTransform;
+            }
+
+            return path;
+        }
+
+        public static Transform DecodeHierarchyPath(Transform parent, int path)
+        {
+            if (path == -1) return parent;
+            
+            Transform current = parent;
+            int shift = 0;
+
+            while (path != 0)
+            {
+                int index = ((path >> shift) & 31) - 1; // Extract 5 bits and subtract 1 to get original index
+                current = current.GetChild(index);
+                path >>= 5;
+            }
+
+            return current;
+        }
+
+        /// <summary>
+        /// Returns a dictorary that uses the given keys array as keys and values array is values (Must have same lenght)
+        /// </summary>
+        public static Dictionary<T1, T2> CreateDictionaryFromArrays<T1, T2>(T1[] keys, T2[] values)
+        {
+            if (keys.Length != values.Length)
+            {
+                throw new ArgumentException("Both arrays must have the same length.");
+            }
+
+            Dictionary<T1, T2> dictionary = new Dictionary<T1, T2>();
+
+            for (int i = 0; i < keys.Length; i++)
+            {
+                dictionary[keys[i]] = values[i];
+            }
+
+            return dictionary;
+        }
+
+        /// <summary>
+        /// Returns two arrays, one with the keys and one with the values from the dictorary
+        /// </summary>
+        public static void DictoraryToArrays<TKey, TValue>(Dictionary<TKey, TValue> dictionary, out TKey[] keys, out TValue[] values)
+        {
+            keys = new TKey[dictionary.Count];
+            values = new TValue[dictionary.Count];
+
+            int index = 0;
+            foreach (var kvp in dictionary)
+            {
+                keys[index] = kvp.Key;
+                values[index] = kvp.Value;
+                index++;
+            }
         }
 
         public static Joint CopyJoint(Joint source, GameObject destination, Rigidbody connectedBody, Vector3 anchorPosition)

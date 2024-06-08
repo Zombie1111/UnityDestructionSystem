@@ -643,6 +643,7 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public Rigidbody sourceRb;
             public float thisRbDesMassDiff;
+            public int thisRbI;
 
             /// <summary>
             /// impPairsI[X] is the contactPair index impPoints[X] was created from
@@ -784,7 +785,7 @@ namespace Zombie1111_uDestruction
                     impForceTotal = maxImpF,
                     impVel = iPair.impVel,
                     parentI = iPair.impFrac.jCDW_job.partsParentI[iPair.impPoints[maxImpI].partI],
-                }, iPair.impPoints.ToNativeArray(Allocator.Persistent), iPair.sourceRb, impId, false);
+                }, iPair.impPoints.ToNativeArray(Allocator.Persistent), iPair.thisRbI, iPair.sourceRb, impId, false);
             }
 
             void CalcImpPair()
@@ -980,7 +981,8 @@ namespace Zombie1111_uDestruction
                         impPairsI = new(),
                         impVel = Vector3.zero,
                         sourceRb = otherRbI < 0 ? null : sourceRbData.rb,
-                        thisRbDesMassDiff = thisRbI < 0 ? 1.0f : (thisRbData.rbMass / thisRbData.desMass)
+                        thisRbDesMassDiff = thisRbI < 0 ? 1.0f : (thisRbData.rbMass / thisRbData.desMass),
+                        thisRbI = thisRbI
                     };
                 }
 
