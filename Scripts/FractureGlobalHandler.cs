@@ -738,25 +738,26 @@ namespace Zombie1111_uDestruction
                     if (iPair.impFrac.GuessIfForceCauseBreaking(desP.force, desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
                     {
                         somethingLikelyBreaks = true;
-                        Debug.Log("Breaks yes " + somethingLikelyBreaks);
 
                         //thisTransCap *= iPair.thisRbDesMassDiff;
                         //thisTransCap /= iPair.impPairsI.Count;
 
                         foreach (int pI in iPair.impPairsI)
                         {
+                            Debug.Log("PairI true " + pI);
+
                             for (int conI = 0; conI < pairs[pI].contactCount; conI++)
                             {
                                 //pairs[pI].SetMaxImpulse(conI, thisTransCap / pairs[pI].contactCount);
-                                pairs[pI].IgnoreContact(conI);
+                                pairs[pI].SetMaxImpulse(conI, 0.0f);
                             }
                         }
                     }
 
                     if (thisTransCap > transCap) transCap = thisTransCap;
                 }
-                
-                //Debug.Log("Breaks? " + somethingLikelyBreaks + " force " + maxImpF);
+
+                Debug.Log("Breaks? " + somethingLikelyBreaks + " force " + maxImpF + " rbI " + iPair.thisRbI);
 
                 //if no impact is likely to cause breaking, mark contacts between source and frac to be ignored the next few physics frames
                 if (somethingLikelyBreaks == false)
@@ -772,9 +773,13 @@ namespace Zombie1111_uDestruction
 
                     foreach (int pI in iPair.impPairsI)
                     {
+                        float maxImpulse = transCap / pairs[pI].contactCount;
+                        if (pairs[pI].GetMaxImpulse(0) < maxImpulse) continue;
+                        Debug.Log("PairI false " + pI);
+
                         for (int conI = 0; conI < pairs[pI].contactCount; conI++)
                         {
-                            pairs[pI].SetMaxImpulse(conI, transCap / pairs[pI].contactCount);
+                            pairs[pI].SetMaxImpulse(conI, maxImpulse);
                         }
                     }
                 }

@@ -2138,20 +2138,35 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Sets newMesh uvs+submeshes from the best sourceMesh uvs+submeshes, the returned list is what source subMesh every new subMesh reprisent
         /// </summary>
-        public static List<int> SetMeshFromOther(ref Mesh newMesh, Mesh sourceMesh, int[] nVersBestSVer, int[] nTrisBestSTri, int[] sTrisSubMeshI, bool setUvs = true)
+        public static List<int> SetMeshFromOther(ref Mesh newMesh, Mesh sourceMesh, int[] nVersBestSVer, int[] nTrisBestSTri, int[] sTrisSubMeshI, bool setUvs = true, Color[] sourceVColors = null)
         {
             //set uvs
+            int newVCount = newMesh.vertexCount;
+
             if (setUvs == true)
             {
                 Vector2[] sUvs = sourceMesh.uv;
-                Vector2[] nUvs = new Vector2[newMesh.vertexCount];
+                Vector2[] nUvs = new Vector2[newVCount];
 
-                for (int nvI = 0; nvI < nUvs.Length; nvI++)
+                for (int nvI = 0; nvI < newVCount; nvI++)
                 {
                     nUvs[nvI] = sUvs[nVersBestSVer[nvI]];
                 }
 
                 newMesh.uv = nUvs;
+            }
+
+            //set colors
+            if (sourceVColors != null && sourceVColors.Length == newVCount)
+            {
+                Color[] nCols = new Color[newVCount];
+
+                for (int nvI = 0; nvI < newVCount; nvI++)
+                {
+                    nCols[nvI] = sourceVColors[nVersBestSVer[nvI]];
+                }
+
+                newMesh.colors = nCols;
             }
 
             //set boneWeights

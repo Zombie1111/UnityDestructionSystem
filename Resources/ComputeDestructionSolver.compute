@@ -119,8 +119,16 @@ RWStructuredBuffer<int> partIToBendPropI;
 RWStructuredBuffer<int> partIToParentI; //The parent part X has
 
 #pragma kernel ComputeSkinDef
-#define VERTEX_32BIT_STRIDE 6 // float3 position, float3 normal, 
+#if defined(SUPPORTVERTEXCOLORS)
+#define VERTEX_32BIT_STRIDE 10 // float3 position, float3 normal, float4 color
+#define SUPPORTVERTEXCOLORS_ON 1
+#else
+#define VERTEX_32BIT_STRIDE 6 // float3 position, float3 normal 
+#define SUPPORTVERTEXCOLORS_ON 0
+#endif
+
 #define NORMAL_OFFSET 3 // float3 position, 
+#define COLOR_OFFSET 6 // float3 position, float3 normal
 
 RWByteAddressBuffer verNors;
 
@@ -131,8 +139,7 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     if (id.x >= (uint)fracRendVerCount) return;
     
     //get skin bone matrix
-    BoneWeight
-        boneWeight = fr_boneWeightsCurrent[id.x];
+    BoneWeight boneWeight = fr_boneWeightsCurrent[id.x];
     float4x4 boneMatrixLToW = allFracBonesLToW[boneWeight.boneIndex0] * boneWeight.weight0 +
         allFracBonesLToW[boneWeight.boneIndex1] * boneWeight.weight1 +
         allFracBonesLToW[boneWeight.boneIndex2] * boneWeight.weight2 +
@@ -146,20 +153,33 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
         float3 offsetW = float3(0.0f, 0.0f, 0.0f);
         int parentI = partIToParentI[meshD.verToPartI];
         BendProperties bendProp = bendProperties[partIToBendPropI[meshD.verToPartI]];
+        float bendStrenght = bendProp.bendStrenght;
+        float bendForce = defBendForce > bendStrenght ? bendStrenght : defBendForce;
+        
+        #if SUPPORTVERTEXCOLORS_ON
+        float vColA = defBendForce;
+        #endif
         
         for (int dpI = 0; dpI < defPointsLenght; dpI++)
         {
             DefPoint defPoint = defPoints[dpI];
         
             if (defPoint.parentI != parentI) continue;
-            
-            float bendStrenght = bendProp.bendStrenght;
-            float bendForce = defBendForce > bendStrenght ? bendStrenght : defBendForce;
-            
+                        
             float3 disVel = mul(boneMatrixLToW, float4(meshD.vertexL, 1.0)).xyz - defPoint.defPos;
             float falloffX = sqrt(dot(disVel, disVel)) * bendProp.bendFalloff;
             falloffX += falloffX * (falloffX * bendProp.bendPower);
-            if (falloffX > bendForce) continue;
+            
+            #if SUPPORTVERTEXCOLORS_ON
+            if (falloffX > defBendForce)
+                continue;
+            
+            if (falloffX < vColA)
+                vColA = falloffX;
+            #endif
+            
+            if (falloffX > bendForce)
+                continue;
 
             offsetW += bendProp.bendyness * clamp((bendForce - falloffX) / (bendStrenght * sqrt(dot(defPoint.defVel, defPoint.defVel))), 0.0f, 1.0f) * defPoint.defVel;
         }
@@ -167,35 +187,25 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
         meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), offsetW);
         //meshD.normalL is currently not deformed, we probably also need mesh triangels to be able to calculate new normal??
         fr_meshData[id.x] = meshD;
-    }
 
-    //int requiredParentI = structs_parentI[meshD.verToPartI];
-    //
-    //if (requiredParentI >= 0)
-    //{
-    //    //get current and prev offset pos
-    //    float3 cPosW = float3(0.0f, 0.0f, 0.0f);
-    //    float3 pPosW = float3(0.0f, 0.0f, 0.0f);
-    //    int nearPartI;
-    //    FracWeight verFW = desWeights[meshD.fracWeightI];
-    //    
-    //    for (int i = 0; i < verFW.stWe_lenght; i++)
-    //    {
-    //        nearPartI = verFW.structsI[i];
-    //        if (structs_parentI[nearPartI] != requiredParentI) continue;
-    //        
-    //        cPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posL[nearPartI], 1.0f)).xyz * verFW.weights[i];
-    //        pPosW += mul(allFracBonesLToW[nearPartI + partBoneOffset], float4(structs_posLPrev[nearPartI], 1.0f)).xyz * verFW.weights[i];
-    //    }
-    //    
-    //    meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), cPosW - pPosW);
-    //    fr_meshData[id.x] = meshD;
-    //}
+        #if SUPPORTVERTEXCOLORS_ON
+        //Apply vertex colors
+        vColA /= defBendForce;
+        vColA = 1.0f - vColA;
+        vColA *= bendForce / bendStrenght;
+        
+        float4 oldVCol = asfloat(verNors.Load4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2));
+        //if (vColA > oldVCol.a)
+        //    verNors.Store4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2, asuint(float4(oldVCol.rgb, vColA)));
+        if (vColA > oldVCol.a * 0.25f)
+            verNors.Store4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2, asuint(float4(oldVCol.rgb, clamp((oldVCol.a * 0.75f) + vColA, 0.0f, 1.0f))));
+        #endif
+    }
     
     //Write updated vertics and normals to mesh
+    //Add an option to do interpolation
     verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
     verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
-    //verNors.Store2(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET + NORMAL_OFFSET) << 2, float2(0.0, 0.0));
 }
 
 RWStructuredBuffer<MeshData> og_frMeshData; //The MeshData values we had at start

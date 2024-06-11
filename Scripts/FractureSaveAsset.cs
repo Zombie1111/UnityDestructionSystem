@@ -364,6 +364,9 @@ namespace Zombie1111_uDestruction
             loadTo.fr_verticesL = fracRendMesh.vertices.ToList();
             loadTo.fr_normalsL = fracRendMesh.normals.ToList();
             loadTo.fr_uvs = fracRendMesh.uv.ToList();
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            loadTo.fr_colors = fracRendMesh.colors.ToList();
+#endif
             loadTo.fr_boneWeights = fracSavedData.saved_nonSkinnedBoneWe.ToList();
             loadTo.fr_boneWeightsSkin = fracSavedData.saved_rendMesh.sMesh_boneWeights.ToList();
             loadTo.fr_bindPoses = fracSavedData.saved_rendMesh.sMesh_bindposes.ToList();

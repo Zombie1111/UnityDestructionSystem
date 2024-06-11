@@ -68,6 +68,22 @@ namespace Zombie1111_uDestruction
                     }
 
                     EditorGUILayout.Space();
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("saveState"), true);
+
+                    if (yourScript.saveState != null && Application.isPlaying == true)
+                    {
+                        if (GUILayout.Button("Save State"))
+                        {
+                            yourScript.saveState.Save(yourScript);
+                        }
+
+                        if (GUILayout.Button("Load State"))
+                        {
+                            yourScript.saveState.Load(yourScript);
+                        }
+                    }
+
+                    EditorGUILayout.Space();
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("debugMode"), true);
 
                     if (Application.isPlaying == true)
@@ -76,7 +92,7 @@ namespace Zombie1111_uDestruction
                         EditorGUILayout.PropertyField(serializedObject.FindProperty("repairSpeed"), true);
 
                         EditorGUILayout.Space();
-                        EditorGUILayout.HelpBox("Modifying destructionMaterials at runtime may cause issues and should only be used to temporarly test different values", MessageType.Warning);
+                        EditorGUILayout.HelpBox("Modifying destructionMaterials at runtime is not supported and should only be used in editor to temporarly test different values", MessageType.Warning);
                         EditorGUILayout.PropertyField(serializedObject.FindProperty("destructionMaterials"), true);
                     }
 
@@ -1363,6 +1379,12 @@ namespace Zombie1111_uDestruction
         [System.NonSerialized] public List<Vector3> fr_normalsL;
         [System.NonSerialized] public List<int> fr_verToPartI;
         [System.NonSerialized] public List<Vector2> fr_uvs;
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+        /// <summary>
+        /// The vertex colors the mesh has, does not exist if FRAC_NO_VERTEXCOLORSUPPORT is defined
+        /// </summary>
+        [System.NonSerialized] public List<Color> fr_colors;
+#endif
         [System.NonSerialized] public List<BoneWeight> fr_boneWeights;
         [System.NonSerialized] public List<BoneWeight> fr_boneWeightsSkin;
         [System.NonSerialized] public List<BoneWeight> fr_boneWeightsCurrent;
@@ -1403,6 +1425,9 @@ namespace Zombie1111_uDestruction
             fr_verToPartI = new();
             fr_normalsL = new();
             fr_uvs = new();
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            fr_colors = new();
+#endif
             fr_boneWeights = new();
             fr_boneWeightsSkin = new();
             fr_boneWeightsCurrent = new();
@@ -1526,7 +1551,7 @@ namespace Zombie1111_uDestruction
         }
 
         private ComputeBuffer buf_boneBindsLToW;
-        private ComputeBuffer buf_meshData;
+        [System.NonSerialized] public ComputeBuffer buf_meshData;
         private ComputeBuffer buf_fr_boneWeightsCurrent;
         private ComputeBuffer buf_partIToParentI;
         private ComputeBuffer buf_bendProperties;
@@ -1540,7 +1565,8 @@ namespace Zombie1111_uDestruction
             public static int verNors = Shader.PropertyToID("verNors");
         }
 
-        private struct MeshData
+        [System.Serializable]
+        public struct MeshData
         {
             public Vector3 vertexL;
             public Vector3 normalL;
@@ -1580,6 +1606,9 @@ namespace Zombie1111_uDestruction
             fracFilter.sharedMesh.SetVertices(fr_verticesL, 0, fr_verticesL.Count, MeshUpdateFlags.DontValidateIndices);
             fracFilter.sharedMesh.SetNormals(fr_normalsL, 0, fr_normalsL.Count, MeshUpdateFlags.DontValidateIndices);
             fracFilter.sharedMesh.SetUVs(0, fr_uvs, 0, fr_uvs.Count, MeshUpdateFlags.DontValidateIndices);
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            fracFilter.sharedMesh.SetColors(fr_colors, 0, fr_colors.Count, MeshUpdateFlags.DontValidateIndices);
+#endif
             FracHelpFunc.SetListLenght(ref skinnedVerticsW, fr_verticesL.Count);
 
             //set rend submeshes
@@ -1668,12 +1697,15 @@ namespace Zombie1111_uDestruction
                     fracRendDividedVerCount = Mathf.CeilToInt(fr_verticesL.Count / 128.0f);
                     computeDestructionSolver.SetInt("fracRendVerCount", fr_verticesL.Count);
                     mesh.vertexBufferTarget |= GraphicsBuffer.Target.Raw;
-                    
+
                     mesh.SetVertexBufferParams(
                         vertexCount: mesh.vertexCount,
                         new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, 0),
                         new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, 0),
                         new VertexAttributeDescriptor(VertexAttribute.Tangent, VertexAttributeFormat.Float32, 4, 1),
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+                        new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, 0),
+#endif
                         new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, 1)
                     );
 
@@ -1725,7 +1757,16 @@ namespace Zombie1111_uDestruction
 
             //get fObject materials
             FracHelpFunc.GetMostSimilarTris(fObj.meshW, fMesh.sourceM.meshW, out int[] nVersBestSVer, out int[] nTrisBestSTri, FracGlobalSettings.worldScale);
-            List<int> nSubSSubI = FracHelpFunc.SetMeshFromOther(ref fObj.meshW, fMesh.sourceM.meshW, nVersBestSVer, nTrisBestSTri, fMesh.sourceM.trisSubMeshI, false);
+            List<int> nSubSSubI = FracHelpFunc.SetMeshFromOther(
+                ref fObj.meshW,
+                fMesh.sourceM.meshW,
+                nVersBestSVer, nTrisBestSTri,
+                fMesh.sourceM.trisSubMeshI,
+                false
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+                , destructionVisualMesh.TryGetVisualVertexColors(fMesh.sourceM.sRend, fMesh.sourceM.meshW.vertexCount)
+#endif
+                );
 
             fObj.mMaterials = new();
             for (int nsI = 0; nsI < nSubSSubI.Count; nsI++)
@@ -1813,9 +1854,6 @@ namespace Zombie1111_uDestruction
 
             //get global data
             DestructionMaterial partGroupD;
-            //if (fObj.meshW.bounds.extents.x > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.x;
-            //if (fObj.meshW.bounds.extents.y > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.y;
-            //if (fObj.meshW.bounds.extents.z > partMaxExtent) partMaxExtent = fObj.meshW.bounds.extents.z;
 
             //create fracPart and assign variabels
             FracPart newPart = new()
@@ -1907,6 +1945,11 @@ namespace Zombie1111_uDestruction
             fr_normalsL.AddRange(FracHelpFunc.ConvertDirectionsWithMatrix(fObj.meshW.normals, rendWtoL));
             fr_verToPartI.AddRange(Enumerable.Repeat((int)newPartI, fObj.meshW.vertexCount));
             fr_uvs.AddRange(fObj.meshW.uv);
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            Color[] meshCols = fObj.meshW.colors;
+            if (meshCols.Length != fObjMeshWVerts.Length) meshCols = new Color[fObjMeshWVerts.Length];
+            fr_colors.AddRange(meshCols);
+#endif
 
             if (jGTD_fracBoneTrans.isCreated == true) jGTD_fracBoneTrans.Add(fr_bones[^1]);
 
@@ -2110,7 +2153,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Sets the given parts parent to newParentI, if -1 the part will become lose
         /// </summary>
-        private void SetPartParent(int partI, int newParentI, Vector3 losePartVelocity = default)
+        public void SetPartParent(int partI, int newParentI, Vector3 losePartVelocity = default)
         {
             if (repairIsSetup == true && jGTD_job.repair_partIWannaRestore[partI] == 1) return;//Not allowed to set parent of parts that are currently being repaired
 
@@ -2519,9 +2562,6 @@ namespace Zombie1111_uDestruction
         /// </summary>
         private List<FracMesh> Gen_fractureMeshes(List<FracSource> meshesToFrac, int totalChunkCount, bool dynamicChunkCount, float worldScaleDis = 0.0001f, int seed = -1)
         {
-            //prefracture
-            if (saveState != null && saveState.preS_fracedMeshes != null) return new(saveState.preS_fracedMeshes.ToFracMesh());
-
             //get random seed
             int nextOgMeshId = 0;
 
@@ -2555,13 +2595,6 @@ namespace Zombie1111_uDestruction
             }
 
             //return the result
-            if (saveState != null)
-            {
-                FractureSavedState.PreS_fracedMeshesData savedMeshData = new();
-                savedMeshData.FromFracMesh(fracedMeshes);
-
-                saveState.SavePrefracture(null, savedMeshData);
-            }
 
             return fracedMeshes;
 
@@ -2860,59 +2893,7 @@ namespace Zombie1111_uDestruction
             }
 
             //return result
-            GetIfValidPrefracture();
             return meshesToFrac;
-
-            bool GetIfValidPrefracture()
-            {
-                //return true if has valid prefracture, other wise false
-                if (saveState == null) return false;
-
-                Bounds[] fRendBounds = new Bounds[meshesToFrac.Count];
-                int totalVerCount = 0;
-
-                for (int i = 0; i < meshesToFrac.Count; i++)
-                {
-                    fRendBounds[i] = meshesToFrac[i].sRend.bounds;
-                    totalVerCount += meshesToFrac[i].meshW.vertexCount;
-                }
-
-                FractureSavedState.FloatList[] mdVersList = FractureSavedState.FloatList.FromFloatArray(md_verGroupIds);
-
-                if (saveState.preS_toFracData == null
-                    || saveState.preS_toFracData.fractureCount != fractureCount
-                    || saveState.preS_toFracData.dynamicFractureCount != dynamicFractureCount
-                    || saveState.preS_toFracData.generationQuality != generationQuality
-                    || FractureSavedState.FloatList.IsTwoArraySame(saveState.preS_toFracData.md_verGroupIds, mdVersList) == false
-                    || saveState.preS_toFracData.randomness != randomness
-                    || saveState.preS_toFracData.remeshing != remeshing
-                    || saveState.preS_toFracData.seed != seed
-                    || saveState.preS_toFracData.worldScale != FracGlobalSettings.worldScale
-                    || saveState.preS_toFracData.totalVerCount != totalVerCount
-                    || FracHelpFunc.AreBoundsArrayEqual(saveState.preS_toFracData.toFracRendBounds, fRendBounds) == false)
-                {
-                    //if has saveState but mayor stuff has changed, return false and clear savedPrefracture
-                    saveState.ClearSavedPrefracture();
-
-                    saveState.SavePrefracture(new()
-                    {
-                        dynamicFractureCount = dynamicFractureCount,
-                        worldScale = FracGlobalSettings.worldScale,
-                        seed = seed,
-                        fractureCount = fractureCount,
-                        generationQuality = generationQuality,
-                        md_verGroupIds = mdVersList,
-                        randomness = randomness,
-                        remeshing = remeshing,
-                        toFracRendBounds = fRendBounds,
-                        totalVerCount = totalVerCount
-                    });
-
-                    return false;
-                }
-
-                return true;
-            }
         }
 
         /// <summary>
@@ -2960,47 +2941,6 @@ namespace Zombie1111_uDestruction
             }
 
             return FracHelpFunc.SplitMeshByTrisIds(meshToSplit, trisIds, triIdToGroupId);
-
-            //while (maxLoops > 0)
-            //{
-            //    maxLoops--;
-            //    if (meshToSplit.meshW.vertexCount < 4) break;
-            //
-            //    verCols = meshToSplit.meshW.colors;
-            //    bool useVerCols = verCols.Length == meshToSplit.meshW.vertexCount;
-            //
-            //    if (splitDisconnectedFaces == false && (useGroupIds == false || useVerCols == false))
-            //    {
-            //        splittedMeshes.Add(new() { meshW = meshToSplit.meshW, mGroupId = null, mMats = meshToSplit.sRend.sharedMaterials.ToList() });
-            //
-            //        return splittedMeshes;
-            //    }
-            //
-            //    tempG = useVerCols == true ? FractureHelperFunc.Gd_getIdFromColor(verCols[0]) : null;
-            //    HashSet<int> vertsToSplit;
-            //    
-            //    if (splitDisconnectedFaces == true)
-            //    {
-            //        vertsToSplit = FractureHelperFunc.GetConnectedVertics(meshToSplit.meshW, 0, worldScaleDis);
-            //        if (useVerCols == true) vertsToSplit = FractureHelperFunc.Gd_getSomeVerticesInId(verCols, tempG, vertsToSplit);
-            //    }
-            //    else
-            //    {
-            //        vertsToSplit = FractureHelperFunc.Gd_getAllVerticesInId(verCols, tempG);
-            //    }
-            //
-            //    //Only meshW, mMats and sRend is assigned in meshToSplit
-            //    tempM = FractureHelperFunc.SplitMeshInTwo(vertsToSplit, meshToSplit, doBones);
-            //
-            //    if (tempM == null) return null;
-            //
-            //    if (tempM[0].meshW.vertexCount >= 4) splittedMeshes.Add(new() { meshW = tempM[0].meshW, mGroupId = tempG, mMats = tempM[0].mMats });
-            //    meshToSplit = tempM[1];
-            //}
-            //
-            //if (meshToSplit.meshW.vertexCount >= 4) splittedMeshes.Add(meshToSplit);
-            //
-            //return splittedMeshes;
         }
 
 #endregion GenerateFractureSystem
@@ -3396,9 +3336,9 @@ namespace Zombie1111_uDestruction
 
         private int fracRendDividedVerCount = 1;
         private bool wantToApplyDeformation = false;
-        private bool wantToApplySkinning = false;
+        [System.NonSerialized] public bool wantToApplySkinning = false;
 
-        private void GetTransformData_end()
+        public void GetTransformData_end()
         {
             if (jGTD_jobIsActive == false) return;
 
@@ -3522,8 +3462,8 @@ namespace Zombie1111_uDestruction
         /// <summary>
         ///Contains all parts that has been deformed. (Since we use async readback, we toggle between using [0] and [1], if its currently readingback)
         /// </summary>
-        private HashSet<int>[] des_deformedParts = new HashSet<int>[2];
-        private byte des_deformedPartsIndex = 0;
+        [System.NonSerialized] public HashSet<int>[] des_deformedParts = new HashSet<int>[2];
+        [System.NonSerialized] public byte des_deformedPartsIndex = 0;
         private AsyncGPUReadbackRequest gpuMeshRequest;
         private List<Rigidbody> jCDW_bodies = new();
 
@@ -3531,6 +3471,9 @@ namespace Zombie1111_uDestruction
         {
             public Vector3 pos;
             public Vector3 nor;
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            public Vector4 col;
+#endif
         }
 
         /// <summary>
@@ -3683,7 +3626,7 @@ namespace Zombie1111_uDestruction
             public Vector3 velPos;
         }
 
-        private void ComputeDestruction_end()
+        public void ComputeDestruction_end()
         {
             if (jCDW_jobIsActive == false) return;
 
@@ -4750,7 +4693,7 @@ namespace Zombie1111_uDestruction
         private HashSet<int> parentsThatNeedsUpdating = new();
 
         /// <summary>
-        /// What parent, position... all parts had when it was added to the system
+        /// The path from parent trans to the parent part X should have
         /// </summary>
         [System.NonSerialized] public List<int> partsLocalParentPath = new();
         [System.NonSerialized] public Dictionary<int, int> localPathToRbIndex = new();

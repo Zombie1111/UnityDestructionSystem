@@ -1,8 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Zombie1111_uDestruction;
-
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -12,153 +10,6 @@ namespace Zombie1111_uDestruction
 {
     public class FractureSavedState : ScriptableObject
     {
-
-        [System.Serializable]
-        public class FloatList
-        {
-            [SerializeField] public List<float> floatList = new();
-
-            public static FloatList[] FromFloatArray(List<float>[] arrayOfLists)
-            {
-                FloatList[] resultList = new FloatList[arrayOfLists.Length];
-
-                for (int i = 0; i < arrayOfLists.Length; i++)
-                {
-                    resultList[i] = new FloatList();
-                    if (arrayOfLists[i] == null) resultList[i].floatList = null;
-                    else resultList[i].floatList.AddRange(arrayOfLists[i]);
-                }
-
-                return resultList;
-            }
-
-            public static bool IsTwoArraySame(FloatList[] floatsA, FloatList[] floatsB)
-            {
-                if (floatsA == null || floatsB == null) return floatsA == null && floatsB == null;
-                int fL = floatsA.Length;
-                if (fL != floatsB.Length) return false;
-
-                for (int i = 0; i < fL; i++)
-                {
-                    if (floatsA[i].floatList == null || floatsA[i].floatList.Count == 0)
-                    {
-                        if (floatsB[i].floatList != null && floatsB[i].floatList.Count > 0) return false;
-                        continue;
-                    }
-
-                    for (int ii = 0; ii < floatsA[i].floatList.Count; ii++)
-                    {
-                        if (floatsA[i].floatList[ii] != floatsB[i].floatList[ii]) return false;
-                    }
-                }
-
-                return true;
-            }
-        }
-
-        //Editor only, save info about the previous fracture result so we can fracture much faster if no mayor changes has been made
-        //save data about meshes to fracture so we can identify if mayor changes has been made or not
-        public PreS_toFracData preS_toFracData = null;
-
-        [System.Serializable]
-        public class PreS_toFracData
-        {
-            public FloatList[] md_verGroupIds;
-            public int seed;
-            public int fractureCount;
-            public bool dynamicFractureCount;
-            public float randomness;
-            public float worldScale;
-            public FractureThis.FractureRemesh remeshing;
-            public FractureThis.GenerationQuality generationQuality;
-            public Bounds[] toFracRendBounds;
-            public int totalVerCount;
-        }
-
-        public PreS_setupRendData preS_setupRendResult = null;
-
-        [System.Serializable]
-        public class PreS_setupRendData
-        {
-            public FractureSaveAsset.SavableMesh comMesh;
-            public FractureThis.IntList[] parts_rendLinkVerIndexes;
-            public FractureThis.IntList[] verticsLinkedThreaded;
-            public int[] rVersBestOgMeshVer;
-            public int[] rTrisBestOgMeshTris;
-        }
-
-        public PreS_setupRealSkinData preS_setupRealSkinResult = null;
-
-        [System.Serializable]
-        public class PreS_setupRealSkinData
-        {
-            public Vector3[] parts_positions;
-            public Quaternion[] parts_rotations;
-        }
-
-        public PreS_fracedMeshesData preS_fracedMeshes = null;
-
-        [System.Serializable]
-        public class PreS_fracedMeshesData
-        {
-            public List<FractureThis.FracMesh> fracedMeshes_d;
-            public List<FractureSaveAsset.SavableMesh> fracedMeshes_m;
-
-            public List<FractureThis.FracMesh> ToFracMesh()
-            {
-                for (int i = 0; i < fracedMeshes_d.Count; i++)
-                {
-                    fracedMeshes_d[i].meshW = fracedMeshes_m[i].ToMesh();
-                }
-
-                return fracedMeshes_d;
-            }
-
-            public void FromFracMesh(List<FractureThis.FracMesh> meshDatas)
-            {
-                fracedMeshes_d = meshDatas;
-                fracedMeshes_m = new();
-
-                for (int i = 0; i < meshDatas.Count; i++)
-                {
-                    fracedMeshes_m.Add(new());
-                    fracedMeshes_m[i].FromMesh(meshDatas[i].meshW);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Saves the given variabels that are not null (Editor only)
-        /// </summary>
-        public void SavePrefracture(
-            PreS_toFracData toFracData = null,
-            PreS_fracedMeshesData fracedMeshes = null,
-            PreS_setupRendData setupRendResult = null,
-            PreS_setupRealSkinData setupRealSkin = null)
-        {
-            //save stuff
-            if (toFracData != null) preS_toFracData = toFracData;
-            if (fracedMeshes != null) preS_fracedMeshes = fracedMeshes;
-            if (setupRendResult != null) preS_setupRendResult = setupRendResult;
-            if (setupRealSkin != null) preS_setupRealSkinResult = setupRealSkin;
-
-#if UNITY_EDITOR
-            //mark dirty
-            EditorUtility.SetDirty(this);
-#endif
-        }
-
-        /// <summary>
-        /// Cleares all preS data
-        /// </summary>
-        public void ClearSavedPrefracture()
-        {
-            preS_toFracData = null;
-            preS_fracedMeshes = null;
-            preS_setupRendResult = null;
-            preS_setupRealSkinResult = null;
-        }
-
 #if UNITY_EDITOR
         [MenuItem("Tools/Fracture/CreateSaveStateAsset")]
 #endif
@@ -190,6 +41,181 @@ namespace Zombie1111_uDestruction
             return null;
 #endif
         }
+
+        public SavedPartState[] savedPartStates;
+        public SavedParentState[] savedParentStates;
+        public FractureThis.MeshData[] savedVertexStates;
+
+        [System.Serializable]
+        public class SavedPartState
+        {
+            public Vector3 transPosL;
+            public Quaternion transRotL;
+            public int parentIndex;
+            public float maxTransportUsed;
+        }
+
+        [System.Serializable]
+        public class SavedParentState
+        {
+            public ParentTransData[] transData;
+
+            [System.Serializable]
+            public class ParentTransData
+            {
+                public int transPath;
+                public Vector3 transPosL;
+                public Quaternion transRotL;
+            }
+        }
+
+        public bool Save(FractureThis saveFrom)
+        {   
+            //Check if can save
+            if (saveFrom.fractureIsValid == false)
+            {
+                Debug.LogError("Cannot save the state of " + saveFrom.transform.name + " because it has not been fractured!");
+                return false;
+            }
+
+            saveFrom.GetTransformData_end();
+            saveFrom.ComputeDestruction_end();
+
+            //Save part states
+            int partCount = saveFrom.allParts.Count;
+            savedPartStates = new SavedPartState[partCount];
+
+            for (int pI = 0; pI < partCount; pI++)
+            {
+                saveFrom.saved_allPartsCol[pI].transform.GetLocalPositionAndRotation(out Vector3 lPos, out Quaternion lRot);
+
+                savedPartStates[pI] = new()
+                {
+                    parentIndex = saveFrom.jCDW_job.partsParentI[pI],
+                    maxTransportUsed = saveFrom.jCDW_job.fStructs[pI].maxTransportUsed,
+                    transPosL = lPos,
+                    transRotL = lRot
+                };
+            }
+
+            //Save parent states
+            int parentCount = saveFrom.allParents.Count;
+            savedParentStates = new SavedParentState[parentCount];
+            HashSet<int> transPaths = new();
+            foreach (int path in saveFrom.partsLocalParentPath)
+            {
+                transPaths.Add(path);
+            }
+
+            for (int pI = 0; pI < parentCount; pI++)
+            {
+                var transData = new SavedParentState.ParentTransData[transPaths.Count];
+                int tI = 0;
+
+                foreach (int path in transPaths)
+                {
+                    Transform trans = FracHelpFunc.DecodeHierarchyPath(saveFrom.allParents[pI].parentTrans, path);
+                    transData[tI] = new()
+                    {
+                       transPath = path,
+                       transPosL = trans.localPosition,
+                       transRotL = trans.localRotation
+                    };
+
+                    tI++;
+                }
+
+                savedParentStates[pI] = new()
+                { 
+                    transData = transData,
+                };
+            }
+
+            //Save vertex states
+            savedVertexStates = new FractureThis.MeshData[saveFrom.buf_meshData.count];
+            saveFrom.buf_meshData.GetData(savedVertexStates);
+
+#if UNITY_EDITOR
+            EditorUtility.SetDirty(this);
+#endif
+
+            return true;
+        }
+
+        public bool Load(FractureThis loadTo)
+        {
+            //Check if can load
+            if (HasValidSavedState(loadTo) == false) return false;
+            loadTo.GetTransformData_end();
+            loadTo.ComputeDestruction_end();
+
+            //Load parents
+            int parentCount = savedParentStates.Length;
+
+            for (int pI = 0; pI < parentCount; pI++)
+            {
+                if (loadTo.allParents.Count <= pI) loadTo.CreateNewParent(null, -1);
+                Transform parentTrans = loadTo.allParents[pI].parentTrans;
+
+                foreach (var tData in savedParentStates[pI].transData)
+                {
+                    Transform trans = FracHelpFunc.DecodeHierarchyPath(parentTrans, tData.transPath);
+                    trans.SetLocalPositionAndRotation(tData.transPosL, tData.transRotL);
+                }
+            }
+
+            //Load parts
+            int partCount = savedPartStates.Length;
+
+            for (int pI = 0; pI < partCount; pI++)
+            {
+                var partState = savedPartStates[pI];
+                var fPart = loadTo.jCDW_job.fStructs[pI];
+
+                fPart.maxTransportUsed = partState.maxTransportUsed;
+                loadTo.jCDW_job.fStructs[pI] = fPart;
+
+                loadTo.SetPartParent(pI, partState.parentIndex);
+                loadTo.saved_allPartsCol[pI].transform.SetLocalPositionAndRotation(partState.transPosL, partState.transRotL);
+            }
+
+            //Load vertics
+            loadTo.buf_meshData.SetData(savedVertexStates);
+            loadTo.wantToApplySkinning = true;
+            if (FracGlobalSettings.maxColliderUpdatesPerFrame > 0)
+            {
+                for (int pI = 0; pI < partCount; pI++)
+                {
+                    loadTo.des_deformedParts[loadTo.des_deformedPartsIndex].Add(pI);
+                }
+            }
+
+            return true;
+        }
+
+        public bool HasValidSavedState(FractureThis validForThis)
+        {
+            if (validForThis.fractureIsValid == false)
+            {
+                Debug.LogError("Cannot load a state to " + validForThis.transform.name + " because it has not been fractured");
+                return false;
+            }
+
+            if (savedPartStates == null || savedParentStates == null || savedVertexStates == null
+                || savedPartStates.Length == 0 || savedParentStates.Length == 0 || savedVertexStates.Length == 0)
+            {
+                Debug.LogError("Cant load " + this.name + " to " + validForThis.transform.name + " because no state has been saved yet");
+                return false;
+            }
+
+            if (savedPartStates.Length != validForThis.allParts.Count || savedVertexStates.Length != validForThis.buf_meshData.count)
+            {
+                Debug.LogError("Cant load " + this.name + " to " + validForThis.transform.name + " because it was saved for another fracture");
+                return false;
+            }
+
+            return true;
+        }
     }
 
 #if UNITY_EDITOR
@@ -216,21 +242,14 @@ namespace Zombie1111_uDestruction
             {
                 // Show the variables
                 serializedObject.Update(); // Ensure serialized object is up to date
-                SerializedProperty fracSavedData = serializedObject.FindProperty("preS_fracedMeshes");
+                SerializedProperty fracSavedData = serializedObject.FindProperty("savedPartStates");
                 EditorGUILayout.PropertyField(fracSavedData, true);
 
-                fracSavedData = serializedObject.FindProperty("preS_toFracData");
+                fracSavedData = serializedObject.FindProperty("savedParentStates");
                 EditorGUILayout.PropertyField(fracSavedData, true);
 
-
-                fracSavedData = serializedObject.FindProperty("preS_setupRendResult");
+                fracSavedData = serializedObject.FindProperty("savedVertexStates");
                 EditorGUILayout.PropertyField(fracSavedData, true);
-
-
-                fracSavedData = serializedObject.FindProperty("preS_setupRealSkinResult");
-                EditorGUILayout.PropertyField(fracSavedData, true);
-
-                //serializedObject.ApplyModifiedProperties(); // Apply changes to the serialized object
             }
 
             // Apply modifications to the asset
