@@ -81,7 +81,7 @@ namespace Zombie1111_uDestruction
 
         //The min&max mass a rigidbody created by the destruction system can have,
         //due to limitations in the physics engine if two rigidbodies with largly different masses collide unexpected behavior may occure.
-        public const float rbMinMass = 1.0f;
+        public const float rbMinMass = 0.1f;
         public const float rbMaxMass = 5.0f;
 
         //If true, it will try to prevent a mesh from being deformed through another object (Comes at a performance cost and not 100% accurate)

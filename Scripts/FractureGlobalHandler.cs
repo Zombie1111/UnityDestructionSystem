@@ -639,6 +639,11 @@ namespace Zombie1111_uDestruction
             public List<FractureThis.DestructionPoint> impPoints;
 
             /// <summary>
+            /// Contains all part indexes that was hit
+            /// </summary>
+            public HashSet<int> impPartIndexs;
+
+            /// <summary>
             /// The other rigidbody in the collision
             /// </summary>
             public Rigidbody sourceRb;
@@ -649,6 +654,11 @@ namespace Zombie1111_uDestruction
             /// impPairsI[X] is the contactPair index impPoints[X] was created from
             /// </summary>
             public List<int> impPairsI;
+
+            /// <summary>
+            /// Contains all contactPair indexes used to create this impPair
+            /// </summary>
+            public HashSet<int> impPairsIndexes;
         }
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
@@ -701,6 +711,8 @@ namespace Zombie1111_uDestruction
                 int maxImpI = 0;
                 int impCount = iPair.impPoints.Count;
 
+                HashSet<int> debug = new();
+
                 for (int i = 0; i < impCount; i++)
                 {
                     //get highest impact force
@@ -715,6 +727,12 @@ namespace Zombie1111_uDestruction
                     //Normlize impact force
                     var desP = iPair.impPoints[i];
                     desP.force /= iPair.impForceTotal;
+
+                    if (debug.Add(desP.partI) ==false)
+                    {
+                        Debug.LogError("double " + desP.partI);
+                    }
+
                     iPair.impPoints[i] = desP;
 
                 }
@@ -769,9 +787,9 @@ namespace Zombie1111_uDestruction
                     }
 
                     transCap *= iPair.thisRbDesMassDiff;
-                    transCap /= iPair.impPairsI.Count;
+                    transCap /= iPair.impPairsIndexes.Count;
 
-                    foreach (int pI in iPair.impPairsI)
+                    foreach (int pI in iPair.impPairsIndexes)
                     {
                         float maxImpulse = transCap / pairs[pI].contactCount;
                         if (pairs[pI].GetMaxImpulse(0) < maxImpulse) continue;
@@ -971,6 +989,7 @@ namespace Zombie1111_uDestruction
 
                 //Get impact from dictorary
                 Debug.DrawLine(impPos, impPos + impactVel, Color.red, 0.1f);
+                Debug.DrawLine(impPos, impPos + (impactVel * forceApplied * 0.1f), Color.yellow, 0.1f);
                 if (impIdToImpPair.TryGetValue(thisImpId, out ImpPair impPair) == false)
                 {
                     GlobalRbData sourceRbData = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI];
@@ -982,7 +1001,9 @@ namespace Zombie1111_uDestruction
                         sourceTransCapTotal = 0.0f,
                         impFrac = fracD.fracThis,
                         impPoints = new(),
+                        impPartIndexs = new(),
                         impPairsI = new(),
+                        impPairsIndexes = new(),
                         impVel = Vector3.zero,
                         sourceRb = otherRbI < 0 ? null : sourceRbData.rb,
                         thisRbDesMassDiff = thisRbI < 0 ? 1.0f : (thisRbData.rbMass / thisRbData.desMass),
@@ -992,11 +1013,35 @@ namespace Zombie1111_uDestruction
 
                 //Modify impact data
                 if (impPair.impVel.sqrMagnitude < impactVel.sqrMagnitude) impPair.impVel = impactVel;
-                impPair.impPoints.Add(new() { partI = fracD.partIndex, force = forceApplied, impPosW = impPos });//partIndex some times does not have a parent, wtf??
-                impPair.impPairsI.Add(pairI);
-                impPair.impForceTotal += forceApplied;
-                impPair.sourceTransCapTotal += sourceTransCap;
+                if (impPair.impPartIndexs.Add(fracD.partIndex) == true)
+                {
+                    //New part, just add it
+                    impPair.impPoints.Add(new()
+                    {
+                        partI = fracD.partIndex,
+                        force = forceApplied,
+                        impPosW = impPos
+                    });//partIndex some times does not have a parent, wtf??
 
+                    impPair.impPairsI.Add(pairI);
+                    impPair.impForceTotal += forceApplied;
+                    impPair.sourceTransCapTotal += sourceTransCap;
+                }
+                else
+                {
+                    //Part already exist, combine with new impact
+                    int oldPointI = impPair.impPoints.FindIndex(point => point.partI == fracD.partIndex);
+                    var oldPoint = impPair.impPoints[oldPointI];
+
+                    oldPoint.impPosW = (oldPoint.impPosW + impPos) / 2.0f;
+                    if (oldPoint.force < forceApplied)
+                    {
+                        impPair.impForceTotal += forceApplied - oldPoint.force;
+                        oldPoint.force = forceApplied;
+                    }
+                }
+
+                impPair.impPairsIndexes.Add(pairI);
                 impIdToImpPair[thisImpId] = impPair;
             }
 

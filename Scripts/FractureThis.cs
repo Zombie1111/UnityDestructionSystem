@@ -15,6 +15,10 @@ using System.Collections.Concurrent;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.SceneManagement;
 using UnityEngine.Assertions.Must;
+using System.Security;
+using JetBrains.Annotations;
+
+
 
 
 #if UNITY_EDITOR
@@ -92,7 +96,10 @@ namespace Zombie1111_uDestruction
                     if (Application.isPlaying == true)
                     {
                         EditorGUILayout.Space();
-                        EditorGUILayout.PropertyField(serializedObject.FindProperty("interpolationSpeed"), true);
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("interpolationSpeedTarget"), true);
+
+                        EditorGUILayout.Space();
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("interpolationSharpness"), true);
 
                         EditorGUILayout.Space();
                         EditorGUILayout.HelpBox("Modifying destructionMaterials at runtime is not supported and should only be used in editor to temporarly test different values", MessageType.Warning);
@@ -108,7 +115,8 @@ namespace Zombie1111_uDestruction
                         "debugMode",
                         "saveState",
                         Application.isPlaying == true ? "destructionMaterials" : "",
-                        Application.isPlaying == true ? "interpolationSpeed" : ""
+                        Application.isPlaying == true ? "interpolationSpeedTarget" : "",
+                        Application.isPlaying == true ? "interpolationSharpness" : ""
                     });
 
                     GUI.enabled = true;
@@ -169,7 +177,9 @@ namespace Zombie1111_uDestruction
 
         [Space(10)]
         [Header("Destruction")]
-        public float interpolationSpeed = 10.0f;
+        public float interpolationSpeedTarget = 10.0f;
+        [SerializeField] private float interpolationSharpness = 5.0f;
+        [System.NonSerialized] public float interpolationSpeedActual;
 
         [Space(10)]
         [Header("Material")]
@@ -3042,6 +3052,7 @@ namespace Zombie1111_uDestruction
             //if (groupDataDefualt.transportCapacity < lowestTransportCapacity) lowestTransportCapacity = groupDataDefualt.transportCapacity;
 
             //setup compute destruction
+            interpolationSpeedActual = interpolationSpeedTarget;
             ComputeDestruction_setup();
 
             //setup gpu readback
@@ -3155,13 +3166,15 @@ namespace Zombie1111_uDestruction
             if (des_deformedParts[1 - des_deformedPartsIndex].Count > 0 || gpuMeshRequest_do == true) UpdateGpuMeshReadback();
 
             //Interpolate gpu mesh
-            if (gpuIsReady == true && interpolationSpeed >= 0.0f
+            interpolationSpeedActual = Mathf.MoveTowards(interpolationSpeedActual, interpolationSpeedTarget, interpolationSharpness * Time.deltaTime);
+
+            if (gpuIsReady == true && interpolationSpeedTarget >= 0.0f
 #if UNITY_EDITOR
                 && Application.isPlaying == true
 #endif
                 )
             {
-                computeDestructionSolver.SetFloat("speedDelta", Mathf.Min(interpolationSpeed * Time.deltaTime, 1.0f));
+                computeDestructionSolver.SetFloat("speedDelta", Mathf.Min(interpolationSpeedActual * Time.deltaTime, 1.0f));
                 computeDestructionSolver.Dispatch(cpKernelId_InterpolateSkinDef, fracRendDividedVerCount, 1, 1);
             }
         }
@@ -3686,9 +3699,7 @@ namespace Zombie1111_uDestruction
             //break parts that should break
             foreach (DesPartToBreak pBreak in jCDW_job.partsToBreak.GetValueArray(Allocator.Temp))
             {
-                //Debug.Log(pBreak.velTarget.magnitude + " " + transform.name + " " + pBreak.partI);
                 SetPartParent((short)pBreak.partI, -1, pBreak.velTarget);
-                //SetPartParent((short)pBreak.partI, -1, Vector3.zero);
             }
 
             //Set compute buffer parents, we wanna update them before we set new parents
@@ -4104,7 +4115,11 @@ namespace Zombie1111_uDestruction
                         DesPartToBreak pBreak = _partsToBreak[partI];
                         float forceRequired = (pBreak.velTarget.magnitude * _desProps[_partIToDesMatI[pBreak.partI]].mass);
                         pBreak.velTarget *= Mathf.Clamp01(pBreak.forceLeft / breakCount / forceRequired);
-                        //pBreak.forceLeft = breakForceLeft - forceRequired;
+                        if (FracHelpFunc.IsVectorValid(pBreak.velTarget) == false)
+                        {
+                            pBreak.velTarget = Vector3.zero;//velTarget is somehow nan sometimes, it is nan before above multiplication
+                        }
+
                         pBreak.forceLeft -= forceRequired;
                         _partsToBreak[partI] = pBreak;
                     }
@@ -4442,7 +4457,7 @@ namespace Zombie1111_uDestruction
             }
 
             //Update gpu mesh (Only if no interpolation)
-            if (interpolationSpeed >= 0.0f
+            if (interpolationSpeedTarget >= 0.0f
 #if UNITY_EDITOR
                 || Application.isPlaying == false
 #endif

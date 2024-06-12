@@ -57,6 +57,8 @@ namespace Zombie1111_uDestruction
             public Quaternion transRotL;
             public int parentIndex;
             public float maxTransportUsed;
+            public Vector3 structOffset;
+            public Vector3 structPos;
         }
 
         [System.Serializable]
@@ -98,7 +100,13 @@ namespace Zombie1111_uDestruction
                     parentIndex = saveFrom.jCDW_job.partsParentI[pI],
                     maxTransportUsed = saveFrom.jCDW_job.fStructs[pI].maxTransportUsed,
                     transPosL = lPos,
-                    transRotL = lRot
+                    transRotL = lRot,
+                    structOffset =
+#if UNITY_EDITOR
+                    Application.isPlaying == false ? Vector3.zero :
+#endif    
+                    saveFrom.jCDW_job.defOffsetW[pI],
+                    structPos = saveFrom.jCDW_job.structPosL[pI]
                 };
             }
 
@@ -187,10 +195,14 @@ namespace Zombie1111_uDestruction
 
                 fPart.maxTransportUsed = partState.maxTransportUsed;
                 loadTo.jCDW_job.fStructs[pI] = fPart;
+                loadTo.jCDW_job.structPosL[pI] = partState.structPos;
+                loadTo.jCDW_job.defOffsetW[pI] = partState.structOffset;
 
                 loadTo.SetPartParent(pI, partState.parentIndex);
                 loadTo.saved_allPartsCol[pI].transform.SetLocalPositionAndRotation(partState.transPosL, partState.transRotL);
             }
+
+            loadTo.StartCoroutine(LoadPartsPosDelay(loadTo));
 
             //Load vertics
             loadTo.buf_meshData.SetData(savedVertexStates);
@@ -208,6 +220,8 @@ namespace Zombie1111_uDestruction
             loadTo.buf_gpuMeshVertexs.SetData(savedColorStates);
 #endif
 
+            //Set interpolation speed
+            loadTo.interpolationSpeedActual = 0.0f;
             return true;
         }
 
@@ -235,6 +249,19 @@ namespace Zombie1111_uDestruction
             }
 
             return true;
+        }
+
+        private IEnumerator LoadPartsPosDelay(FractureThis fracThis)
+        {
+            yield return new WaitForFixedUpdate();
+
+            int partCount = savedPartStates.Length;
+
+            for (int pI = 0; pI < partCount; pI++)
+            {
+                var partState = savedPartStates[pI];
+                fracThis.saved_allPartsCol[pI].transform.SetLocalPositionAndRotation(partState.transPosL, partState.transRotL);
+            }
         }
     }
 
