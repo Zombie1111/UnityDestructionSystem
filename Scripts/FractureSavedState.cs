@@ -46,6 +46,10 @@ namespace Zombie1111_uDestruction
         public SavedParentState[] savedParentStates;
         public FractureThis.MeshData[] savedVertexStates;
 
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+        public FractureThis.GpuMeshVertex[] savedColorStates;
+#endif
+
         [System.Serializable]
         public class SavedPartState
         {
@@ -69,7 +73,7 @@ namespace Zombie1111_uDestruction
             }
         }
 
-        public bool Save(FractureThis saveFrom)
+        public bool Save(FractureThis saveFrom, bool calledManually = false)
         {   
             //Check if can save
             if (saveFrom.fractureIsValid == false)
@@ -135,8 +139,17 @@ namespace Zombie1111_uDestruction
             savedVertexStates = new FractureThis.MeshData[saveFrom.buf_meshData.count];
             saveFrom.buf_meshData.GetData(savedVertexStates);
 
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            //Save color states
+            savedColorStates = new FractureThis.GpuMeshVertex[saveFrom.buf_gpuMeshVertexs.count];
+            saveFrom.buf_gpuMeshVertexs.GetData(savedColorStates);
+#endif
+
 #if UNITY_EDITOR
-            EditorUtility.SetDirty(this);
+            if (calledManually == true)
+            {
+                EditorUtility.SetDirty(this);
+            }
 #endif
 
             return true;
@@ -190,6 +203,11 @@ namespace Zombie1111_uDestruction
                 }
             }
 
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            //Load color states
+            loadTo.buf_gpuMeshVertexs.SetData(savedColorStates);
+#endif
+
             return true;
         }
 
@@ -201,14 +219,16 @@ namespace Zombie1111_uDestruction
                 return false;
             }
 
-            if (savedPartStates == null || savedParentStates == null || savedVertexStates == null
-                || savedPartStates.Length == 0 || savedParentStates.Length == 0 || savedVertexStates.Length == 0)
+            if (savedPartStates == null || savedParentStates == null || savedVertexStates == null || savedColorStates == null
+                || savedPartStates.Length == 0 || savedParentStates.Length == 0 || savedVertexStates.Length == 0 || savedColorStates.Length == 0)
             {
                 Debug.LogError("Cant load " + this.name + " to " + validForThis.transform.name + " because no state has been saved yet");
                 return false;
             }
 
-            if (savedPartStates.Length != validForThis.allParts.Count || savedVertexStates.Length != validForThis.buf_meshData.count)
+            if (savedPartStates.Length != validForThis.allParts.Count
+                || savedVertexStates.Length != validForThis.buf_meshData.count
+                || savedColorStates.Length != validForThis.buf_gpuMeshVertexs.count)
             {
                 Debug.LogError("Cant load " + this.name + " to " + validForThis.transform.name + " because it was saved for another fracture");
                 return false;

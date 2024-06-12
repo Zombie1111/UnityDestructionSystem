@@ -1,13 +1,5 @@
 #include "ComputeGlobalSettings.cginc"
 
-
-struct FracWeight
-{
-    int stWe_lenght;
-    int structsI[maxDeformationBones];
-    float weights[maxDeformationBones];
-};
-
 struct BoneWeight
 {
     float weight0;
@@ -84,22 +76,40 @@ inline float4x4 inverse(float4x4 m)
     return ret;
 }
 
-inline float3 vec3LerpMin(float3 current, float3 target, float t, float min, out bool reachedTarget)
+//inline float3 vec3LerpMin(float3 current, float3 target, float t, float min, out bool reachedTarget)
+inline float3 vec3LerpMin(float3 current, float3 target, float t, float min)
 {
     //Does not seem to work
     float3 vel = target - current;
     float dis = sqrt(dot(vel, vel));
     if (dis <= min)
     {
-        reachedTarget = true;
+        //reachedTarget = true;
         return target;
     }
 
-    dis *= t;
+    dis *= t; //Expecting t to always be within 0.0-1.0 range
     if (dis < min) dis = min;
 
-    reachedTarget = false;
+    //reachedTarget = false;
     return current + (normalize(vel) * dis);
+}
+
+//inline float floatLerpMin(float current, float target, float t, float min, out bool reachedTarget)
+inline float floatLerpMin(float current, float target, float t, float min)
+{
+    float dis = target - current;
+    if (dis <= min)
+    {
+        //reachedTarget = true;
+        return target;
+    }
+
+    dis *= t; //Expecting t to always be within 0.0-1.0 range
+    if (dis < min) dis = min;
+
+    //reachedTarget = false;
+    return current + dis;
 }
 
 //skinning stuff
@@ -130,13 +140,25 @@ RWStructuredBuffer<int> partIToParentI; //The parent part X has
 #define NORMAL_OFFSET 3 // float3 position, 
 #define COLOR_OFFSET 6 // float3 position, float3 normal
 
-RWByteAddressBuffer verNors;
+struct GpuMeshVertex
+{
+    float3 pos;
+    float3 nor;
+
+    #if SUPPORTVERTEXCOLORS_ON
+    float colA;
+    #endif
+};
+
+RWStructuredBuffer<GpuMeshVertex> meshVertexs;
 
 [numthreads(128, 1, 1)]
 void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
 {
     //return if out of bounds
     if (id.x >= (uint)fracRendVerCount) return;
+    
+    GpuMeshVertex meshVerx = meshVertexs[id.x];
     
     //get skin bone matrix
     BoneWeight boneWeight = fr_boneWeightsCurrent[id.x];
@@ -150,93 +172,108 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     
     if (defPointsLenght > 0)
     {
-        float3 offsetW = float3(0.0f, 0.0f, 0.0f);
         int parentI = partIToParentI[meshD.verToPartI];
-        BendProperties bendProp = bendProperties[partIToBendPropI[meshD.verToPartI]];
-        float bendStrenght = bendProp.bendStrenght;
-        float bendForce = defBendForce > bendStrenght ? bendStrenght : defBendForce;
         
-        #if SUPPORTVERTEXCOLORS_ON
-        float vColA = defBendForce;
-        #endif
-        
-        for (int dpI = 0; dpI < defPointsLenght; dpI++)
+        if (parentI >= 0)
         {
-            DefPoint defPoint = defPoints[dpI];
+            float3 offsetW = float3(0.0f, 0.0f, 0.0f);
+            BendProperties bendProp = bendProperties[partIToBendPropI[meshD.verToPartI]];
+            float bendStrenght = bendProp.bendStrenght;
+            float bendForce = defBendForce > bendStrenght ? bendStrenght : defBendForce;
         
-            if (defPoint.parentI != parentI) continue;
+#if SUPPORTVERTEXCOLORS_ON
+            float vColA = defBendForce;
+#endif
+        
+            for (int dpI = 0; dpI < defPointsLenght; dpI++)
+            {
+                DefPoint defPoint = defPoints[dpI];
+        
+                if (defPoint.parentI != parentI)
+                    continue;
                         
-            float3 disVel = mul(boneMatrixLToW, float4(meshD.vertexL, 1.0)).xyz - defPoint.defPos;
-            float falloffX = sqrt(dot(disVel, disVel)) * bendProp.bendFalloff;
-            falloffX += falloffX * (falloffX * bendProp.bendPower);
+                float3 disVel = mul(boneMatrixLToW, float4(meshD.vertexL, 1.0)).xyz - defPoint.defPos;
+                float falloffX = sqrt(dot(disVel, disVel)) * bendProp.bendFalloff;
+                falloffX += falloffX * (falloffX * bendProp.bendPower);
             
-            #if SUPPORTVERTEXCOLORS_ON
-            if (falloffX > defBendForce)
-                continue;
+#if SUPPORTVERTEXCOLORS_ON
+                if (falloffX > defBendForce)
+                    continue;
             
-            if (falloffX < vColA)
-                vColA = falloffX;
-            #endif
+                if (falloffX < vColA)
+                    vColA = falloffX;
+#endif
             
-            if (falloffX > bendForce)
-                continue;
+                if (falloffX > bendForce)
+                    continue;
 
-            offsetW += bendProp.bendyness * clamp((bendForce - falloffX) / (bendStrenght * sqrt(dot(defPoint.defVel, defPoint.defVel))), 0.0f, 1.0f) * defPoint.defVel;
-        }
+                offsetW += bendProp.bendyness * clamp((bendForce - falloffX) / (bendStrenght * sqrt(dot(defPoint.defVel, defPoint.defVel))), 0.0f, 1.0f) * defPoint.defVel;
+            }
     
-        meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), offsetW);
-        //meshD.normalL is currently not deformed, we probably also need mesh triangels to be able to calculate new normal??
-        fr_meshData[id.x] = meshD;
+            meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), offsetW);
+            //meshD.normalL is currently not deformed, we probably also need mesh triangels to be able to calculate new normal??
+            fr_meshData[id.x] = meshD;
 
-        #if SUPPORTVERTEXCOLORS_ON
-        //Apply vertex colors
-        vColA /= defBendForce;
-        vColA = 1.0f - vColA;
-        vColA *= bendForce / bendStrenght;
+#if SUPPORTVERTEXCOLORS_ON
+            //Apply vertex colors
+            vColA /= defBendForce;
+            vColA = 1.0f - vColA;
+            vColA *= bendForce / bendStrenght;
         
-        float4 oldVCol = asfloat(verNors.Load4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2));
-        //if (vColA > oldVCol.a)
-        //    verNors.Store4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2, asuint(float4(oldVCol.rgb, vColA)));
-        if (vColA > oldVCol.a * 0.25f)
-            verNors.Store4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2, asuint(float4(oldVCol.rgb, clamp((oldVCol.a * 0.75f) + vColA, 0.0f, 1.0f))));
-        #endif
+            float oldVColA = meshVerx.colA;
+
+            if (vColA > oldVColA * 0.25f)
+                meshVerx.colA = clamp((oldVColA * 0.75f) + vColA, 0.0f, 1.0f);
+#endif   
+        }
+#if SUPPORTVERTEXCOLORS_ON
+        else
+        {
+            meshVerx.colA = 1.0f;
+        }
+#endif
     }
     
     //Write updated vertics and normals to mesh
-    //Add an option to do interpolation
-    verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
-    verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
+    //verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
+    meshVerx.pos = mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz;
+    //verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
+    meshVerx.nor = mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL));
+    meshVertexs[id.x] = meshVerx;
 }
 
-RWStructuredBuffer<MeshData> og_frMeshData; //The MeshData values we had at start
-RWStructuredBuffer<int> partIWannaRestore; //if partIWannaRestore[partI] is true, partI should be restored
-//RWStructuredBuffer<int> isRepairDone;
-//float repairSpeedDelta;
+RWByteAddressBuffer verNors;
+float speedDelta;//Interpolation speed and deltatime
 
-#pragma kernel RestoreSkinDef
+#pragma kernel InterpolateSkinDef
 
 [numthreads(128, 1, 1)]
-void RestoreSkinDef(uint3 id : SV_DispatchThreadID)
+void InterpolateSkinDef(uint3 id : SV_DispatchThreadID)
 {
     //return if out of bounds
     if (id.x >= (uint) fracRendVerCount) return;
     
-    //return if dont wanna restore
-    MeshData meshD = fr_meshData[id.x];
-    if (partIWannaRestore[meshD.verToPartI] == 0) return;
-
-    MeshData meshDOg = og_frMeshData[id.x];
+    GpuMeshVertex meshVerx = meshVertexs[id.x];
     
-    //bool doneA;
-    //meshD.vertexL = vec3LerpMin(meshD.vertexL, meshDOg.vertexL, repairSpeedDelta, repairSpeedDelta * 2.0f, doneA);
-    //
-    //bool doneB;
-    //meshD.normalL = vec3LerpMin(meshD.normalL, meshDOg.normalL, repairSpeedDelta, repairSpeedDelta * 2.0f, doneB);
+    //interpolate position, do we wanna have a per part buffer so each part can have their own repair speed?
+    float3 oldVPos = asfloat(verNors.Load3((id.x * VERTEX_32BIT_STRIDE) << 2));
     
-    meshD.vertexL = meshDOg.vertexL;
-    meshD.normalL = meshDOg.normalL;
+    verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2,
+        asuint(vec3LerpMin(oldVPos, meshVerx.pos, speedDelta, speedDelta * 2.0f)));
     
-    fr_meshData[id.x] = meshD;
-    partIWannaRestore[meshD.verToPartI] = false;
+    //interpolate normal
+    float3 oldVNor = asfloat(verNors.Load3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2));
+    
+    verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2,
+        asuint(vec3LerpMin(oldVNor, meshVerx.nor, speedDelta, speedDelta * 2.0f)));
+    
+    #if SUPPORTVERTEXCOLORS_ON
+    //interpolate color
+    float4 oldVCol = asfloat(verNors.Load4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2));
+    
+    verNors.Store4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2,
+        asuint(float4(oldVCol.rgb, floatLerpMin(oldVCol.a, meshVerx.colA, speedDelta, speedDelta * 2.0f))));
+    #endif
 }
+
 

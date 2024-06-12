@@ -744,7 +744,7 @@ namespace Zombie1111_uDestruction
 
                         foreach (int pI in iPair.impPairsI)
                         {
-                            Debug.Log("PairI true " + pI);
+                            //Debug.Log("PairI true " + pI);
 
                             for (int conI = 0; conI < pairs[pI].contactCount; conI++)
                             {
@@ -757,7 +757,7 @@ namespace Zombie1111_uDestruction
                     if (thisTransCap > transCap) transCap = thisTransCap;
                 }
 
-                Debug.Log("Breaks? " + somethingLikelyBreaks + " force " + maxImpF + " rbI " + iPair.thisRbI);
+                //Debug.Log("Breaks? " + somethingLikelyBreaks + " force " + maxImpF + " rbI " + iPair.thisRbI);
 
                 //if no impact is likely to cause breaking, mark contacts between source and frac to be ignored the next few physics frames
                 if (somethingLikelyBreaks == false)
@@ -775,7 +775,6 @@ namespace Zombie1111_uDestruction
                     {
                         float maxImpulse = transCap / pairs[pI].contactCount;
                         if (pairs[pI].GetMaxImpulse(0) < maxImpulse) continue;
-                        Debug.Log("PairI false " + pI);
 
                         for (int conI = 0; conI < pairs[pI].contactCount; conI++)
                         {

@@ -356,7 +356,6 @@ namespace Zombie1111_uDestruction
             //load local paths
             loadTo.partsLocalParentPath = fracSavedData.saved_partsLocalParentPath.ToList();
             loadTo.localPathToRbIndex = FracHelpFunc.CreateDictionaryFromArrays<int, int>(fracSavedData.saved_localPathToRbIndex_keys, fracSavedData.saved_localPathToRbIndex_values);
-            Debug.Log(loadTo.localPathToRbIndex.Count);
 
             //restore fr_[] variabels from fracRend mesh
             Mesh fracRendMesh = loadTo.fracFilter.sharedMesh;
