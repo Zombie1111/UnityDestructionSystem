@@ -72,9 +72,6 @@ namespace Zombie1111_uDestruction
         //How many parts a parent must have for it to be created when destoying stuff, used to prevent hundreds of tiny parents from potentially being created when destroying stuff
         public const byte minParentPartCount = 3;
 
-        //The maxDepenetrationVelocity for all destructable rigidbodies
-        public const float desRbMaxDepenetrationVelocity = 1000.0f;
-
         //If false, parts that are kinematic wont break from impacts (Kinematic parts are usually parts that are overlapping with other geometry if
         //MainPhysicsType == OverlappingIsKinematic)
         public const bool kinematicPartsCanBreak = true;

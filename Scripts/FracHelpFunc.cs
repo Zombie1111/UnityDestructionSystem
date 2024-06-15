@@ -91,11 +91,11 @@ namespace Zombie1111_uDestruction
         public static Vector3 GetObjectVelocityAtPoint(Matrix4x4 objWToLPrev, Matrix4x4 objLToWNow, Vector3 point, float deltatime)
         {
             //for what ever reason transforming (point - velOffset) seems to give slightly better result at the cost of 2 extra transformations??
-            //Vector3 velOffset = point - (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point);
-            //return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(velOffset)) - velOffset) / deltatime;
+            Vector3 velOffset = point - (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point);
+            return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(velOffset)) - velOffset) / deltatime;
 
-            //The one below is faster and in theory it should be more accurate but it aint???
-            return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point) / deltatime;
+            ////The one below is faster and in theory it should be more accurate but it aint???
+            //return (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point) / deltatime;
         }
 
         /// <summary>

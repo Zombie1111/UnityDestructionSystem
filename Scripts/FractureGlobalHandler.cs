@@ -725,15 +725,15 @@ namespace Zombie1111_uDestruction
                     }
 
                     //Normlize impact force
-                    var desP = iPair.impPoints[i];
-                    desP.force /= iPair.impForceTotal;
+                    //var desP = iPair.impPoints[i];
+                    impP.force /= iPair.impForceTotal;
 
-                    if (debug.Add(desP.partI) ==false)
+                    if (debug.Add(impP.partI) ==false)
                     {
-                        Debug.LogError("double " + desP.partI);
+                        Debug.LogError("double " + impP.partI);
                     }
 
-                    iPair.impPoints[i] = desP;
+                    iPair.impPoints[i] = impP;
 
                 }
 
@@ -754,13 +754,15 @@ namespace Zombie1111_uDestruction
 
                     var tempPair = pairs[iPair.impPairsI[i]];
                     if (iPair.impFrac.GuessIfForceCauseBreaking(desP.force, desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
+                    //if (iPair.impFrac.GuessIfForceCauseBreaking(maxImpF * Mathf.Clamp01((desP.force / maxImpF) * Mathf.Max(1.0f, iPair.impPoints.Count / 4.0f))
+                    //    , desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
                     {
                         somethingLikelyBreaks = true;
 
                         //thisTransCap *= iPair.thisRbDesMassDiff;
                         //thisTransCap /= iPair.impPairsI.Count;
 
-                        foreach (int pI in iPair.impPairsI)
+                        foreach (int pI in iPair.impPairsIndexes)
                         {
                             //Debug.Log("PairI true " + pI);
 
@@ -775,7 +777,7 @@ namespace Zombie1111_uDestruction
                     if (thisTransCap > transCap) transCap = thisTransCap;
                 }
 
-                //Debug.Log("Breaks? " + somethingLikelyBreaks + " force " + maxImpF + " rbI " + iPair.thisRbI);
+                Debug.Log("Breaks? " + somethingLikelyBreaks + " force " + maxImpF + " rbI " + iPair.thisRbI);
 
                 //if no impact is likely to cause breaking, mark contacts between source and frac to be ignored the next few physics frames
                 if (somethingLikelyBreaks == false)
@@ -788,6 +790,7 @@ namespace Zombie1111_uDestruction
 
                     transCap *= iPair.thisRbDesMassDiff;
                     transCap /= iPair.impPairsIndexes.Count;
+                    transCap /= Mathf.Max(1.0f, iPair.impPoints.Count / 2.0f);
 
                     foreach (int pI in iPair.impPairsIndexes)
                     {
@@ -989,7 +992,7 @@ namespace Zombie1111_uDestruction
 
                 //Get impact from dictorary
                 Debug.DrawLine(impPos, impPos + impactVel, Color.red, 0.1f);
-                Debug.DrawLine(impPos, impPos + (impactVel * forceApplied * 0.1f), Color.yellow, 0.1f);
+                //Debug.DrawLine(impPos, impPos + (impactVel * forceApplied * 0.1f), Color.yellow, 0.1f);
                 if (impIdToImpPair.TryGetValue(thisImpId, out ImpPair impPair) == false)
                 {
                     GlobalRbData sourceRbData = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI];
@@ -1039,6 +1042,8 @@ namespace Zombie1111_uDestruction
                         impPair.impForceTotal += forceApplied - oldPoint.force;
                         oldPoint.force = forceApplied;
                     }
+
+                    impPair.impPoints[oldPointI] = oldPoint;
                 }
 
                 impPair.impPairsIndexes.Add(pairI);
