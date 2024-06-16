@@ -739,23 +739,42 @@ namespace Zombie1111_uDestruction
 
                 if (iPair.sourceTransCapTotal > 0.0f && maxImpF > iPair.sourceTransCapTotal) maxImpF = iPair.sourceTransCapTotal;
 
+                //Get top 10% impact
+                float neededForce = maxImpF * 0.9f;
+                float totTopForce = 0.0f;
+                int totTopCount = 0;
+
+                for (int i = 0; i < impCount; i++)
+                {
+                    var desP = iPair.impPoints[i];
+                    desP.force *= maxImpF;
+
+                    if (desP.force > neededForce)
+                    {
+                        totTopForce += desP.force;
+                        totTopCount++;
+                    }
+
+                    iPair.impPoints[i] = desP;
+                }
+
                 //Multiply normlized impact forces with highest impact force, Because we want more impact points to result in less force at each impact point
                 bool somethingLikelyBreaks = false;
                 float transCap = 0.0f;
 
-                for (int i = 0; i < iPair.impPoints.Count; i++)
+                for (int i = 0; i < impCount; i++)
                 {
                     var desP = iPair.impPoints[i];
-                    desP.force *= maxImpF;
-                    iPair.impPoints[i] = desP;
+                    //desP.force *= maxImpF;
+                    //iPair.impPoints[i] = desP;
 
                     //Ignore collisions if part most likely will break
                     if (somethingLikelyBreaks == true) continue;
 
                     var tempPair = pairs[iPair.impPairsI[i]];
-                    if (iPair.impFrac.GuessIfForceCauseBreaking(desP.force, desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
-                    //if (iPair.impFrac.GuessIfForceCauseBreaking(maxImpF * Mathf.Clamp01((desP.force / maxImpF) * Mathf.Max(1.0f, iPair.impPoints.Count / 4.0f))
-                    //    , desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
+                    //if (iPair.impFrac.GuessIfForceCauseBreaking(desP.force, desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
+                    if (iPair.impFrac.GuessIfForceCauseBreaking(totTopForce * Mathf.Clamp01((desP.force / totTopForce) * Mathf.Max(1.0f, totTopCount / 2.0f))
+                        , desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
                     {
                         somethingLikelyBreaks = true;
 
