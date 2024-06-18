@@ -6,7 +6,8 @@ using System.Threading.Tasks;
 using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Burst;
-using g3;
+using Unity.Mathematics;
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -62,6 +63,238 @@ namespace Zombie1111_uDestruction
 
             array = newArray;
         }
+
+        /// <summary>
+        /// Returns the closest triangel index on the mesh
+        /// </summary>
+        [BurstCompile]
+        public static int GetClosestTriOnMesh(ref NativeArray<Vector3> meshWorldVers, ref NativeArray<int> meshTris, ref Vector3 posA, ref Vector3 posB, ref Vector3 posC, float worldScale = 1.0f)
+        {
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float disT;
+            float disP;
+            float worldScaleDis = worldScale * 0.00001f;
+            worldScaleDis *= worldScaleDis;
+            int trisL = meshTris.Length;
+
+            Vector3 tPosA;
+            Vector3 tPosB;
+            Vector3 tPosC;
+            Vector3 crossPos;
+            Vector3 result = new();
+
+            for (int i = 0; i < trisL; i += 3)
+            {
+                //if distance to tris is < 2x the distance to plane, We can use plane distance
+                disT = 0.0f;
+                disP = 0.0f;
+                tPosA = meshWorldVers[meshTris[i]];
+                tPosB = meshWorldVers[meshTris[i + 1]];
+                tPosC = meshWorldVers[meshTris[i + 2]];
+                crossPos = Vector3.Cross(tPosA - tPosB, tPosA - tPosC);
+
+                ClosestPointOnTriangle(ref tPosA, ref tPosB, ref tPosC, ref posA, ref result);
+                disT += (posA - result).sqrMagnitude;
+                ClosestPointOnPlaneInfinit(ref tPosA, ref crossPos, ref posA, ref result);
+                disP += (posA - result).sqrMagnitude;
+
+                ClosestPointOnTriangle(ref tPosA, ref tPosB, ref tPosC, ref posB, ref result);
+                disT += (posB - result).sqrMagnitude;
+                ClosestPointOnPlaneInfinit(ref tPosA, ref crossPos, ref posB, ref result);
+                disP += (posB - result).sqrMagnitude;
+
+                ClosestPointOnTriangle(ref tPosA, ref tPosB, ref tPosC, ref posC, ref result);
+                disT += (posC - result).sqrMagnitude;
+                ClosestPointOnPlaneInfinit(ref tPosA, ref crossPos, ref posC, ref result);
+                disP += (posC - result).sqrMagnitude;
+
+                //if (disT < disP * 3.0f) disT = disP;
+                if (disP < worldScaleDis) disT /= 9.0f;//The odds of this being true for "incorrect faces" and false for "correct faces" is besically 0%,
+                                                       //so it should never cause a problem. Since disT is squared 9.0f = 3.0f
+
+                //if (disT < bestD)
+                if (disT < bestD)
+                {
+                    //bestD = disT;
+                    bestD = disT;
+                    bestI = i;
+                    if (bestD < 0.000001f) break;
+
+                    //if (currentD < preExitTolerance) break;
+                }
+            }
+
+            return bestI;
+        }
+
+        [BurstCompile]
+        public static void ClosestPointOnTriangle(ref Vector3 p0, ref Vector3 p1, ref Vector3 p2, ref Vector3 queryPoint, ref Vector3 result)
+        {
+            //first get closest point on plane
+            Vector3 pNor = Vector3.Cross(p0 - p1, p0 - p2);
+            Vector3 closeP = queryPoint + (-Vector3.Dot(pNor, queryPoint - p0) / Vector3.Dot(pNor, pNor)) * pNor;
+
+            //if the closest point on plane is inside the triangel, return closest planePoint
+            if (PointInTriangle(ref closeP, ref p0, ref p1, ref p2) == true)
+            {
+                result = closeP;
+                return;
+            }
+
+            //return closest point on the closest edge
+            Vector3 pLine0 = new();
+            ClosestPointOnLine(ref p0, ref p1, ref queryPoint, ref pLine0);
+
+            Vector3 pLine1 = new();
+            ClosestPointOnLine(ref p1, ref p2, ref queryPoint, ref pLine1);
+
+            Vector3 pLine2 = new();
+            ClosestPointOnLine(ref p0, ref p2, ref queryPoint, ref pLine2);
+
+            float cLine0 = (pLine0 - queryPoint).sqrMagnitude;
+            float cLine1 = (pLine1 - queryPoint).sqrMagnitude;
+            float cLine2 = (pLine2 - queryPoint).sqrMagnitude;
+
+            if (cLine0 < cLine1)
+            {
+                //0 or 2 is closest
+                if (cLine2 < cLine0)
+                {
+                    result = pLine2;
+                    return;
+                }
+
+                result = pLine0;
+                return;
+            }
+
+            if (cLine1 < cLine2)
+            {
+                //1 is closest. We checked 0 before
+                result = pLine1;
+                return;
+            }
+
+            result = pLine2;
+            return;
+
+            [BurstCompile]
+            static bool PointInTriangle(ref Vector3 p, ref Vector3 p00, ref Vector3 p11, ref Vector3 p22)
+            {
+                // Lets define some local variables, we can change these
+                // without affecting the references passed in
+                Vector3 a = p00 - p;
+                Vector3 b = p11 - p;
+                Vector3 c = p22 - p;
+
+                Vector3 u = Vector3.Cross(b, c);
+                Vector3 v = Vector3.Cross(c, a);
+                Vector3 w = Vector3.Cross(a, b);
+
+                // Test to see if the normals are facing 
+                // the same direction, return false if not
+                if (Vector3.Dot(u, v) < 0f)
+                {
+                    return false;
+                }
+                if (Vector3.Dot(u, w) < 0.0f)
+                {
+                    return false;
+                }
+
+                // All normals facing the same way, return true
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Returns the closest position to point on a line between start and end
+        /// </summary>
+        [BurstCompile]
+        public static void ClosestPointOnLine(ref Vector3 lineStart, ref Vector3 lineEnd, ref Vector3 point, ref Vector3 result)
+        {
+            Vector3 lineDirection = lineEnd - lineStart;
+            float lineLength = lineDirection.magnitude;
+            lineDirection.Normalize();
+
+            // Project the point onto the line
+            float dotProduct = Vector3.Dot(point - lineStart, lineDirection);
+            dotProduct = Mathf.Clamp(dotProduct, 0f, lineLength); // Ensure point is within the segment
+            result = lineStart + dotProduct * lineDirection;
+            return;
+        }
+
+        [BurstCompile]
+        public static void ClosestPointOnPlaneInfinit(ref Vector3 planePos, ref Vector3 planeNor, ref Vector3 queryPoint, ref Vector3 result)
+        {
+            result = queryPoint + (-Vector3.Dot(planeNor, queryPoint - planePos) / Vector3.Dot(planeNor, planeNor)) * planeNor;
+            return;
+        }
+
+        /// <summary>
+        /// Returns 0 if possA is closest to pos, returns 2 if possC is closest to poss....
+        /// </summary>
+        [BurstCompile]
+        public static int GetClosestPointOfPoss(ref Vector3 possA, ref Vector3 possB, ref Vector3 possC, ref Vector3 pos)
+        {
+            int bestI = 0;
+            float bestD = float.MaxValue;
+            float currentD;
+
+            //A
+            currentD = (pos - possA).sqrMagnitude;
+
+            if (currentD < bestD)
+            {
+                bestD = currentD;
+                bestI = 0;
+            }
+
+            //B
+            currentD = (pos - possB).sqrMagnitude;
+
+            if (currentD < bestD)
+            {
+                bestD = currentD;
+                bestI = 1;
+            }
+
+            //C
+            if ((pos - possC).sqrMagnitude < bestD)
+            {
+                bestI = 2;
+            }
+
+            return bestI;
+        }
+
+        [BurstCompile]
+        public static void DecomposeMatrix(ref Matrix4x4 matrix, ref Vector3 position, ref Quaternion rotation, ref Vector3 scale)
+        {
+            position = matrix.GetColumn(3);
+            rotation = Quaternion.LookRotation(matrix.GetColumn(2), matrix.GetColumn(1));
+            scale = new Vector3(matrix.GetColumn(0).magnitude, matrix.GetColumn(1).magnitude, matrix.GetColumn(2).magnitude);
+        }
+
+        [BurstCompile]
+        public static void InterpolateMatrix(ref Matrix4x4 A, ref Matrix4x4 B, float t)
+        {
+            // Decompose matrices
+            Vector3 posA = Vector3.zero, posB = Vector3.zero, scaleA = Vector3.one, scaleB = Vector3.one;
+            Quaternion rotA = Quaternion.identity, rotB = Quaternion.identity;
+
+            DecomposeMatrix(ref A, ref posA, ref rotA, ref scaleA);
+            DecomposeMatrix(ref B, ref posB, ref rotB, ref scaleB);
+
+            // Interpolate components
+            Vector3 pos = Vector3.Lerp(posA, posB, t);
+            Quaternion rot = Quaternion.Slerp(rotA, rotB, t);
+            Vector3 scale = Vector3.Lerp(scaleA, scaleB, t);
+
+            // Recompose matrix
+            A = Matrix4x4.TRS(pos, rot, scale);
+        }
     }
 
     public static class FracHelpFunc
@@ -88,7 +321,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns how much the given point has moved in the last second between objWToLPrev and objLToWNow
         /// </summary>
-        public static Vector3 GetObjectVelocityAtPoint(Matrix4x4 objWToLPrev, Matrix4x4 objLToWNow, Vector3 point, float deltatime)
+        public static Vector3 GetObjectVelocityAtPoint(ref Matrix4x4 objWToLPrev, ref Matrix4x4 objLToWNow, ref Vector3 point, float deltatime)
         {
             //for what ever reason transforming (point - velOffset) seems to give slightly better result at the cost of 2 extra transformations??
             Vector3 velOffset = point - (objLToWNow.MultiplyPoint3x4(objWToLPrev.MultiplyPoint3x4(point)) - point);
@@ -348,7 +581,7 @@ namespace Zombie1111_uDestruction
             /// [indexValue] = the sortValue that indexValue has
             /// </summary>
             public NativeHashMap<int, float> indexValueToSortValue;
-            
+
             /// <summary>
             /// [0] = the lowest sortValue that exists (The floats are always sorted from lowest to highest)
             /// </summary>
@@ -366,7 +599,7 @@ namespace Zombie1111_uDestruction
             public int Add(float sortValue, int indexValue)
             {
                 int sortIndex = GetNewSortIndex(sortValue);
-                
+
                 if (sortIndex >= sortIndexToSortValue.Length)
                 {
                     sortIndexToSortValue.Add(sortValue);
@@ -567,7 +800,7 @@ namespace Zombie1111_uDestruction
         public static void MoveItem<T>(ref List<T> list, int oldIndex, int newIndex)
         {
             if (oldIndex == newIndex) return;
-            
+
             T item = list[oldIndex];
             list.RemoveAt(oldIndex);
 
@@ -693,35 +926,6 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns the closest position index
-        /// </summary>
-        /// <param name="positions">The positions to check against</param>
-        /// <param name="pos">Closest position to this</param>
-        /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
-        /// <returns></returns>
-        public static int GetClosestPointInArray(Vector3[] positions, Vector3 pos)
-        {
-            int bestI = 0;
-            float bestD = float.MaxValue;
-            float currentD;
-
-            for (int i = 0; i < positions.Length; i++)
-            {
-                currentD = (pos - positions[i]).sqrMagnitude;
-
-                if (currentD < bestD)
-                {
-                    bestD = currentD;
-                    bestI = i;
-
-                    //if (currentD < preExitTolerance) break;
-                }
-            }
-
-            return bestI;
-        }
-
-        /// <summary>
         /// Returns the closest position on the given disc (Flat circle)
         /// </summary>
         public static Vector3 ClosestPointOnDisc(Vector3 point, Vector3 discCenter, Vector3 discNormal, float discRadius, float discRadiusSquared)
@@ -736,79 +940,11 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Returns the closest position to point on a line between start and end
-        /// </summary>
-        public static Vector3 ClosestPointOnLine(Vector3 lineStart, Vector3 lineEnd, Vector3 point)
-        {
-            Vector3 lineDirection = lineEnd - lineStart;
-            float lineLength = lineDirection.magnitude;
-            lineDirection.Normalize();
-
-            // Project the point onto the line
-            float dotProduct = Vector3.Dot(point - lineStart, lineDirection);
-            dotProduct = Mathf.Clamp(dotProduct, 0f, lineLength); // Ensure point is within the segment
-            return lineStart + dotProduct * lineDirection;
-        }
-
-        /// <summary>
         /// Returns the closest position to point on the given line
         /// </summary>
         public static Vector3 ClosestPointOnLineInfinit(Vector3 point, Vector3 linePosition, Vector3 lineDirection)
         {
             return linePosition + (Vector3.Dot(point - linePosition, lineDirection) / lineDirection.sqrMagnitude) * lineDirection;
-        }
-
-        /// <summary>
-        /// Returns the closest triangel index on the mesh
-        /// </summary>
-        /// <param name="meshWorldVers">The mesh vertics in world space</param>
-        /// <param name="meshTris">The mesh triangels</param>
-        /// <param name="pos">Closest triangel to these</param>
-        /// <param name="preExitTolerance">If point is closer than this, return it without checking rest</param>
-        /// <returns></returns>
-        public static int GetClosestTriOnMesh(Vector3[] meshWorldVers, int[] meshTris, Vector3[] poss, float worldScale = 1.0f)
-        {
-            int bestI = 0;
-            float bestD = float.MaxValue;
-            float disT;
-            float disP;
-            float worldScaleDis = worldScale * 0.00001f;
-            worldScaleDis *= worldScaleDis;
-
-            for (int i = 0; i < meshTris.Length; i += 3)
-            {
-
-                //if (Vector3.Dot(meshWorldNors[meshTris[i]].normalized, nor.normalized) < 0.5f) continue;
-
-                //if (meshVerIds[meshTris[i]] != id) continue;
-                //if distance to tris is < 2x the distance to plane, We can use plane distance
-                disT = 0.0f;
-                disP = 0.0f;
-                for (int ii = 0; ii < poss.Length; ii++)
-                {
-                    disT += (poss[ii] - ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], poss[ii])).sqrMagnitude;
-                    disP += (poss[ii] - ClosestPointOnPlaneInfinit(meshWorldVers[meshTris[i]],
-                        Vector3.Cross(meshWorldVers[meshTris[i]] - meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i]] - meshWorldVers[meshTris[i + 2]]), poss[ii])).sqrMagnitude;
-                }
-
-                //if (disT < disP * 3.0f) disT = disP;
-                if (disP < worldScaleDis) disT /= 9.0f;//The odds of this being true for "incorrect faces" and false for "correct faces" is besically 0%,
-                                                       //so it should never cause a problem. Since disT is squared 9.0f = 3.0f
-                                                       //disT = disP;
-
-                //if (disT < bestD)
-                if (disT < bestD)
-                {
-                    //bestD = disT;
-                    bestD = disT;
-                    bestI = i;
-                    if (bestD == 0.0f) break;
-
-                    //if (currentD < preExitTolerance) break;
-                }
-            }
-
-            return bestI;
         }
 
         /// <summary>
@@ -819,11 +955,12 @@ namespace Zombie1111_uDestruction
             float bestD = float.MaxValue;
             Vector3 closePos = pos;
             float disT;
-            Vector3 posT;
+            Vector3 posT = new();
 
             for (int i = 0; i < meshTris.Length; i += 3)
             {
-                posT = ClosestPointOnTriangle(meshWorldVers[meshTris[i]], meshWorldVers[meshTris[i + 1]], meshWorldVers[meshTris[i + 2]], pos);
+                FracHelpFuncBurst.ClosestPointOnTriangle(ref meshWorldVers[meshTris[i]], ref meshWorldVers[meshTris[i + 1]],
+                    ref meshWorldVers[meshTris[i + 2]], ref pos, ref posT);
                 disT = (pos - posT).sqrMagnitude;
 
                 if (disT < bestD)
@@ -1361,7 +1498,8 @@ namespace Zombie1111_uDestruction
         /// </summary>
         public static Mesh MergeSubMeshes(Mesh mesh)
         {
-            return new() {
+            return new()
+            {
                 vertices = mesh.vertices,
                 triangles = mesh.triangles,
                 normals = mesh.normals,
@@ -1831,65 +1969,6 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Generates a oriented bounding box containing the given points and then returns its volume
-        /// </summary>
-        public static float GetAccuratePointsVolume(Vector3[] points)
-        {
-            //Convert unity vec3 to g3
-            var points3d = new Vector3d[points.Length];
-            int i = 0;
-
-            foreach (var point in points)
-            {
-                //points3d[i] = point;
-                points3d[i] = point;
-                i++;
-            }
-
-            //Generate oriented bounding box using g3
-            var orientedBoundingBox = new ContOrientedBox3(points3d);
-            //if (orientedBoundingBox.ResultValid == false)//Seems to always be false even when its working
-            //{
-            //    Debug.LogError("Failed to generate oriented bounding box");
-            //    return 0.0f;
-            //}
-
-            var center = (Vector3)orientedBoundingBox.Box.Center;
-
-            var axisX = (Vector3)orientedBoundingBox.Box.AxisX;
-            var axisY = (Vector3)orientedBoundingBox.Box.AxisY;
-            var axisZ = (Vector3)orientedBoundingBox.Box.AxisZ;
-            var extends = (Vector3)orientedBoundingBox.Box.Extent;
-
-            // Now we can simply calculate our 8 vertices of the bounding box
-            var A = center - extends.z * axisZ - extends.x * axisX - axisY * extends.y;
-            var B = center - extends.z * axisZ + extends.x * axisX - axisY * extends.y;
-            var C = center - extends.z * axisZ + extends.x * axisX + axisY * extends.y;
-            var D = center - extends.z * axisZ - extends.x * axisX + axisY * extends.y;
-
-            var E = center + extends.z * axisZ - extends.x * axisX - axisY * extends.y;
-            var F = center + extends.z * axisZ + extends.x * axisX - axisY * extends.y;
-            var G = center + extends.z * axisZ + extends.x * axisX + axisY * extends.y;
-            var H = center + extends.z * axisZ - extends.x * axisX + axisY * extends.y;
-
-            // And finally visualize it
-            Debug.DrawLine(A, B, Color.red, 5.0f, false);
-            Debug.DrawLine(B, C, Color.red, 5.0f, false);
-            Debug.DrawLine(C, D, Color.red, 5.0f, false);
-            Debug.DrawLine(D, A, Color.red, 5.0f, false);
-            Debug.DrawLine(E, F, Color.red, 5.0f, false);
-            Debug.DrawLine(F, G, Color.red, 5.0f, false);
-            Debug.DrawLine(G, H, Color.red, 5.0f, false);
-            Debug.DrawLine(H, E, Color.red, 5.0f, false);
-            Debug.DrawLine(A, E, Color.red, 5.0f, false);
-            Debug.DrawLine(B, F, Color.red, 5.0f, false);
-            Debug.DrawLine(D, H, Color.red, 5.0f, false);
-            Debug.DrawLine(C, G, Color.red, 5.0f, false);
-
-            return (float)orientedBoundingBox.Box.Volume;
-        }
-
-        /// <summary>
         /// Returns the volume of the bounds (How much water it can contain)
         /// </summary>
         public static float GetBoundingBoxVolume(Bounds bounds)
@@ -1906,16 +1985,22 @@ namespace Zombie1111_uDestruction
         public static void GetMostSimilarTris(Mesh newMW, Mesh sourceMW, out int[] nVersBestSVer, out int[] nTrisBestSTri, float worldScale = 1.0f)
         {
             //get the most similar og triangel for every triangel on the comMesh
-            int[] sTris = sourceMW.triangles;
-            Vector3[] sVers = sourceMW.vertices;
+            //int[] sTris = sourceMW.triangles;
+            NativeArray<int> sTris = new(sourceMW.triangles, Allocator.Temp);
+            //Vector3[] sVers = sourceMW.vertices;
+            NativeArray<Vector3> sVers = new(sourceMW.vertices, Allocator.Temp);
 
-            int[] nTris = newMW.triangles;
-            Vector3[] nVers = newMW.vertices;
+            //int[] nTris = newMW.triangles;
+            NativeArray<int> nTris = new(newMW.triangles, Allocator.Temp);
+            //Vector3[] nVers = newMW.vertices;
+            NativeArray<Vector3> nVers = new(newMW.vertices, Allocator.Temp);
 
             int ntL = nTris.Length / 3;
             NativeArray<int> closeOTris = new(ntL, Allocator.Temp);
             int nvL = nVers.Length;
-            int[] closeOVer = Enumerable.Repeat(-1, nvL).ToArray();
+            //int[] closeOVer = Enumerable.Repeat(-1, nvL).ToArray();
+            NativeArray<int> closeOVer = new(Enumerable.Repeat(-1, nvL).ToArray(), Allocator.Temp);
+            System.Object lockObject = new();
 
             //Debug_drawMesh(newMW, false, 10.0f);
             //Debug_drawMesh(sourceMW, false, 10.0f);
@@ -1923,54 +2008,48 @@ namespace Zombie1111_uDestruction
             Parallel.For(0, ntL, i =>
             {
                 int tI = i * 3;
+                Vector3 tPosA = nVers[nTris[tI]];
+                Vector3 tPosB = nVers[nTris[tI + 1]];
+                Vector3 tPosC = nVers[nTris[tI + 2]];
 
-                closeOTris[i] = FracHelpFunc.GetClosestTriOnMesh(
-                    sVers,
-                    sTris,
-                    new Vector3[3] { nVers[nTris[tI]], nVers[nTris[tI + 1]], nVers[nTris[tI + 2]] },
+                int closeTrisI = FracHelpFuncBurst.GetClosestTriOnMesh(
+                    ref sVers,
+                    ref sTris,
+                    ref tPosA, ref tPosB, ref tPosC,
                     worldScale);
 
-                Vector3[] oTrisPoss = new Vector3[3] { sVers[sTris[closeOTris[i]]], sVers[sTris[closeOTris[i] + 1]], sVers[sTris[closeOTris[i] + 2]] };
+                closeOTris[i] = closeTrisI;
+                //Vector3[] oTrisPoss = new Vector3[3] { sVers[sTris[closeTrisI]], sVers[sTris[closeTrisI + 1]], sVers[sTris[closeTrisI + 2]] };
+                Vector3 ttPosA = sVers[sTris[closeTrisI]];
+                Vector3 ttPosB = sVers[sTris[closeTrisI + 1]];
+                Vector3 ttPosC = sVers[sTris[closeTrisI + 2]];
 
-                ////debug stuff
-                //Vector3[] tPoss = new Vector3[3] { nVers[nTris[tI]], nVers[nTris[tI + 1]], nVers[nTris[tI + 2]] };
-                //foreach (Vector3 pos in tPoss)
-                //{
-                //    Debug.DrawLine(pos, ClosestPointOnTriangle(oTrisPoss[0], oTrisPoss[1], oTrisPoss[2], pos), Color.yellow, 10.0f);
-                //}
-
-                lock (closeOVer)
+                lock (lockObject)
                 {
                     if (closeOVer[nTris[tI]] < 0)
                     {
-                        closeOVer[nTris[tI]] = sTris[closeOTris[i] + FracHelpFunc.GetClosestPointInArray(
-                          oTrisPoss,
-                          nVers[nTris[tI]])];
-
-                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI]]], cVers[cTris[tI]], Color.magenta, 30.0f);
+                        closeOVer[nTris[tI]] = sTris[closeTrisI + FracHelpFuncBurst.GetClosestPointOfPoss(
+                             ref ttPosA, ref ttPosB, ref ttPosC,
+                             ref tPosA)];
                     }
 
                     if (closeOVer[nTris[tI + 1]] < 0)
                     {
-                        closeOVer[nTris[tI + 1]] = sTris[closeOTris[i] + FracHelpFunc.GetClosestPointInArray(
-                          oTrisPoss,
-                          nVers[nTris[tI + 1]])];
-
-                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 1]]], cVers[cTris[tI + 1]], Color.magenta, 30.0f);
+                        closeOVer[nTris[tI + 1]] = sTris[closeTrisI + FracHelpFuncBurst.GetClosestPointOfPoss(
+                            ref ttPosA, ref ttPosB, ref ttPosC,
+                            ref tPosB)];
                     }
 
                     if (closeOVer[nTris[tI + 2]] < 0)
                     {
-                        closeOVer[nTris[tI + 2]] = sTris[closeOTris[i] + FracHelpFunc.GetClosestPointInArray(
-                          oTrisPoss,
-                          nVers[nTris[tI + 2]])];
-
-                        //if (oI == 0 && Vector3.Distance(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]]) > 0.001f) Debug.DrawLine(oVerss[oI][closeOVer[cTris[tI + 2]]], cVers[cTris[tI + 2]], Color.magenta, 30.0f);
+                        closeOVer[nTris[tI + 2]] = sTris[closeTrisI + FracHelpFuncBurst.GetClosestPointOfPoss(
+                            ref ttPosA, ref ttPosB, ref ttPosC,
+                            ref tPosC)];
                     }
                 }
             });
 
-            nVersBestSVer = closeOVer;
+            nVersBestSVer = closeOVer.ToArray();
             nTrisBestSTri = closeOTris.ToArray();
             closeOTris.Dispose();
         }
@@ -1979,7 +2058,7 @@ namespace Zombie1111_uDestruction
         /// Returns a mesh that is as similar to sourceMesh as possible while being convex, sourceMeshW must be in worldspace
         /// </summary>
         public static Mesh MakeMeshConvex(Mesh sourceMeshW, bool verticsOnly = false, float worldScale = 1.0f)
-        {   
+        {
             var calc = new QuickHull_convex();
             var verts = new List<Vector3>();
             var tris = new List<int>();
@@ -2203,17 +2282,17 @@ namespace Zombie1111_uDestruction
             {
                 int ntI = i * 3;
                 int ssI = sTrisSubMeshI[nTrisBestSTri[i]];
-               
+
                 nSubTris[ssI].Add(nTris[ntI]);
                 nSubTris[ssI].Add(nTris[ntI + 1]);
                 nSubTris[ssI].Add(nTris[ntI + 2]);
             }
-            
+
             //remove unused submeshes
             for (int nsI = nSubTris.Count - 1; nsI >= 0; nsI--)
             {
                 if (nSubTris[nsI].Count > 0) continue;
-                    
+
                 nSubTris.RemoveAt(nsI);
                 nSubSSubI.RemoveAt(nsI);
             }
@@ -2360,150 +2439,9 @@ namespace Zombie1111_uDestruction
             return midPos / positions.Length;
         }
 
-        public static Vector3 ClosestPointOnPlaneInfinit(Vector3 planePos, Vector3 planeNor, Vector3 queryPoint)
-        {
-            return queryPoint + (-Vector3.Dot(planeNor, queryPoint - planePos) / Vector3.Dot(planeNor, planeNor)) * planeNor;
-        }
-
-        public static Vector3 ClosestPointOnTriangle(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 queryPoint)
-        {
-            //first get closest point on plane
-            Vector3 pNor = Vector3.Cross(p0 - p1, p0 - p2);
-            Vector3 closeP = queryPoint + (-Vector3.Dot(pNor, queryPoint - p0) / Vector3.Dot(pNor, pNor)) * pNor;
-
-            //if the closest point on plane is inside the triangel, return closest planePoint
-            if (PointInTriangle(closeP) == true) return closeP;
-
-            //return closest point on the closest edge
-            //Vector3[] closeL = new Vector3[3] { ClosestPointOnLine(p0, p1, queryPoint), ClosestPointOnLine(p1, p2, queryPoint), ClosestPointOnLine(p0, p2, queryPoint) };
-            Vector3 pLine0 = ClosestPointOnLine(p0, p1, queryPoint);
-            Vector3 pLine1 = ClosestPointOnLine(p1, p2, queryPoint);
-            Vector3 pLine2 = ClosestPointOnLine(p0, p2, queryPoint);
-
-            float cLine0 = (pLine0 - queryPoint).sqrMagnitude;
-            float cLine1 = (pLine1 - queryPoint).sqrMagnitude;
-            float cLine2 = (pLine2 - queryPoint).sqrMagnitude;
-
-            if (cLine0 < cLine1)
-            {
-                //0 or 2 is closest
-                if (cLine2 < cLine0) return pLine2;
-                return pLine0;
-            }
-
-            if (cLine1 < cLine2)
-            {
-                //1 is closest. We checked 0 before
-                return pLine1;
-            }
-
-            return pLine2;
-
-
-            //return closeL[GetClosestPointInArray(closeL, queryPoint, 0.0f)];
-
-            bool PointInTriangle(Vector3 p)
-            {
-                // Lets define some local variables, we can change these
-                // without affecting the references passed in
-                Vector3 a = p0 - p;
-                Vector3 b = p1 - p;
-                Vector3 c = p2 - p;
-
-                // The point should be moved too, so they are both
-                // relative, but because we don't use p in the
-                // equation anymore, we don't need it!
-                // p -= p;
-
-                // Compute the normal vectors for triangles:
-                // u = normal of PBC
-                // v = normal of PCA
-                // w = normal of PAB
-
-                Vector3 u = Vector3.Cross(b, c);
-                Vector3 v = Vector3.Cross(c, a);
-                Vector3 w = Vector3.Cross(a, b);
-
-                // Test to see if the normals are facing 
-                // the same direction, return false if not
-                if (Vector3.Dot(u, v) < 0f)
-                {
-                    return false;
-                }
-                if (Vector3.Dot(u, w) < 0.0f)
-                {
-                    return false;
-                }
-
-                // All normals facing the same way, return true
-                return true;
-            }
-
-            //// Calculate triangle normal
-            //Vector3 triNorm = Vector3.Cross(pointA - pointB, pointA - pointC);
-            //
-            //// Calculate the projection of the query point onto the triangle plane
-            //Plane triPlane = new(triNorm, pointA);
-            //triPlane.Set3Points(pointA, pointB, pointC);
-            //Vector3 projectedPoint = triPlane.ClosestPointOnPlane(queryPoint);
-            //return projectedPoint;
-            //
-            //// Check if the projected point is inside the triangle
-            //if (IsPointInTriangle(projectedPoint, pointA, pointB, pointC))
-            //{
-            //    return projectedPoint;
-            //}
-            //else
-            //{
-            //    // If not, find the closest point on each triangle edge
-            //    Vector3 closestOnAB = ClosestPointOnSegment(pointA, pointB, queryPoint);
-            //    Vector3 closestOnBC = ClosestPointOnSegment(pointB, pointC, queryPoint);
-            //    Vector3 closestOnCA = ClosestPointOnSegment(pointC, pointA, queryPoint);
-            //
-            //    // Find the closest point among these three
-            //    float distAB = Vector3.Distance(queryPoint, closestOnAB);
-            //    float distBC = Vector3.Distance(queryPoint, closestOnBC);
-            //    float distCA = Vector3.Distance(queryPoint, closestOnCA);
-            //
-            //    if (distAB < distBC && distAB < distCA)
-            //        return closestOnAB;
-            //    else if (distBC < distCA)
-            //        return closestOnBC;
-            //    else
-            //        return closestOnCA;
-            //}
-            //
-            //
-            //bool IsPointInTriangle(Vector3 point, Vector3 A, Vector3 B, Vector3 C)
-            //{
-            //
-            //    // Check if the point is inside the triangle using barycentric coordinates
-            //    float alpha = ((B - C).y * (point.x - C.x) + (C - B).x * (point.y - C.y)) /
-            //                  ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
-            //
-            //    float beta = ((C - A).y * (point.x - C.x) + (A - C).x * (point.y - C.y)) /
-            //                 ((B - C).y * (A.x - C.x) + (C - B).x * (A.y - C.y));
-            //
-            //    float gamma = 1.0f - alpha - beta;
-            //
-            //    return alpha > 0 && beta > 0 && gamma > 0;
-            //}
-            //
-            //Vector3 ClosestPointOnSegment(Vector3 start, Vector3 end, Vector3 queryPoint)
-            //{
-            //    // Find the closest point on a line segment
-            //    Vector3 direction = end - start;
-            //    float t = Mathf.Clamp01(Vector3.Dot(queryPoint - start, direction) / direction.sqrMagnitude);
-            //    return start + t * direction;
-            //}
-        }
-
-
         /// <summary>
         /// Performs a linecast for all positions between all positions
         /// </summary>
-        /// <param name="poss"></param>
-        /// <returns></returns>
         public static HashSet<Collider> LinecastsBetweenPositions(List<Vector3> poss, PhysicsScene phyScene)
         {
             RaycastHit[] rHits = new RaycastHit[5];
@@ -2532,7 +2470,7 @@ namespace Zombie1111_uDestruction
             return cHits;
         }
 
-        public  static int FindTriangleIndexWithVertex(int[] triangles, int vertexIndex)
+        public static int FindTriangleIndexWithVertex(int[] triangles, int vertexIndex)
         {
             for (int i = 0; i < triangles.Length; i += 3)
             {
@@ -2827,7 +2765,7 @@ namespace Zombie1111_uDestruction
         public static void MatchChildTransforms(Transform A, Transform B)
         {
             int childCount = Mathf.Min(A.childCount, B.childCount);
-            
+
             for (int i = 0; i < childCount; i++)
             {
                 Transform childA = A.GetChild(i);
@@ -2899,7 +2837,7 @@ namespace Zombie1111_uDestruction
             GameObject newO = new("Debug_meshRend");
             MeshFilter meshF = newO.AddComponent<MeshFilter>();
             MeshRenderer meshR = newO.AddComponent<MeshRenderer>();
-            
+
             meshF.mesh = meshW;
             Material[] mats = new Material[meshW.subMeshCount];
             for (int i = 0; i < mats.Length; i++)
@@ -3016,13 +2954,22 @@ namespace Zombie1111_uDestruction
             newRb.maxAngularVelocity = source.maxAngularVelocity;
             newRb.maxLinearVelocity = source.maxLinearVelocity;
             newRb.maxDepenetrationVelocity = source.maxDepenetrationVelocity;
+#if UNITY_2023_1_OR_NEWER
+            newRb.angularDamping = source.angularDamping;
+            newRb.linearDamping = source.linearDamping;
+#else
             newRb.angularDrag = source.angularDrag;
             newRb.drag = source.drag;
+#endif
             newRb.freezeRotation = source.freezeRotation;
             newRb.constraints = source.constraints;
             if (newRb.isKinematic == false)
             {
+#if UNITY_2023_1_OR_NEWER
+                newRb.linearVelocity = source.linearVelocity;
+#else
                 newRb.velocity = source.velocity;
+#endif
                 newRb.angularVelocity = source.angularVelocity;
             }
             newRb.collisionDetectionMode = source.collisionDetectionMode;
@@ -3033,7 +2980,7 @@ namespace Zombie1111_uDestruction
         public static int EncodeHierarchyPath(Transform child, Transform parent)
         {
             if (child == parent) return -1;
-            
+
             int path = 0;
             int shift = 0;
             Transform current = child;
@@ -3056,7 +3003,7 @@ namespace Zombie1111_uDestruction
         public static Transform DecodeHierarchyPath(Transform parent, int path)
         {
             if (path == -1) return parent;
-            
+
             Transform current = parent;
             int shift = 0;
 
@@ -3205,7 +3152,7 @@ namespace Zombie1111_uDestruction
             }
 
             throw new Exception("Copying " + source.GetType() + "s has not been implemented!");
-            
+
             void SetGlobalProperties(Joint ogJoint, Joint newJoint)
             {
                 newJoint.anchor = anchorPosition;
@@ -3223,5 +3170,5 @@ namespace Zombie1111_uDestruction
             }
         }
 #endif
-    }
-}
+            }
+        }

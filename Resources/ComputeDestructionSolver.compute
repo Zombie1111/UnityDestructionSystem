@@ -117,7 +117,6 @@ int partBoneOffset; //allFracBonesLToW[partI + partBoneOffset] is the LToW matri
 int fracRendVerCount; //The number of vertics in the frac mesh
 float4x4 fracRendWToL; //The WToL matrix for the frac mesh
 RWStructuredBuffer<float4x4> allFracBonesLToW; //The LToW matrix for every bone
-RWStructuredBuffer<BoneWeight> fr_boneWeightsCurrent; //The bone weight for every vertex in frac mesh
 RWStructuredBuffer<MeshData> fr_meshData;
 
 //bend stuff
@@ -161,15 +160,10 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     GpuMeshVertex meshVerx = meshVertexs[id.x];
     
     //get skin bone matrix
-    BoneWeight boneWeight = fr_boneWeightsCurrent[id.x];
-    float4x4 boneMatrixLToW = allFracBonesLToW[boneWeight.boneIndex0] * boneWeight.weight0 +
-        allFracBonesLToW[boneWeight.boneIndex1] * boneWeight.weight1 +
-        allFracBonesLToW[boneWeight.boneIndex2] * boneWeight.weight2 +
-        allFracBonesLToW[boneWeight.boneIndex3] * boneWeight.weight3;
+    MeshData meshD = fr_meshData[id.x];
+    float4x4 boneMatrixLToW = allFracBonesLToW[meshD.verToPartI];
     
     //deform mesh
-    MeshData meshD = fr_meshData[id.x];
-    
     if (defPointsLenght > 0)
     {
         int parentI = partIToParentI[meshD.verToPartI];

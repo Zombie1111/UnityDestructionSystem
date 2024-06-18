@@ -1,4 +1,3 @@
-using g3;
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
@@ -25,10 +24,10 @@ namespace Zombie1111_uDestruction
         #region InstanceIds
         private ConcurrentDictionary<int, GlobalFracData> partColsInstanceId = new();
 
-        private class GlobalTransToSet
+        private class GlobalRbDataToSet
         {
-            public Rigidbody rb;
-            public float mass;
+            public GlobalRbData rbData;
+
             /// <summary>
             /// 0 = remove, 1 = add+reset, 2 = add+update
             /// </summary>
@@ -47,21 +46,6 @@ namespace Zombie1111_uDestruction
             //setup rb job
             GetRbVelocities_setup();
 
-#pragma warning disable IDE0079
-#pragma warning disable 0162
-            //get all rigidbodies in scene
-            if (FracGlobalSettings.addAllActiveRigidbodiesOnLoad == true)
-            {
-                Rigidbody[] bodies = GameObject.FindObjectsByType<Rigidbody>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-                foreach (Rigidbody rb in bodies)
-                {
-                    OnAddOrUpdateRb(rb, rb.mass);
-                    //rigidbodiesInstanceId.TryAdd(rb.GetInstanceID(), rb);
-                }
-            }
-#pragma warning restore 0162
-#pragma warning restore IDE0079
-
             //verify global handlers
             //If more than one global handler exists merge other with this one
             FractureGlobalHandler[] handlers = GameObject.FindObjectsByType<FractureGlobalHandler>(FindObjectsInactive.Include, FindObjectsSortMode.None);
@@ -70,14 +54,22 @@ namespace Zombie1111_uDestruction
                 if (handlers[i] == this) continue;
                 handlers[i].GetRbVelocities_end();//make sure the job aint running
 
-                partColsInstanceId.AddRange(handlers[i].partColsInstanceId);
+#pragma warning disable CS0162 // Unreachable code detected
+                if (FracGlobalSettings.canAutomaticallyRemoveAddedRigidbodies == false) partColsInstanceId.AddRange(handlers[i].partColsInstanceId);
+                else foreach (var idFrac in handlers[i].partColsInstanceId)
+                     {
+                         if (idFrac.Value.fracThis == null) continue;
+                         idFrac.Value.fracThis.globalHandler = this;
+                         partColsInstanceId.TryAdd(idFrac.Key, idFrac.Value);
+                     }
+#pragma warning restore CS0162 // Unreachable code detected
 
-                for (int rI = 0; rI < handlers[i].jGRV_rb_mass.Count; rI++)
+                int rbCount = handlers[i].jGRV_rbData.Count;
+                for (int rI = 0; rI < rbCount; rI++)
                 {
-                    if (handlers[i].jGRV_rbTrans[rI].transform == null
-                        || handlers[i].jGRV_rbTrans[rI].transform.TryGetComponent(out Rigidbody rb) == false) continue;
+                    if (handlers[i].jGRV_rbData[rI].rb == null) continue;
 
-                    OnAddOrUpdateRb(rb, handlers[i].jGRV_rb_mass[rI].desMass);//potential issue, if the rb hit something the same frame it wont cause any damage
+                    OnAddOrUpdateRb(handlers[i].jGRV_rbData[rI]);
                 }
 
                 foreach (var pair in handlers[i].jGRV_rbToSet)
@@ -88,17 +80,18 @@ namespace Zombie1111_uDestruction
                 Destroy(handlers[i]);
             }
 
-            ogFixedTimeStep = Time.fixedDeltaTime;
+            //Get ogFixedTimeStep
+            if (handlers.Length == 0) ogFixedTimeStep = Time.fixedDeltaTime;
+            else ogFixedTimeStep = handlers[0].ogFixedTimeStep;
+
         }
 
         private void Start()
         {
-#pragma warning disable IDE0079
-#pragma warning disable 0162
             //When a new scene is loaded old rigidbodies and fracs can often be null
-            if (FracGlobalSettings.addAllActiveRigidbodiesOnLoad == true) RemoveNullInstanceIds();
-#pragma warning restore 0162
-#pragma warning restore IDE0079
+#pragma warning disable CS0162 // Unreachable code detected
+            if (FracGlobalSettings.canAutomaticallyRemoveAddedRigidbodies == true) RemoveNullRigidbodies();
+#pragma warning restore CS0162 // Unreachable code detected
         }
 
         public void OnAddFracPart(FractureThis frac, short partI)
@@ -134,9 +127,8 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Call to remove a rigidbody that you added with OnAddOrUpdateRb(), should always be called before you destroy a rigidbody component
+        /// Call to remove a rigidbody that you added with OnAddOrUpdateRb()
         /// </summary>
-        /// <param name="rbToRemove">The rigidbody </param>
         public void OnRemoveRigidbody(Rigidbody rbToRemove)
         {
             int rbId = rbToRemove.GetInstanceID();
@@ -150,19 +142,25 @@ namespace Zombie1111_uDestruction
         /// Makes sure the rigidbody is added to the destruction system and resets its properties,
         /// call if you have teleported the rigidbody or created new rb. Mass must be > 0.0f
         /// </summary>
-        /// <param name="mass">The mass the rigidbody has for the destruction system</param>
-        public void OnAddOrResetRb(Rigidbody rbToAddOrReset, float mass)
+        /// <param name="desMass">The mass the rigidbody should have for the destruction system</param>
+        /// <param name="rbMass">The mass the rigidbody actually has, should always be equal to rbToAddOrReset.mass</param>
+        public void OnAddOrResetRb(GlobalRbData rbData)
         {
-            int rbId = rbToAddOrReset.GetInstanceID();
+            int rbId = rbData.rb.GetInstanceID();
+            if (rbData.rb.isKinematic == true)
+            {
+                rbData.desMass *= -1;
+                rbData.rbMass *= -1;
+            }
+
             if (jGRV_rbToSet.TryAdd(rbId, new()
             {
-                mass = mass,
-                rb = rbToAddOrReset,
+                rbData = rbData,
                 updateStatus = 1
             }) == false)
             {
                 if (jGRV_rbToSet[rbId].updateStatus == 2) jGRV_rbToSet[rbId].updateStatus = 1;
-                jGRV_rbToSet[rbId].mass = mass;
+                jGRV_rbToSet[rbId].rbData = rbData;
             }
         }
 
@@ -170,40 +168,75 @@ namespace Zombie1111_uDestruction
         /// Makes sure the rigidbody is added to the destruction system and updates its properties,
         /// call if you have modified the rigidbody mass or created new rb. Mass must be > 0.0f
         /// </summary>
-        /// <param name="mass">The mass the rigidbody has for the destruction system</param>
-        public void OnAddOrUpdateRb(Rigidbody rbToAddOrUpdate, float mass)
+        /// <param name="desMass">The mass the rigidbody should have for the destruction system</param>
+        /// <param name="rbMass">The mass the rigidbody actually has, should always be equal to rbToAddOrUpdate.mass</param>
+        public void OnAddOrUpdateRb(GlobalRbData rbData)
         {
-            int rbId = rbToAddOrUpdate.GetInstanceID();
+            int rbId = rbData.rb.GetInstanceID();
+            if (rbData.rb.isKinematic == true)
+            {
+                rbData.desMass *= -1;
+                rbData.rbMass *= -1;
+            }
+
             if (jGRV_rbToSet.TryAdd(rbId, new()
             {
-                mass = mass,
-                rb = rbToAddOrUpdate,
+                rbData = rbData,
                 updateStatus = 2
             }) == false)
             {
-                jGRV_rbToSet[rbId].mass = mass;
+                jGRV_rbToSet[rbId].rbData = rbData;
             }
         }
 
         /// <summary>
-        /// Call to remove all rigidbodies and fractures that has been destroyed
+        /// Call to remove all rigidbodies that has been destroyed
         /// </summary>
-        public void RemoveNullInstanceIds()
+        public void RemoveNullRigidbodies()
         {
-            bool wasRunning = jGRV_jobIsActive;
-            GetRbVelocities_end(); //make sure job aint running
-
-            foreach (int rbId in rbInstancIdToJgrvIndex.Keys)
+            //Remove rigidbodies
+            foreach (var rbIdIndex in rbInstancIdToJgrvIndex)
             {
-                if (jGRV_rbTrans[rbInstancIdToJgrvIndex[rbId]].transform != null
-                    && jGRV_rbTrans[rbInstancIdToJgrvIndex[rbId]].transform.TryGetComponent<Rigidbody>(out _) == true) continue;
+                if (jGRV_rbData[rbIdIndex.Value].rb != null) continue;
 
-                if (jGRV_rbToSet.TryAdd(rbId, new() { updateStatus = 0 }) == false)
-                    jGRV_rbToSet[rbId].updateStatus = 0;
+                if (jGRV_rbToSet.TryAdd(rbIdIndex.Key, new() { updateStatus = 0 }) == false)
+                    jGRV_rbToSet[rbIdIndex.Key].updateStatus = 0;
             }
 
-            //start job again
-            if (wasRunning == true) GetRbVelocities_start();
+            //Remove fractures
+            foreach (var idFrac in partColsInstanceId)
+            {
+                if (idFrac.Value.fracThis != null) continue;
+
+                partColsInstanceId.TryRemove(idFrac.Key, out _);
+            }
+        }
+
+        /// <summary>
+        /// Returns a valid FractureGlobalHandler, returns null if no valid FractureGlobalHandler exist in scene
+        /// </summary>
+        public static FractureGlobalHandler TryGetGlobalHandler(GameObject sourceObj, FractureThis sourceFrac = null, bool canLogError = true)
+        {
+            FractureGlobalHandler[] handlers = GameObject.FindObjectsOfType<FractureGlobalHandler>(true);
+            if (handlers == null || handlers.Length < 1 || handlers[0].isActiveAndEnabled == false)
+            {
+                if (canLogError == true) Debug.LogError("There is no active FractureGlobalHandler script in " + sourceObj.scene.name + " (Scene), make sure a active Gameobject has the script attatch to it");
+                return null;
+            }
+            else if (handlers.Length > 1)
+            {
+                if (canLogError == true) Debug.LogError("There are more than one FractureGlobalHandler script in " + sourceObj.scene.name + " (Scene), please remove all but one and refracture all objects");
+                return null;
+            }
+
+            if (handlers[0].gameObject.scene != sourceObj.scene)
+            {
+                int prefabT = sourceFrac != null ? sourceFrac.GetFracturePrefabType() : 0;
+                if (prefabT != 2 && canLogError == true) Debug.LogError("The FractureGlobalHandler script must be in the same scene as " + sourceObj.transform.name);
+                return prefabT == 2 ? handlers[0] : null;
+            }
+
+            return handlers[0];
         }
 
         #endregion InstanceIds
@@ -296,24 +329,12 @@ namespace Zombie1111_uDestruction
 #endif
         }
 
-
         private float syncTime = 0.0f;
         private int syncFrames = 0;
         private float ogFixedTimeStep;
 
         private void Update()
         {
-            //debug keys
-            if (Input.GetKeyDown(KeyCode.U) == true)
-            {
-                Rigidbody[] bodies = GameObject.FindObjectsByType<Rigidbody>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-                foreach (Rigidbody rb in bodies)
-                {
-                    OnAddOrUpdateRb(rb, rb.mass);
-                    //rigidbodiesInstanceId.TryAdd(rb.GetInstanceID(), rb);
-                }
-            }
-
 #pragma warning disable IDE0079
 #pragma warning disable 0162
             //sync fixedTimestep with fps
@@ -337,30 +358,39 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Contains all transforms that should be set on the trans velocity system, trans instanceId as key
         /// </summary>
-        private Dictionary<int, GlobalTransToSet> jGRV_rbToSet = new();
+        private Dictionary<int, GlobalRbDataToSet> jGRV_rbToSet = new();
         private TransformAccessArray jGRV_rbTrans;
         /// <summary>
         /// Contains data about the rigidbody mass
         /// </summary>
-        private List<GlobalRbData> jGRV_rb_mass;
+        private List<GlobalRbData> jGRV_rbData;
         private JobHandle jGRV_handle;
         public GetRbVelocities_work jGRV_job;
         public Dictionary<int, int> rbInstancIdToJgrvIndex = new();
         private bool jGRV_jobIsActive = false;
 
-        private class GlobalRbData
+        [System.Serializable]
+        public class GlobalRbData
         {
-            public Rigidbody rb;
+            public GlobalRbData ShallowCopy()
+            {
+                return (GlobalRbData)this.MemberwiseClone();
+            }
+
+            [System.NonSerialized] public Rigidbody rb;
 
             /// <summary>
             /// The mass of the rigidbody as seen by the destruction system
             /// </summary>
-            public float desMass;
+            [System.NonSerialized] public float desMass;
 
             /// <summary>
             /// The mass of the actuall rigidbody
             /// </summary>
-            public float rbMass;
+            [System.NonSerialized] public float rbMass;
+
+            //Add custom properties here
+            //public float buoyancy; //Example
         }
 
         private void OnDestroy()
@@ -384,7 +414,7 @@ namespace Zombie1111_uDestruction
 
             jGRV_rbTrans = new();
             jGRV_jobIsActive = false;
-            jGRV_rb_mass = new();
+            jGRV_rbData = new();
         }
 
         private void GetRbVelocities_start()
@@ -417,17 +447,20 @@ namespace Zombie1111_uDestruction
 
                 foreach (int rbId in jGRV_rbToSet.Keys)
                 {
+                    //Get rbToSet
                     var rbToSet = jGRV_rbToSet[rbId];
                     byte uStatus = rbToSet.updateStatus;
                     Transform rbTrans;
+
+                    //Remove if rbToSet has been destoyed 
                     if (uStatus > 0)
                     {
-                        if (rbToSet.rb == null)
+                        if (rbToSet.rbData.rb == null)
                         {
                             rbTrans = null;
                             uStatus = 0;
                         }
-                        else rbTrans = rbToSet.rb.transform;
+                        else rbTrans = rbToSet.rbData.rb.transform;
                     }
                     else rbTrans = null;
 
@@ -435,18 +468,12 @@ namespace Zombie1111_uDestruction
                     {
                         if (uStatus > 0)
                         {
-                            //update or reset
-                            bool isKinematic = rbToSet.rb.isKinematic;
-                            jGRV_rb_mass[jIndex].desMass = isKinematic == false ? rbToSet.mass : -rbToSet.mass;
-                            jGRV_rb_mass[jIndex].rbMass = isKinematic == false ? rbToSet.rb.mass : -rbToSet.rb.mass;
+                            //update and maybe reset
+                            jGRV_rbData[jIndex] = rbToSet.rbData;
+
+                            if (uStatus == 2) continue;
+
                             var posD = jGRV_job.rb_posData[jIndex];
-
-                            if (uStatus == 2)
-                            {
-                                jGRV_job.rb_posData[jIndex] = posD;
-                                continue;
-                            }
-
                             posD.rbLToWNow = rbTrans.localToWorldMatrix;
                             posD.rbWToLPrev = rbTrans.worldToLocalMatrix;
                             jGRV_job.rb_posData[jIndex] = posD;
@@ -455,7 +482,7 @@ namespace Zombie1111_uDestruction
                         {
                             //remove
                             jGRV_rbTrans.RemoveAtSwapBack(jIndex);
-                            jGRV_rb_mass.RemoveAtSwapBack(jIndex);
+                            jGRV_rbData.RemoveAtSwapBack(jIndex);
                             jGRV_job.rb_posData.RemoveAtSwapBack(jIndex);
                             rbInstancIdToJgrvIndex.Remove(rbId);
                             int movedId = rbInstancIdToJgrvIndex.Count;
@@ -476,13 +503,7 @@ namespace Zombie1111_uDestruction
                         if (jGRV_rbTrans.isCreated == false) jGRV_rbTrans = new(new Transform[1] { rbTrans });
                         else jGRV_rbTrans.Add(rbTrans);
 
-                        bool isKinematic = rbToSet.rb.isKinematic;
-                        jGRV_rb_mass.Add(new()
-                        {
-                            desMass = isKinematic == false ? rbToSet.mass : -rbToSet.mass,
-                            rbMass = isKinematic == false ? rbToSet.rb.mass : -rbToSet.rb.mass,
-                            rb = rbToSet.rb
-                        });
+                        jGRV_rbData.Add(rbToSet.rbData);
 
                         jGRV_job.rb_posData.Add(new()
                         {
@@ -515,9 +536,16 @@ namespace Zombie1111_uDestruction
                 RbPosData posD = rb_posData[index];
                 //InterpolateMatrix(ref posD.rbWToLPrev, posD.rbLToWNow.inverse, 0.4f);
                 //InterpolateMatrix(ref posD.rbLToWNow, transform.localToWorldMatrix, 0.4f);
+
+                //var wToLPrev = posD.rbLToWNow.inverse;
+                //FracHelpFuncBurst.InterpolateMatrix(ref posD.rbWToLPrev, ref wToLPrev, 0.4f);
+                //
+                //var lToWNow = transform.localToWorldMatrix;
+                //FracHelpFuncBurst.InterpolateMatrix(ref posD.rbLToWNow, ref lToWNow, 0.4f);
+
                 posD.rbWToLPrev = posD.rbLToWNow.inverse;
                 posD.rbLToWNow = transform.localToWorldMatrix;
-
+                
                 rb_posData[index] = posD;
 
                 //void InterpolateMatrix(ref Matrix4x4 from, Matrix4x4 to, float t)
@@ -728,7 +756,7 @@ namespace Zombie1111_uDestruction
                     //var desP = iPair.impPoints[i];
                     impP.force /= iPair.impForceTotal;
 
-                    if (debug.Add(impP.partI) ==false)
+                    if (debug.Add(impP.partI) == false)
                     {
                         Debug.LogError("double " + impP.partI);
                     }
@@ -963,10 +991,13 @@ namespace Zombie1111_uDestruction
 
                 if (rbInstancIdToJgrvIndex.TryGetValue(bodyId, out rbI) == true)
                 {
+                    var rbWToLPrev = jGRV_job.rb_posData[rbI].rbWToLPrev;
+                    var rbWToLNow = jGRV_job.rb_posData[rbI].rbLToWNow;
+
                     rbVel = FracHelpFunc.GetObjectVelocityAtPoint(
-                            jGRV_job.rb_posData[rbI].rbWToLPrev,
-                            jGRV_job.rb_posData[rbI].rbLToWNow,
-                            impPos, fixedDeltatime
+                            ref rbWToLPrev,
+                            ref rbWToLNow,
+                            ref impPos, fixedDeltatime
                             );
 
                     //Normals are bad for fast moving objects (Unless using continues collision) This is because collision does
@@ -1014,8 +1045,8 @@ namespace Zombie1111_uDestruction
                 //Debug.DrawLine(impPos, impPos + (impactVel * forceApplied * 0.1f), Color.yellow, 0.1f);
                 if (impIdToImpPair.TryGetValue(thisImpId, out ImpPair impPair) == false)
                 {
-                    GlobalRbData sourceRbData = otherRbI < 0 ? null : jGRV_rb_mass[otherRbI];
-                    GlobalRbData thisRbData = thisRbI < 0 ? null : jGRV_rb_mass[thisRbI];
+                    GlobalRbData sourceRbData = otherRbI < 0 ? null : jGRV_rbData[otherRbI];
+                    GlobalRbData thisRbData = thisRbI < 0 ? null : jGRV_rbData[thisRbI];
 
                     impPair = new()
                     {
@@ -1074,9 +1105,9 @@ namespace Zombie1111_uDestruction
                 if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceConsume(forceVel, fracD_hit.partIndex, bouncyness);
 
                 //if the opposite object is not destructable it has infinit stenght
-                if (rbI_hit < 0 || jGRV_rb_mass[rbI_hit].desMass < 0.0f) return float.MaxValue;
+                if (rbI_hit < 0 || jGRV_rbData[rbI_hit].desMass < 0.0f) return float.MaxValue;
 
-                float forceConsume = forceVel.magnitude * jGRV_rb_mass[rbI_hit].desMass;
+                float forceConsume = forceVel.magnitude * jGRV_rbData[rbI_hit].desMass;
                 return forceConsume + (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
             }
 
@@ -1088,7 +1119,7 @@ namespace Zombie1111_uDestruction
                 transCap = 0.0f;
 
                 if (rbI_hit < 0 || rbIsKinematic == true) return float.MaxValue;
-                float forceConsume = forceVel.magnitude * Mathf.Abs(jGRV_rb_mass[rbI_hit].desMass);
+                float forceConsume = forceVel.magnitude * Mathf.Abs(jGRV_rbData[rbI_hit].desMass);
                 return forceConsume - (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
             }
         }

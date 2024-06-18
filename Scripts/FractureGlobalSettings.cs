@@ -10,6 +10,7 @@ namespace Zombie1111_uDestruction
         FRAC_NO_VERIFICATION //If defined, no verify saving before fracturing and no notices
         FRAC_NO_BURST //If defined, burst wont be used in Zombie1111_uDestruction namespace
         FRAC_NO_VERTEXCOLORSUPPORT //If defined, vertex colors wont be supported, also change SUPPORTVERTEXCOLORS in ComputeGlobalSettings.cginc
+        FRAC_NO_VERTEXCOLORSAVESTATESUPPORT //If defined, VERTEXCOLORS wont be loaded/saved by fracSaveStates
     */
 
     public static class FracGlobalSettings
@@ -25,9 +26,6 @@ namespace Zombie1111_uDestruction
         //This will try to prevent this by also increasing fixedUpdate if update is > 50fps
         public const bool syncFixedTimestepWithFps = false;
 
-        //If true, all enabled rigidbodies will automatically be registered by the globalHandler when a scene is loaded
-        public const bool addAllActiveRigidbodiesOnLoad = true;
-
         //The minimum force a impact must cause for it to cause any destruction 
         public const float minimumImpactForce = 5.0f;
 
@@ -41,10 +39,10 @@ namespace Zombie1111_uDestruction
         public const bool canGetImpactNormalFromPlane = false;
 
         //A higher value will cause the impact angle/normal to have less affect on the damage done by the impact, a value of 1 will cause it to have 0 affect
-        public const float normalInfluenceReduction = 0.5f;
+        public const float normalInfluenceReduction = 0.0f;
 
         //Same as above but overrides it for impacts caused by itself, example if the object falls and hit the ground 
-        public const float normalInfluenceReductionSelf = 0.5f;
+        public const float normalInfluenceReductionSelf = 0.0f;
 
         //If fracture.MainPhyiscsType == OverlappingIsKinematic, the overlapping colliders will always be calculated when fracturing.
         //But it may be useful to also recalculate it when loading a fracture, recalculating will increase loading time!
@@ -86,5 +84,10 @@ namespace Zombie1111_uDestruction
 
         //If true, it will try to prevent kinematic parts from being deformed (Not very accurate)
         public const bool preventKinematicDeformation = false;
+
+        //If true, it will remove destroyed rigidbodies added to the globalHandler on sceneLoaded and onDestroy destructionBody
+        //However null exceptions should never happen even if null rigidbodies does exist,
+        //is the performance cost of removing rigidbodies worth the minor risk of null exception?
+        public const bool canAutomaticallyRemoveAddedRigidbodies = true;
     }
 }

@@ -73,13 +73,11 @@ namespace Zombie1111_uDestruction
             //Only used if prefab because unity is useless and cant save meshes inside prefabs
             public SavableMesh saved_rendMesh = new();
             public VecArray[] sMesh_colsVers = null;
-            public List<BoneWeight> saved_nonSkinnedBoneWe = new();
         }
 
         [System.Serializable]
         public class SavableMesh
         {
-            public BoneWeight[] sMesh_boneWeights = null;
             public Matrix4x4[] sMesh_bindposes = null;
             public Vector3[] sMesh_vertics = null;
             public FractureThis.IntList[] sMesh_triangels = null;
@@ -101,7 +99,6 @@ namespace Zombie1111_uDestruction
                 if (ignoreSkin == false)
                 {
                     newM.bindposes = sMesh_bindposes;
-                    newM.boneWeights = sMesh_boneWeights;
                 }
 
                 //load submeshes and tris
@@ -128,7 +125,6 @@ namespace Zombie1111_uDestruction
                 //save basic
                 if (ignoreSkin == false)
                 {
-                    sMesh_boneWeights = mesh.boneWeights;
                     sMesh_bindposes = mesh.bindposes;
                 }
 
@@ -152,7 +148,6 @@ namespace Zombie1111_uDestruction
             /// </summary>
             public void Clear()
             {
-                sMesh_boneWeights = null;
                 sMesh_bindposes = null;
                 sMesh_vertics = null;
                 sMesh_triangels = null;
@@ -256,8 +251,6 @@ namespace Zombie1111_uDestruction
             }
 
             //save skin stuff
-            fracSavedData.saved_nonSkinnedBoneWe = saveFrom.fr_boneWeights.ToList();
-            fracSavedData.saved_rendMesh.sMesh_boneWeights = saveFrom.fr_boneWeightsSkin.ToArray();
             fracSavedData.saved_rendMesh.sMesh_bindposes = saveFrom.fr_bindPoses.ToArray();
 
             ////because ScriptableObject cannot save actual components we save it on FractureThis
@@ -366,11 +359,8 @@ namespace Zombie1111_uDestruction
 #if !FRAC_NO_VERTEXCOLORSUPPORT
             loadTo.fr_colors = fracRendMesh.colors.ToList();
 #endif
-            loadTo.fr_boneWeights = fracSavedData.saved_nonSkinnedBoneWe.ToList();
-            loadTo.fr_boneWeightsSkin = fracSavedData.saved_rendMesh.sMesh_boneWeights.ToList();
             loadTo.fr_bindPoses = fracSavedData.saved_rendMesh.sMesh_bindposes.ToList();
             loadTo.fr_subTris = new();
-            loadTo.fr_boneWeightsCurrent = loadTo.isRealSkinnedM == true ? loadTo.fr_boneWeightsSkin.ToList() : loadTo.fr_boneWeights.ToList();
             loadTo.fr_verToPartI = fracSavedData.saved_fr_verToPartI.ToList();
 
             for (int sI = 0; sI < fracRendMesh.subMeshCount; sI++)
