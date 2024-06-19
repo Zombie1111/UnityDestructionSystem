@@ -1,28 +1,26 @@
 
-using Mono.Cecil.Cil;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor.Searcher;
 using UnityEngine;
 
-namespace Zombie1111_uDestruction
+namespace zombDestruction
 {
-    public class destructionJoint : MonoBehaviour
+    public class DestructionJoint : MonoBehaviour
     {
         [SerializeField] private Transform connectedTransform = null;
         [SerializeField] private Joint sourceJoint = null;
-        private FractureThis fracSource = null;
+        private DestructableObject fracSource = null;
         [SerializeField] private List<Transform> jointAnchors = new();
         [SerializeField] private float maxDisFromAnchor = 2.0f;
 
+#pragma warning disable IDE0044 // Add readonly modifier
         private Dictionary<int, DesJoint> jointIdToDesJoint = new();
         private Dictionary<int, HashSet<int>> partIToConnectionI = new();
         private List<DesConnection> desConnections = new();
-        private int nextJointId = 0;
+#pragma warning restore IDE0044 // Add readonly modifier
 
-        public unsafe void SetupJoints(FractureThis fracThis)
+        public unsafe void SetupJoints(DestructableObject fracThis)
         {
             //remove previous joints
             RemoveJoints();
@@ -73,7 +71,7 @@ namespace Zombie1111_uDestruction
 
             for (int partI = 0; partI < partCount; partI++)
             {
-                Collider partCol = fracSource.saved_allPartsCol[partI];
+                Collider partCol = fracSource.allPartsCol[partI];
                 if (partCol.transform.parent != transform) continue;
 
                 //Get what anchor to use
@@ -98,7 +96,7 @@ namespace Zombie1111_uDestruction
                 {
                     int nPI = fPart.neighbourPartI[nI];
 
-                    if (fracSource.saved_allPartsCol[nPI].transform.parent != connectedTransform) continue;
+                    if (fracSource.allPartsCol[nPI].transform.parent != connectedTransform) continue;
 
                     AddConnectionIndexLink(partI, desConnections.Count);
                     AddConnectionIndexLink(nPI, desConnections.Count);
@@ -239,14 +237,14 @@ namespace Zombie1111_uDestruction
         {
             if (jointIdToDesJoint.TryGetValue(desJId, out _) == false)
             {
-                Rigidbody rbA = fracSource.saved_allPartsCol[partA].attachedRigidbody;
+                Rigidbody rbA = fracSource.allPartsCol[partA].attachedRigidbody;
 
                 DesJoint desJ = new()
                 {
                     phyJoint = FracHelpFunc.CopyJoint(
                         sourceJoint,
                         rbA.gameObject,
-                        fracSource.saved_allPartsCol[partB].attachedRigidbody,
+                        fracSource.allPartsCol[partB].attachedRigidbody,
                         rbA.transform.worldToLocalMatrix.MultiplyPoint3x4(jointAnchors[anchorI].position)),
                     connectionCount = 1
                 };

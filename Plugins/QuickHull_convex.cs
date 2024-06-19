@@ -29,7 +29,7 @@ using UnityEngine;
 using System.Linq;
 //using Codice.CM.Client.Differences.Merge;
 
-namespace Zombie1111_uDestruction
+namespace zombDestruction
 {
     /// <summary>
     ///   An implementation of the quickhull algorithm for generating 3d convex

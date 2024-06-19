@@ -14,11 +14,11 @@ namespace GameLogic
         public Transform gunCenter;
         public float rbMass = 1.0f;
         public float virtualMass = 3.0f;
-        private Zombie1111_uDestruction.FractureGlobalHandler globalF;
+        private zombDestruction.DestructionHandler globalF;
 
         private void Start()
         {
-            globalF = GameObject.FindObjectOfType<Zombie1111_uDestruction.FractureGlobalHandler>();
+            globalF = GameObject.FindObjectOfType<zombDestruction.DestructionHandler>();
         }
 
         /// <summary>
@@ -89,8 +89,8 @@ namespace GameLogic
             Vector3 holdPos = camTrans.position + (camTrans.forward * currentHDis);
 
             Vector3 velToGive = Vector3.ClampMagnitude(holdPos - objPos, 20.0f) * 8.0f;
-            Zombie1111_uDestruction.FracHelpFunc.SetVelocityUsingForce(velToGive, grabbedRb);
-            Zombie1111_uDestruction.FracHelpFunc.SetAngularVelocityUsingTorque(grabbedRb.angularVelocity * 0.5f, grabbedRb);
+            zombDestruction.FracHelpFunc.SetVelocityUsingForce(velToGive, grabbedRb);
+            zombDestruction.FracHelpFunc.SetAngularVelocityUsingTorque(grabbedRb.angularVelocity * 0.5f, grabbedRb);
         }
     }
 }

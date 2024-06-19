@@ -1,6 +1,4 @@
-using UnityEngine.Experimental.GlobalIllumination;
-
-namespace Zombie1111_uDestruction
+namespace zombDestruction
 {
     /*
         #################Optional Scripting Define Symbols (ProjectSettings>Player>OtherSettings)################
@@ -82,12 +80,15 @@ namespace Zombie1111_uDestruction
         //If true, it will try to prevent a mesh from being deformed through another object (Comes at a performance cost and not 100% accurate)
         public const bool doDeformationCollision = true;
 
-        //If true, it will try to prevent kinematic parts from being deformed (Not very accurate)
+        //If true, it will try to prevent kinematic parts from being deformed (Not 100% accurate)
         public const bool preventKinematicDeformation = false;
 
         //If true, it will remove destroyed rigidbodies added to the globalHandler on sceneLoaded and onDestroy destructionBody
         //However null exceptions should never happen even if null rigidbodies does exist,
         //is the performance cost of removing rigidbodies worth the minor risk of null exception?
         public const bool canAutomaticallyRemoveAddedRigidbodies = true;
+
+        //A multiplier on the velocity a part that breaks actually gets
+        public const float partBreakVelocityMultiplier = 0.5f;
     }
 }

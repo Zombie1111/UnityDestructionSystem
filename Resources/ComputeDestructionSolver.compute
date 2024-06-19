@@ -113,7 +113,6 @@ inline float floatLerpMin(float current, float target, float t, float min)
 }
 
 //skinning stuff
-int partBoneOffset; //allFracBonesLToW[partI + partBoneOffset] is the LToW matrix for the part
 int fracRendVerCount; //The number of vertics in the frac mesh
 float4x4 fracRendWToL; //The WToL matrix for the frac mesh
 RWStructuredBuffer<float4x4> allFracBonesLToW; //The LToW matrix for every bone

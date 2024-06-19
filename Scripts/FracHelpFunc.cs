@@ -7,13 +7,15 @@ using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Burst;
 using Unity.Mathematics;
+using UnityEditor.SceneManagement;
+
 
 
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
 
-namespace Zombie1111_uDestruction
+namespace zombDestruction
 {
 #if !FRAC_NO_BURST
     [BurstCompile]
@@ -1183,7 +1185,7 @@ namespace Zombie1111_uDestruction
         /// <param name="ogMeshD">Only ogMeshD.meshW and ogMeshD.mMats must be assigned</param>
         /// <param name="ogTrisId">Must have the same lenght as ogMeshW.triangles.lengt / 3</param>
         /// <param name="triIdToGroupId">All different values that exist in ogTrisId must exist as key in triIdToGroupId</param>
-        public static List<FractureThis.FracSource> SplitMeshByTrisIds(FractureThis.FracSource ogMeshD, int[] ogTrisId, Dictionary<int, List<float>> triIdToGroupId)
+        public static List<DestructableObject.FracSource> SplitMeshByTrisIds(DestructableObject.FracSource ogMeshD, int[] ogTrisId, Dictionary<int, List<float>> triIdToGroupId)
         {
             //Get source mesh data
             Mesh ogMeshW = ogMeshD.meshW;
@@ -1264,7 +1266,7 @@ namespace Zombie1111_uDestruction
             }
 
             //Create new meshes
-            List<FractureThis.FracSource> newSources = new();
+            List<DestructableObject.FracSource> newSources = new();
 
             foreach (var idNew in idToNew)
             {
@@ -1296,7 +1298,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns 2 meshes, [0] is the one containing vertexIndexesToSplit. May remove tris at split edges if some tris vertics are in vertexIndexesToSplit and some not
         /// </summary>
-        public static List<FractureThis.FracSource> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, FractureThis.FracSource orginalMeshD, bool doBones)
+        public static List<DestructableObject.FracSource> SplitMeshInTwo(HashSet<int> vertexIndexesToSplit, DestructableObject.FracSource orginalMeshD, bool doBones)
         {
             //get ogMesh tris, vers....
             Mesh oMesh = orginalMeshD.meshW;
@@ -1374,10 +1376,10 @@ namespace Zombie1111_uDestruction
                 ProcessTriangle(vIndexA, vIndexB, vIndexC, splitA, i);
             }
 
-            FractureThis.FracSource newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA, splitLinkA);
-            FractureThis.FracSource newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB, splitLinkB);
+            DestructableObject.FracSource newMA = CreateMesh(splitVerA, splitNorA, splitUvsA, splitColsA, splitBonA, splitTriA, splitLinkA);
+            DestructableObject.FracSource newMB = CreateMesh(splitVerB, splitNorB, splitUvsB, splitColsB, splitBonB, splitTriB, splitLinkB);
 
-            return new List<FractureThis.FracSource> { newMA, newMB };
+            return new List<DestructableObject.FracSource> { newMA, newMB };
 
             void ProcessTriangle(int vIndexA, int vIndexB, int vIndexC, bool splitA, int ogTrisI)
             {
@@ -1435,7 +1437,7 @@ namespace Zombie1111_uDestruction
                 }
             }
 
-            FractureThis.FracSource CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> splitTrisOgTris)
+            DestructableObject.FracSource CreateMesh(List<Vector3> vertices, List<Vector3> normals, List<Vector2> uvs, List<Color> colors, List<BoneWeight> boneWeights, List<int> triangles, List<int> splitTrisOgTris)
             {
                 Mesh mesh = new()
                 {
@@ -1810,7 +1812,7 @@ namespace Zombie1111_uDestruction
         /// <summary>
         /// Returns true if partA is linked with partB (They can be connected)
         /// </summary>
-        public static bool Gd_isPartLinkedWithPart(FractureThis.FracPart partA, FractureThis.FracPart partB)
+        public static bool Gd_isPartLinkedWithPart(FracPart partA, FracPart partB)
         {
             //get if connected with id
             List<float> partAId = partA.groupId;
@@ -2309,73 +2311,6 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
-        /// Combines the meshes and updates fracParts rendVertexIndexes list
-        /// </summary>
-        /// <param name="fracMeshes">Must have same lenght as fracParts</param>
-        public static Mesh CombineMeshes(Mesh[] fracMeshes, ref FractureThis.FracPart[] fracParts)
-        {
-            Debug.LogError("Not yet implemented??");
-            return null;
-
-            //int partCount = fracParts.Length;
-            //Mesh comMesh = new();
-            //comMesh.indexFormat = IndexFormat.UInt32;
-            //List<CombineInstance> comMeshes = new();
-            //List<bool> comHadSub = new();
-            //int subMeshCount = 0;
-            //
-            //for (int i = 0; i < partCount; i++)
-            //{
-            //    comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 0 });
-            //    subMeshCount++;
-            //    if (fracMeshes[i].subMeshCount > 1)
-            //    {
-            //        comMeshes.Add(new() { mesh = fracMeshes[i], subMeshIndex = 1 });
-            //        comHadSub.Add(true);
-            //    }
-            //    else comHadSub.Add(false);
-            //}
-            //
-            //comMesh.CombineMeshes(comMeshes.ToArray(), false, false, false);//if we lucky, combinedMesh submesh[0] == comMesh[0], if thats the case we can just use unity combine
-            //comMesh.Optimize();//Should be safe to call since submeshes order does not change?
-            //Debug_doesMeshContainUnusedVers(comMesh);
-            //int partI = 0;
-            //List<int> newSubTrisA = new();
-            //List<int> newSubTrisB = new();
-            //
-            //for (int comI = 0; comI < comMeshes.Count; comI++)
-            //{
-            //    foreach (int vI in comMesh.GetTriangles(comI))
-            //    {
-            //        newSubTrisA.Add(vI);
-            //        if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
-            //    }
-            //
-            //    if (comHadSub[partI] == false)
-            //    {
-            //        partI++;
-            //        continue;
-            //    }
-            //
-            //    comI++;
-            //    foreach (int vI in comMesh.GetTriangles(comI))
-            //    {
-            //        newSubTrisB.Add(vI);
-            //        if (fracParts[partI].rendLinkVerIndexes.Contains(vI) == false) fracParts[partI].rendLinkVerIndexes.Add(vI);
-            //    }
-            //
-            //    partI++;
-            //}
-            //
-            //comMesh.subMeshCount = newSubTrisB.Count > 0 ? 2 : 1;
-            //comMesh.SetTriangles(newSubTrisA, 0);
-            //if (newSubTrisB.Count > 0) comMesh.SetTriangles(newSubTrisB, 1);
-            //
-            //Debug_doesMeshContainUnusedVers(comMesh);
-            //return comMesh;
-        }
-
-        /// <summary>
         /// Returns the angular velocity
         /// </summary>
         public static Vector3 GetAngularVelocity(Quaternion prevRot, Quaternion currentRot, float deltaTime)
@@ -2778,6 +2713,23 @@ namespace Zombie1111_uDestruction
         }
 
         /// <summary>
+        /// Asks the user if we are allowed to save and returns true if we are (Always true at runtime)
+        /// </summary>
+        public static bool AskEditorIfCanSave(bool willRemoveFrac)
+        {
+#if UNITY_EDITOR
+            if (Application.isPlaying == false && EditorSceneManager.GetActiveScene().isDirty == true
+    && EditorUtility.DisplayDialog("", willRemoveFrac == true ? "All open scenes must be saved before removing fracture!"
+    : "All open scenes must be saved before fracturing!", willRemoveFrac == true ? "Save and remove" : "Save and fracture", "Cancel") == false)
+            {
+                return false;
+            }
+#endif
+
+            return true;
+        }
+
+        /// <summary>
         /// Assigns each axis of vecA with vecB if the same vecB axis is lower
         /// </summary>
         public static void GetEachAxisMin(ref Vector3 vecA, Vector3 vecB)
@@ -3027,7 +2979,7 @@ namespace Zombie1111_uDestruction
                 throw new ArgumentException("Both arrays must have the same length.");
             }
 
-            Dictionary<T1, T2> dictionary = new Dictionary<T1, T2>();
+            Dictionary<T1, T2> dictionary = new();
 
             for (int i = 0; i < keys.Length; i++)
             {

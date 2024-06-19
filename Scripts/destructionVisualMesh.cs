@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class destructionVisualMesh : MonoBehaviour
+public class DestructionVisualMesh : MonoBehaviour
 {
     [SerializeField] private Mesh visualMesh = null;
 
@@ -12,7 +12,7 @@ public class destructionVisualMesh : MonoBehaviour
     public static Color[] TryGetVisualVertexColors(Renderer rend, int requiredLenght)
     {
         if (rend == null) return null;
-        if (rend.TryGetComponent(out destructionVisualMesh visMesh) == false) return null;
+        if (rend.TryGetComponent(out DestructionVisualMesh visMesh) == false) return null;
         if (visMesh.visualMesh == null) return null;
         Color[] visColors = visMesh.visualMesh.colors;
         if (visColors.Length != requiredLenght)

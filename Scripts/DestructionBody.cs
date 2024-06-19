@@ -2,21 +2,21 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Zombie1111_uDestruction
+namespace zombDestruction
 {
     public class DestructionBody : MonoBehaviour
     {
         [SerializeField] private float desMassMultiplier = 2.0f;
-        [SerializeField] private FractureGlobalHandler.GlobalRbData customRigidbodyProperties = new();
+        [SerializeField] private GlobalRbData customRigidbodyProperties = new();
         [SerializeField] private bool includeDisabled = false;
         [SerializeField] private bool includeKinematic = false;
         [SerializeField] private bool includeChildren = true;
-        private FractureGlobalHandler globalHandler;
+        private DestructionHandler globalHandler;
         private HashSet<Rigidbody> usedRigidbodies = new();
 
         private void Start()
         {
-            globalHandler = FractureGlobalHandler.TryGetGlobalHandler(gameObject);
+            globalHandler = DestructionHandler.TryGetGlobalHandler(gameObject);
             if (globalHandler == null) return;
 
             if (includeChildren == false)
@@ -50,7 +50,7 @@ namespace Zombie1111_uDestruction
 
             if (globalHandler == null)
             {
-                globalHandler = FractureGlobalHandler.TryGetGlobalHandler(gameObject);
+                globalHandler = DestructionHandler.TryGetGlobalHandler(gameObject, null, false);
                 if (globalHandler == null) return;
             }
 
