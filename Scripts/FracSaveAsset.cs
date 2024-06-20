@@ -286,6 +286,8 @@ namespace zombDestruction
 
             //Apply saved data to the provided FractureThis instance
             //Load compute destruction job
+            loadTo.allPartsParentI = fracSavedData.saved_structs_parentI.ToList();
+
             loadTo.jCDW_job = new()
             {
                 structPosL = fracSavedData.saved_structs_posL.ToNativeList(Allocator.Persistent),

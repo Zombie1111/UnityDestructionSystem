@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 
 namespace zombDestruction
 {
@@ -107,5 +108,85 @@ namespace zombDestruction
         /// The vertex indexes in fracRend.sharedmesh this part uses
         /// </summary>
         public List<int> partColVerts = new();
+    }
+
+    [System.Serializable]
+    public class FracCallbackEvent
+    {
+        [Header("Invoke Configuration")]
+        public float invokeWhenBrokenPercentageHasChangedBy = 0.7f;
+        public float alwaysInvokeIfOnMessuredSideOf = 0.9f;
+        public BrokenMessureType onlyMessure = BrokenMessureType.PositiveChange;
+        public bool onlyInvokeOnce = false;
+        public bool resetInvokedStatusWhenOppositeChange = true;
+
+        [Space()]
+        [Header("Invoke Events")]
+        public UnityEvent unityEventToInvoke;
+        /// <summary>
+        /// Gets invoked if percentageChanged is > invokeWhenBrokenPercentageHasChangedBy and if currentBrokenPercentage </or> alwaysInvokeIfOnMessuredSideOf
+        /// </summary>
+        /// <param name="percentageChanged">How much it has changed since last invoke (0.0f - 1.0f)</param>
+        /// <param name="currentBrokenPercentage">How broken it is (0.0f - 1.0f)</param>
+        public delegate void Event_OnPercentageChanged(float percentageChanged, float currentBrokenPercentage);
+        public event Event_OnPercentageChanged OnDestructionCallback;
+
+        [System.NonSerialized] public float lastInvokeValue = 0.0f;
+        [System.NonSerialized] public bool hasBeenInvoked = false;
+
+        public enum BrokenMessureType
+        {
+            PositiveChange,
+            NegativeChange,
+            AnyChance
+        }
+
+        /// <summary>
+        /// Invokes all events if not already invoked
+        /// </summary>
+        public void TryInvokeEvents(float percentageChanged, float currentBrokenPercentage)
+        {
+            lastInvokeValue = currentBrokenPercentage;
+            if (onlyInvokeOnce == true && hasBeenInvoked == true) return;
+            
+            unityEventToInvoke.Invoke();
+            OnDestructionCallback?.Invoke(percentageChanged, currentBrokenPercentage);
+            hasBeenInvoked = true;
+        }
+    }
+
+    public unsafe struct DestructionSource
+    {
+        /// <summary>
+        /// The velocity that can be applied at most to parts that breaks and their parent, the opposite of this should be applied to rbSource(If any)(If == vector.zero, it will be like a chock wave)
+        /// </summary>
+        public Vector3 impVel;
+        public bool isExplosion;
+
+        /// <summary>
+        /// The total force applied to this object (Should be equal to all impPoints_force added togehter)
+        /// </summary>
+        public float impForceTotal;
+
+        public void* desPoints_ptr;
+        public int desPoints_lenght;
+
+        /// <summary>
+        /// The index of the parent all parts in this source has
+        /// </summary>
+        public int parentI;
+
+        public Matrix4x4 parentLToW_now;
+        public Matrix4x4 parentWToL_prev;
+
+        public Vector3 centerImpPos;
+    }
+
+    public struct DestructionPoint
+    {
+        public Vector3 impPosW;
+        public float force;
+        public int partI;
+        public float disToWall;
     }
 }

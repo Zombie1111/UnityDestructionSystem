@@ -449,11 +449,35 @@ namespace zombDestruction
             return GetOrAddComponent(go, typeof(T)) as T;
         }
 
+        /// <summary>
+        /// Sets the mass of the given rigidbody to newMass clamped with FracGlobalSettings.rbMinMass and  FracGlobalSettings.rbMaxMass
+        /// </summary>
         public static void SetRbMass(ref Rigidbody rb, float newMass)
         {
             if (newMass > FracGlobalSettings.rbMaxMass) rb.mass = FracGlobalSettings.rbMaxMass;
             else if (newMass < FracGlobalSettings.rbMinMass) rb.mass = FracGlobalSettings.rbMinMass;
             else rb.mass = newMass;
+        }
+
+        /// <summary>
+        /// Returns a array containing evenly distributed directions with the largest possible avg difference between each direction
+        /// </summary>
+        public static Vector3[] GetSphereDirections(int directionCount)
+        {
+            Vector3[] directions = new Vector3[directionCount];
+
+            float goldenRatio = (1 + Mathf.Sqrt(5)) / 2;
+            float angleIncrement = Mathf.PI * 2 * goldenRatio;
+
+            for (int i = 0; i < directionCount; i++)
+            {
+                float inclination = Mathf.Acos(1 - 2 * ((float)i / directionCount));
+                float azimuth = angleIncrement * i;
+
+                directions[i] = new Vector3(Mathf.Sin(inclination) * Mathf.Cos(azimuth), Mathf.Sin(inclination) * Mathf.Sin(azimuth), Mathf.Cos(inclination));
+            }
+
+            return directions;
         }
 
         private static float SignedVolumeOfTriangle(Vector3 p1, Vector3 p2, Vector3 p3)

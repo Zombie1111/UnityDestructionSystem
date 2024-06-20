@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using zombDestruction;
 
 namespace GameLogic
 {
@@ -69,9 +70,21 @@ namespace GameLogic
             }
 
             if (Input.GetKeyUp(KeyCode.Mouse1) == true) grabbedCol = null;
+
+            if (Input.GetKeyDown(KeyCode.X) == true)
+            {
+                if (Physics.Raycast(camTrans.position, camTrans.forward, out RaycastHit nHit, 100.0f, maskGround, QueryTriggerInteraction.Ignore) == true)
+                {
+                    DestructionHandler.TryGetGlobalHandler(gameObject).RegisterExplosion(
+                        nHit.point + (nHit.normal * 0.51f), nHit.normal, explosionForce, explosionSpeed, maskGround, out _, out _, 0.5f, explosionRadius, 32);
+                }
+            }
         }
 
         public float holdDis = 3.0f;
+        public float explosionForce = 3200.0f;
+        public float explosionSpeed = 8.0f;
+        public float explosionRadius = 5.0f;
 
         private void FixedUpdate()
         {

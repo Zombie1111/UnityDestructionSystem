@@ -20,112 +20,120 @@ namespace zombDestruction
         private List<DesConnection> desConnections = new();
 #pragma warning restore IDE0044 // Add readonly modifier
 
-        public unsafe void SetupJoints(DestructableObject fracThis)
+        private void Start()
         {
-            //remove previous joints
-            RemoveJoints();
+            SetupJoints();
 
-            //Verify if valid
-            if (connectedTransform == null)
+            unsafe void SetupJoints()
             {
-                Debug.LogError(transform.name + " DestructionJoint connectedTransform property has not been assigned!");
-                return;
-            }
+                //remove previous joints
+                RemoveJoints();
 
-            if (sourceJoint == null)
-            {
-                Debug.LogError(transform.name + " DestructionJoint sourceJoint property has not been assigned!");
-                return;
-            }
+                //Get fracture
+                fracSource = DestructableObject.TryGetValidDestructableObjectInParent(transform);
+                if (fracSource == null) return;
 
-            if (gameObject.GetComponentInParent<Rigidbody>(false) == null)
-            {
-                Debug.LogError("There must be a active rigidbody in " + transform.name + " or any of its parents!");
-                return;
-            }
-
-            if (jointAnchors.Count == 0)
-            {
-                Debug.LogError(transform.name + " DestructionJoint does not have any jointAnchors");
-                return;
-            }
-
-            foreach (Transform trans in jointAnchors)
-            {
-                if (trans != null) continue;
-
-                Debug.LogError("A jointAnchor transform in " + trans.name + " DestructionJoint is null");
-                return;
-            }
-
-            if (float.IsInfinity(sourceJoint.breakForce) == false || float.IsInfinity(sourceJoint.breakTorque) == false)
-            {
-                Debug.LogError(transform.name + " DestructionJoint sourceJoint must have infinit breakForce and breakTorque");
-                return;
-            }
-
-            //Setup destruction joints
-            fracSource = fracThis;
-            int partCount = fracSource.allParts.Count;
-            Vector3[] anchorPoss = jointAnchors.Select(trans => trans.position).ToArray(); 
-
-            for (int partI = 0; partI < partCount; partI++)
-            {
-                Collider partCol = fracSource.allPartsCol[partI];
-                if (partCol.transform.parent != transform) continue;
-
-                //Get what anchor to use
-                float bestD = maxDisFromAnchor;
-                int bestAI = -1;
-
-                for (int aI = 0; aI < anchorPoss.Length; aI++)
+                //Verify if valid
+                if (connectedTransform == null)
                 {
-                    float dis = (partCol.ClosestPoint(anchorPoss[aI]) - anchorPoss[aI]).magnitude;
-                    if (dis > bestD) continue;
-
-                    bestD = dis;
-                    bestAI = aI;
+                    Debug.LogError(transform.name + " DestructionJoint connectedTransform property has not been assigned!");
+                    return;
                 }
 
-                if (bestAI < 0) continue;
-
-                //Loop neighbours and see if any is valid connection
-                var fPart = fracSource.jCDW_job.fStructs[partI];
-
-                for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                if (sourceJoint == null)
                 {
-                    int nPI = fPart.neighbourPartI[nI];
+                    Debug.LogError(transform.name + " DestructionJoint sourceJoint property has not been assigned!");
+                    return;
+                }
 
-                    if (fracSource.allPartsCol[nPI].transform.parent != connectedTransform) continue;
+                if (gameObject.GetComponentInParent<Rigidbody>(false) == null)
+                {
+                    Debug.LogError("There must be a active rigidbody in " + transform.name + " or any of its parents!");
+                    return;
+                }
 
-                    AddConnectionIndexLink(partI, desConnections.Count);
-                    AddConnectionIndexLink(nPI, desConnections.Count);
+                if (jointAnchors.Count == 0)
+                {
+                    Debug.LogError(transform.name + " DestructionJoint does not have any jointAnchors");
+                    return;
+                }
 
-                    desConnections.Add(new()
+                foreach (Transform trans in jointAnchors)
+                {
+                    if (trans != null) continue;
+
+                    Debug.LogError("A jointAnchor transform in " + trans.name + " DestructionJoint is null");
+                    return;
+                }
+
+                if (float.IsInfinity(sourceJoint.breakForce) == false || float.IsInfinity(sourceJoint.breakTorque) == false)
+                {
+                    Debug.LogError(transform.name + " DestructionJoint sourceJoint must have infinit breakForce and breakTorque");
+                    return;
+                }
+
+                //Setup destruction joints
+                int partCount = fracSource.allParts.Count;
+                Vector3[] anchorPoss = jointAnchors.Select(trans => trans.position).ToArray();
+
+                for (int partI = 0; partI < partCount; partI++)
+                {
+                    Collider partCol = fracSource.allPartsCol[partI];
+                    if (partCol.transform.parent != transform) continue;
+
+                    //Get what anchor to use
+                    float bestD = maxDisFromAnchor;
+                    int bestAI = -1;
+
+                    for (int aI = 0; aI < anchorPoss.Length; aI++)
                     {
-                        anchorI = bestAI,
-                        jointId = 0,
-                        partA = partI,
-                        partB = nPI,
-                        isValid = false
-                    });
+                        float dis = (partCol.ClosestPoint(anchorPoss[aI]) - anchorPoss[aI]).magnitude;
+                        if (dis > bestD) continue;
 
-                    OnPartParentChanged(partI, 0, 0);
+                        bestD = dis;
+                        bestAI = aI;
+                    }
+
+                    if (bestAI < 0) continue;
+
+                    //Loop neighbours and see if any is valid connection
+                    var fPart = fracSource.jCDW_job.fStructs[partI];
+
+                    for (int nI = 0; nI < fPart.neighbourPartI_lenght; nI++)
+                    {
+                        int nPI = fPart.neighbourPartI[nI];
+
+                        if (fracSource.allPartsCol[nPI].transform.parent != connectedTransform) continue;
+
+                        AddConnectionIndexLink(partI, desConnections.Count);
+                        AddConnectionIndexLink(nPI, desConnections.Count);
+
+                        desConnections.Add(new()
+                        {
+                            anchorI = bestAI,
+                            jointId = 0,
+                            partA = partI,
+                            partB = nPI,
+                            isValid = false
+                        });
+
+                        OnPartParentChanged(partI, 0, 0);
+                    }
                 }
-            }
-            
-            //Add to event
-            if (Application.isPlaying == true) fracSource.OnPartParentChanged += OnPartParentChanged;
 
-            void AddConnectionIndexLink(int partI, int connectionI)
-            {
-                if (partIToConnectionI.TryGetValue(partI, out HashSet<int> conIndexs) == false)
+                //Add to event
+                fracSource.OnPartParentChanged += OnPartParentChanged;
+
+                void AddConnectionIndexLink(int partI, int connectionI)
                 {
-                    conIndexs = new();
-                }
+                    if (partIToConnectionI.TryGetValue(partI, out HashSet<int> conIndexs) == false)
+                    {
+                        conIndexs = new();
+                    }
 
-                if (conIndexs.Add(connectionI) == false) return;
-                partIToConnectionI[partI] = conIndexs;
+                    if (conIndexs.Add(connectionI) == false) return;
+                    partIToConnectionI[partI] = conIndexs;
+                }
             }
         }
 
@@ -147,7 +155,7 @@ namespace zombDestruction
         public void RemoveJoints()
         {
             //Remove from event
-            if (Application.isPlaying == true && fracSource != null) fracSource.OnPartParentChanged -= OnPartParentChanged;
+            if (fracSource != null) fracSource.OnPartParentChanged -= OnPartParentChanged;
 
             //Remove joints
             foreach (var desJ in jointIdToDesJoint)
@@ -173,8 +181,8 @@ namespace zombDestruction
             foreach (int conI in partIToConnectionI[partI])
             {
                 var con = desConnections[conI];
-                int parentA = fracSource.jCDW_job.partsParentI[con.partA];
-                int parentB = fracSource.jCDW_job.partsParentI[con.partB];
+                int parentA = fracSource.allPartsParentI[con.partA];
+                int parentB = fracSource.allPartsParentI[con.partB];
 
                 bool isValid = parentA >= 0 && parentA == parentB;
                 if (isValid == false)
@@ -209,7 +217,7 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Removes a connection from the given desJointId and destroys the desJoint of this was last connection, throws error if desJId does not exist
+        /// Removes a connection from the given desJointId and destroys the desJoint if this was last connection, throws error if desJId does not exist
         /// </summary>
         private void RemoveConnectionFromDesJoint(int desJId)
         {

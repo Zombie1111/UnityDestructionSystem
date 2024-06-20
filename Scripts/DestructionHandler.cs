@@ -158,7 +158,7 @@ namespace zombDestruction
         /// </summary>
         /// <param name="desMass">The mass the rigidbody should have for the destruction system</param>
         /// <param name="rbMass">The mass the rigidbody actually has, should always be equal to rbToAddOrUpdate.mass</param>
-        public void OnAddOrUpdateRb(GlobalRbData rbData)
+        public void OnAddOrUpdateRb(GlobalRbData rbData, bool onlyUpdateMass = false)
         {
             int rbId = rbData.rb.GetInstanceID();
             if (rbData.rb.isKinematic == true)
@@ -173,6 +173,15 @@ namespace zombDestruction
                 updateStatus = 2
             }) == false)
             {
+                if (onlyUpdateMass == true)
+                {
+                    float ogDesMass = rbData.desMass;
+                    float ogRbMass = rbData.rbMass;
+                    rbData = jGRV_rbData[rbId].ShallowCopy();
+                    rbData.desMass = ogDesMass;
+                    rbData.rbMass = ogRbMass;
+                }
+
                 jGRV_rbToSet[rbId].rbData = rbData;
             }
         }
@@ -585,7 +594,7 @@ namespace zombDestruction
             /// <summary>
             /// Contains all parts that was hit and the force applied to each of them
             /// </summary>
-            public List<DestructableObject.DestructionPoint> impPoints;
+            public List<DestructionPoint> impPoints;
 
             /// <summary>
             /// Contains all part indexes that was hit
@@ -756,7 +765,7 @@ namespace zombDestruction
                 {
                     impForceTotal = maxImpF,
                     impVel = iPair.impVel,
-                    parentI = iPair.impFrac.jCDW_job.partsParentI[iPair.impPoints[maxImpI].partI],
+                    parentI = iPair.impFrac.allPartsParentI[iPair.impPoints[maxImpI].partI],
                 }, iPair.impPoints.ToNativeArray(Allocator.Persistent), iPair.thisRbI, impId, false);
             }
 
@@ -764,14 +773,14 @@ namespace zombDestruction
             {
                 //get the destructable object we hit, or return if we did not hit one
                 if (partColsInstanceId.TryGetValue(pair.colliderInstanceID, out GlobalFracData fracD_a) == true
-                    && fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex] < 0)
+                    && fracD_a.fracThis.allPartsParentI[fracD_a.partIndex] < 0)
                 {
                     if (rbInstancIdToJgrvIndex.TryGetValue(pair.bodyInstanceID, out _) == false) return;
                     fracD_a = null;
                 }
 
                 if (partColsInstanceId.TryGetValue(pair.otherColliderInstanceID, out GlobalFracData fracD_b) == true
-                    && fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex] < 0)
+                    && fracD_b.fracThis.allPartsParentI[fracD_b.partIndex] < 0)
                 {
                     if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out _) == false) return;
                     fracD_b = null;
@@ -860,7 +869,7 @@ namespace zombDestruction
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
 
                         float rbA_forceApplied = Mathf.Min(
-                            GuessMaxForceApply(rbForceVel, null, rbI_a, impBouncyness, out _, fracD_a.fracThis.allParents[fracD_a.fracThis.jCDW_job.partsParentI[fracD_a.partIndex]].parentKinematic > 0),
+                            GuessMaxForceApply(rbForceVel, null, rbI_a, impBouncyness, out _, fracD_a.fracThis.allParents[fracD_a.fracThis.allPartsParentI[fracD_a.partIndex]].parentKinematic > 0),
                             GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, out float transCap, false));
                         //float rbA_forceApplied = GuessMaxForceApply(rbForceVel, fracD_b, rbI_b, impBouncyness, false);
 
@@ -876,7 +885,7 @@ namespace zombDestruction
                             rbB_vel * Mathf.Clamp01(norrDiffB + FracGlobalSettings.normalInfluenceReduction));
 
                         float rbB_forceApplied = Mathf.Min(
-                            GuessMaxForceApply(rbForceVel, null, rbI_b, impBouncyness, out _, fracD_b.fracThis.allParents[fracD_b.fracThis.jCDW_job.partsParentI[fracD_b.partIndex]].parentKinematic > 0),
+                            GuessMaxForceApply(rbForceVel, null, rbI_b, impBouncyness, out _, fracD_b.fracThis.allParents[fracD_b.fracThis.allPartsParentI[fracD_b.partIndex]].parentKinematic > 0),
                             GuessMaxForceApply(rbForceVel, fracD_a, rbI_a, impBouncyness, out float transCap, false));
 
                         CalcImpContact(fracD_b, rbB_causedImp == true ? -rbB_vel : rbA_vel, rbB_forceApplied, rbI_a, transCap, rbI_b);
@@ -998,7 +1007,7 @@ namespace zombDestruction
 
             float GuessMaxForceApply(Vector3 forceVel, GlobalFracData fracD_hit, int rbI_hit, float bouncyness, out float transCap, bool rbIsKinematic = false)
             {
-                if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceApplied(forceVel, fracD_hit.partIndex, out transCap, bouncyness);
+                if (fracD_hit != null) return fracD_hit.fracThis.GuessMaxForceApply(forceVel, fracD_hit.partIndex, out transCap, bouncyness);
 
                 //if the opposite object is not destructable it has infinit stenght
                 transCap = 0.0f;
@@ -1018,7 +1027,7 @@ namespace zombDestruction
 
         /// <summary>
         /// Applies force as destruction to the given collider, returns false if the collider aint breakable
-        /// (You may wanna add additional force directly to the collider rigidbody if you want it to move more)
+        /// (You may wanna add force directly to the collider rigidbody if you want it to move)
         /// </summary>
         /// <param name="col">The collider to apply force to</param>
         /// <param name="impactPoint"></param>
@@ -1030,7 +1039,7 @@ namespace zombDestruction
             var fracD = TryGetFracPartFromColInstanceId(col.GetInstanceID());
             if (fracD == null) return false;
 
-            NativeArray<DestructableObject.DestructionPoint> impPoints = new(1, Allocator.Persistent);
+            NativeArray<DestructionPoint> impPoints = new(1, Allocator.Persistent);
             impPoints[0] = new()
             { 
                 force = impactForce,
@@ -1046,8 +1055,43 @@ namespace zombDestruction
                 impForceTotal = impactForce,
                 impVel = velocity,
                 isExplosion = treatAsExplosion,
-                parentI = fracD.fracThis.jCDW_job.partsParentI[fracD.partIndex],
+                parentI = fracD.fracThis.allPartsParentI[fracD.partIndex],
             }, impPoints, thisRbI, 0, false);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Applies force as destruction to the given collider, returns false if the collider aint breakable
+        /// (You may wanna add force directly to the collider rigidbody if you want it to move)
+        /// This function can be called from any thread
+        /// </summary>
+        /// <param name="fracD">Use TryGetFracPartFromColInstanceId() to get fracData from collider</param>
+        /// <param name="jGrvIndex">Use rbInstancIdToJgrvIndex.TryGetValue() to get jGrvIndex from rigidbody</param>
+        /// <param name="impactPoint"></param>
+        /// <param name="impactForce">The force applied to the collider</param>
+        /// <param name="velocity">The target velocity for the collider</param>
+        /// <param name="treatAsExplosion">If true, force will be more like a chock wave originating from impactCenter</param>
+        public bool RegisterImpact(ref GlobalFracData fracD, int jGrvIndex, ref Vector3 impactPoint, float impactForce, ref Vector3 velocity, ref Vector3 impactCenter, bool treatAsExplosion = false)
+        {
+            if (fracD == null) return false;
+
+            NativeArray<DestructionPoint> impPoints = new(1, Allocator.Persistent);
+            impPoints[0] = new()
+            {
+                force = impactForce,
+                impPosW = impactPoint,
+                partI = fracD.partIndex
+            };
+
+            fracD.fracThis.RegisterDestruction(new()
+            {
+                centerImpPos = impactCenter,
+                impForceTotal = impactForce,
+                impVel = velocity,
+                isExplosion = treatAsExplosion,
+                parentI = fracD.fracThis.allPartsParentI[fracD.partIndex],
+            }, impPoints, jGrvIndex, 0, false);
 
             return true;
         }
@@ -1080,30 +1124,28 @@ namespace zombDestruction
 
         /// <summary>
         /// Applies force as destruction at all impactPoints
+        /// (You may wanna add force directly to the collider rigidbody if you want it to move)
         /// </summary>
-        /// <param name="colInstanceIds">The instanceId of the colliders to apply force to</param>
-        /// <param name="impactPoints">The position on each collider the force orginate from (Must have same lenght as colInstanceIds)</param>
+        /// <param name="fracDatas">All parts to apply force to</param>
+        /// <param name="impactPoints">The position on each collider the force orginate from (Must have same lenght as fracDatas)</param>
         /// <param name="impactForce">The force to apply at each impactPoint, you may wanna devide it with impactPoints.count</param>
         /// <param name="impactCenter">The center of the explosion, only used if treatAsExplosion is true</param>
         /// <param name="velocity">The target velocity for each collider</param>
         /// <param name="treatAsExplosion">If true, velocity direction will be replaced with the direction from impactCenter to fracPart</param>
         /// <param name="threadSafe">If true, this function can be called from any thread</param>
-        public void RegisterImpact(ref List<int> colInstanceIds, ref List<Vector3> impactPoints, float impactForce, ref Vector3 impactCenter, ref Vector3 velocity, bool treatAsExplosion = false, bool threadSafe = false)
+        public void RegisterImpact(ref List<GlobalFracData> fracDatas, ref List<Vector3> impactPoints, float impactForce, ref Vector3 impactCenter, ref Vector3 velocity, bool treatAsExplosion = false, bool threadSafe = false)
         {
             //Get all different frac parts we hit and sort them by parent & frac
             Dictionary<RegImpactDic_key, RegImpactDic_value> fracToListIndexes = new();
 
-            for (int listI = 0; listI < colInstanceIds.Count; listI++)
+            for (int listI = 0; listI < fracDatas.Count; listI++)
             {
-                var fracD = TryGetFracPartFromColInstanceId(colInstanceIds[listI]);
-                if (fracD == null) continue;
+                var fracD = fracDatas[listI];
 
                 RegImpactDic_key newK = new()
                 {
-                    frac = fracD.fracThis, parentIndex = fracD.fracThis.jCDW_job.partsParentI[fracD.partIndex]
+                    frac = fracD.fracThis, parentIndex = fracD.fracThis.allPartsParentI[fracD.partIndex]
                 };
-
-                colInstanceIds[listI] = fracD.partIndex;
 
                 if (fracToListIndexes.ContainsKey(newK) == true) fracToListIndexes[newK].listIndexes.Add(listI);
                 else fracToListIndexes.Add(newK, new() { frac = fracD.fracThis, listIndexes = new() { listI } });
@@ -1113,13 +1155,13 @@ namespace zombDestruction
             foreach (var fracKeys in fracToListIndexes)
             {
                 //Store the impact positions in nativeArray
-                NativeArray<DestructableObject.DestructionPoint> impPoints = new(fracKeys.Value.listIndexes.Count, Allocator.Persistent);
+                NativeArray<DestructionPoint> impPoints = new(fracKeys.Value.listIndexes.Count, Allocator.Persistent);
                 int i = 0;
                 int partI = 0;
 
                 foreach (int listI in fracKeys.Value.listIndexes)
                 {
-                    partI = colInstanceIds[listI];
+                    partI = fracDatas[listI].partIndex;
 
                     impPoints[i] = new()
                     { 
@@ -1148,9 +1190,72 @@ namespace zombDestruction
             }
         }
 
-        public void RegisterExplosion()
+        public void RegisterExplosion(Vector3 explosionPosition, Vector3 groundNormal, float explosionForce, float explosionSpeed, LayerMask hitMask, out RaycastHit[] rayHits, out int hitCount, float rayWidth = 0.5f, float explosionRadius = 5.0f, int resolution = 32)
         {
+            List<GlobalFracData> hitFracs = new(4);
+            List<Vector3> hitPoints = new(4);
+            rayHits = new RaycastHit[resolution];
 
+            hitCount = 0;
+
+            //Get parts inside explosion center
+            Collider[] cols = Physics.OverlapSphere(explosionPosition, rayWidth * 1.1f, hitMask, QueryTriggerInteraction.Ignore);
+            foreach (Collider col in cols)
+            {
+                var fracD = TryGetFracPartFromColInstanceId(col.GetInstanceID());
+                if (fracD == null) continue;
+
+                hitFracs.Add(fracD);
+                hitPoints.Add(explosionPosition);
+            }
+
+            var explosionVel = new Vector3(explosionSpeed, 0.0f, 0.0f);
+            if (hitFracs.Count > 0)
+            {
+                RegisterImpact(ref hitFracs, ref hitPoints, explosionForce / hitFracs.Count, ref explosionPosition, ref explosionVel, true, false);
+            }
+
+            //Add force too all nearby stuff
+            cols = Physics.OverlapSphere(explosionPosition, explosionRadius, hitMask, QueryTriggerInteraction.Ignore);
+            foreach (Collider col in cols)
+            {
+                if (col.attachedRigidbody == null) continue;
+                float velMultiply = 1.0f;
+                var fracD = TryGetFracPartFromColInstanceId(col.GetInstanceID());
+                if (fracD != null)
+                {
+                    int parentI = fracD.fracThis.allPartsParentI[fracD.partIndex];
+                    if (parentI >= 0) velMultiply /= fracD.fracThis.allParents[parentI].partIndexes.Count;
+                }
+
+                Vector3 disDir = (col.bounds.center - explosionPosition);
+
+                col.attachedRigidbody.AddForceAtPosition(
+                    (1.0f - (disDir.magnitude / explosionRadius)) * explosionSpeed * velMultiply * ((groundNormal + disDir.normalized) / 2.0f), explosionPosition, ForceMode.Impulse);
+            }
+
+            //Do grenade fragments
+            foreach (var dir in FracHelpFunc.GetSphereDirections(resolution))
+            {
+
+                //if (Physics.Raycast(explosionPosition, dir, out rayHits[hitCount], explosionRadius, hitMask, QueryTriggerInteraction.Ignore) == false) continue;
+                if (Physics.SphereCast(explosionPosition, rayWidth, dir, out rayHits[hitCount], explosionRadius, hitMask, QueryTriggerInteraction.Ignore) == false) continue;
+
+                //if (rayHits[hitCount].rigidbody != null) rayHits[hitCount].rigidbody.AddForceAtPosition(
+                //    0.2f * explosionSpeed * dir, explosionPosition, ForceMode.Impulse);
+
+                var fracD = TryGetFracPartFromColInstanceId(rayHits[hitCount].colliderInstanceID);
+                if (fracD == null) continue;
+                Debug.DrawLine(explosionPosition, rayHits[hitCount].point, Color.red, 1.0f, true);
+
+
+                hitFracs.Add(fracD);
+                hitPoints.Add(rayHits[hitCount].point);
+                hitCount++;
+            }
+
+            
+            RegisterImpact(ref hitFracs, ref hitPoints, explosionForce / resolution, ref explosionPosition, ref explosionVel, true, false);
         }
 
         /// <summary>

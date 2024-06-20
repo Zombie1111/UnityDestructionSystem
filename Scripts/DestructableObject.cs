@@ -278,7 +278,7 @@ namespace zombDestruction
 
                 for (int structI = 0; structI < allParts.Count; structI++)
                 {
-                    int parentI = jCDW_job.partsParentI[structI];
+                    int parentI = allPartsParentI[structI];
                     if (parentI < 0) continue;
 
                     sPos = GetStructWorldPosition(structI);
@@ -304,7 +304,7 @@ namespace zombDestruction
                     for (byte neI = 0; neI < fStruct.neighbourPartI_lenght; neI++)
                     {
                         short nStructI = fStruct.neighbourPartI[neI];
-                        if (jCDW_job.partsParentI[nStructI] != parentI) continue;
+                        if (allPartsParentI[nStructI] != parentI) continue;
                         Gizmos.DrawLine(GetStructWorldPosition(nStructI), sPos);
                     }
                 }
@@ -649,6 +649,7 @@ namespace zombDestruction
             allPartsCol = new();
             allParts = new();
             allParents = new();
+            allPartsParentI = new();
             partsLocalParentPath = new();
             localPathToRbIndex = new();
             parentsThatNeedsUpdating = new();
@@ -1876,7 +1877,8 @@ namespace zombDestruction
 
                 //set part parent
                 jCDW_job.partsParentI.Add(-6969);
-                if (newPartParentI <= 0 && nearPartIndexes.Count > 0) newPartParentI = jCDW_job.partsParentI[nearPartIndexes[0]];
+                allPartsParentI.Add(-6969);
+                if (newPartParentI <= 0 && nearPartIndexes.Count > 0) newPartParentI = allPartsParentI[nearPartIndexes[0]];
                 if (newPartParentI < 0) newPartParentI = CreateNewParent(null);
 
                 partsLocalParentPath.Add(FracHelpFunc.EncodeHierarchyPath(fObj.defualtParent, allParents[newPartParentI].parentTrans));
@@ -1890,7 +1892,7 @@ namespace zombDestruction
                 foreach (short nearPartI in nearPartIndexes)
                 {
                     //ignore if this neighbour part is invalid
-                    if (jCDW_job.partsParentI[newPartI] != jCDW_job.partsParentI[nearPartI]
+                    if (allPartsParentI[newPartI] != allPartsParentI[nearPartI]
                         || FracHelpFunc.Gd_isPartLinkedWithPart(newPart, allParts[nearPartI]) == false) continue;
 
                     //add neighbours to newPart struct and add newPart to neighbours
@@ -1938,7 +1940,7 @@ namespace zombDestruction
             else jCDW_job.kinematicPartIndexes.Remove(partI);
 
             //update the parent the part uses
-            int parentI = jCDW_job.partsParentI[partI];
+            int parentI = allPartsParentI[partI];
 
             if (parentI >= 0)
             {
@@ -1991,7 +1993,7 @@ namespace zombDestruction
         /// </summary>
         public void SetPartParent(int partI, int newParentI, Vector3 losePartVelocity = default)
         {
-            int oldParentI = jCDW_job.partsParentI[partI];
+            int oldParentI = allPartsParentI[partI];
             if (oldParentI == newParentI) return;
 
             //Verify part count
@@ -2029,6 +2031,7 @@ namespace zombDestruction
             else FromNoParentToParent();
 
             jCDW_job.partsParentI[partI] = newParentI;
+            allPartsParentI[partI] = newParentI;
 
             //if want to remove parent
             if (newParentI < 0)
@@ -2124,14 +2127,6 @@ namespace zombDestruction
                 //remove rigidbody
                 //if (allPartsCol[partI].attachedRigidbody != null) Destroy(allPartsCol[partI].attachedRigidbody);
                 if (allPartsCol[partI].TryGetComponent(out Rigidbody rb) == true) Destroy(rb);//We cant use attachedRigidbody since it may be the parents rigidbody
-            }
-        }
-
-        private void RealizeDestructionJoints()
-        {
-            foreach (var desJoint in allParents[0].parentTrans.GetComponentsInChildren<DestructionJoint>())
-            {
-                desJoint.SetupJoints(this);
             }
         }
 
@@ -2285,16 +2280,14 @@ namespace zombDestruction
 
                 fRb.rb.isKinematic = fRb.rbIsKin;
 
-#if UNITY_EDITOR
-                if (globalHandler != null || Application.isPlaying == true)
+                if (globalHandler != null)
                 {
                     var rbData = phyMainOptions.customRbProperties.ShallowCopy();
                     rbData.rb = fRb.rb;
                     rbData.desMass = fRb.rbDesMass;
                     rbData.rbMass = newRbMass;
-                    globalHandler.OnAddOrUpdateRb(rbData);
+                    globalHandler.OnAddOrUpdateRb(rbData, true);
                 }
-#endif
             }
         }
 
@@ -2758,7 +2751,7 @@ namespace zombDestruction
         /// </summary>
         [System.NonSerialized] public bool fractureIsValid = false;
 
-        private unsafe void Start()
+        private unsafe void Awake()
         {
 #if UNITY_EDITOR
             if (Application.isPlaying == false) return;
@@ -2825,9 +2818,6 @@ namespace zombDestruction
             //setup gpu readback
             gpuMeshVertexData = new GpuMeshVertex[allParts.Count];
             gpuMeshBonesLToW = new Matrix4x4[fr_bones.Count];
-
-            //Add destruction joints
-            RealizeDestructionJoints();
         }
 
         private void Update()
@@ -3399,8 +3389,6 @@ namespace zombDestruction
 
             //run the job
             jCDW_jobIsActive = true;
-
-            //Debug.Log(jCDW_job.partsParentI[0]);
             jCDW_handle = jCDW_job.Schedule();
         }
 
@@ -3444,6 +3432,7 @@ namespace zombDestruction
             {
                 while (jCDW_job.deformedPartsI.TryDequeue(out int partI) == true)
                 {
+                    //If we wanna add support for onDeformation event we should invoke it here
                     des_deformedParts[des_deformedPartsIndex].Add(partI);
                 }
             }
@@ -3824,7 +3813,6 @@ namespace zombDestruction
                             pBreak = _partsToBreak[bsPI];
                             if (pBreak.layerI > resistanceLayer)
                             {
-                                Debug.Log("reduced breakForce");
                                 breakForce -= pBreak.velForce;
                                 continue;
                             }
@@ -4004,7 +3992,6 @@ namespace zombDestruction
                             _defPoints.Add(new()
                             {
                                 defPos = desPoint.impPosW,
-                                //defVel = desSource.impVel,
                                 defVel = velDir * velDis,
                                 parentI = desSource.parentI,
                                 disToWall = desPoint.disToWall,
@@ -4310,41 +4297,6 @@ namespace zombDestruction
         private readonly object destructionPairsLock = new();
         private ConcurrentDictionary<int, DestructionSource> destructionSources;//For some weird reason it does not work correctly if I replace this with a Dictionary
 
-        public unsafe struct DestructionSource
-        {
-            /// <summary>
-            /// The velocity that can be applied at most to parts that breaks and their parent, the opposite of this should be applied to rbSource(If any)(If == vector.zero, it will be like a chock wave)
-            /// </summary>
-            public Vector3 impVel;
-            public bool isExplosion;
-
-            /// <summary>
-            /// The total force applied to this object (Should be equal to all impPoints_force added togehter)
-            /// </summary>
-            public float impForceTotal;
-
-            public void* desPoints_ptr;
-            public int desPoints_lenght;
-
-            /// <summary>
-            /// The index of the parent all parts in this source has
-            /// </summary>
-            public int parentI;
-
-            public Matrix4x4 parentLToW_now;
-            public Matrix4x4 parentWToL_prev;
-
-            public Vector3 centerImpPos;
-        }
-
-        public struct DestructionPoint
-        {
-            public Vector3 impPosW;
-            public float force;
-            public int partI;
-            public float disToWall;
-        }
-
         /// <summary>
         /// For advanced users, its recommended to use FractureGlobalHandler RegisterImpact and RegisterExplosion instead
         /// </summary>
@@ -4436,14 +4388,9 @@ namespace zombDestruction
         public List<FracParent> allParents = new();
 
         /// <summary>
-        /// Used to compute destruction, the position of the struct in its part localspace
+        /// The parent index each part has
         /// </summary>
-        //[System.NonSerialized] public NativeList<Vector3> structs_posL = new();
-
-        /// <summary>
-        /// Used to compute destruction, the parent part X has
-        /// </summary>
-        //[System.NonSerialized] public NativeList<int> structs_parentI = new();
+        public List<int> allPartsParentI = new();
 
         /// <summary>
         /// Contains the index of all parents that should be updated the next frame
@@ -4521,7 +4468,7 @@ namespace zombDestruction
                 for (int nI = 0; nI < fStruct.neighbourPartI_lenght; nI++)
                 {
                     short nPI = fStruct.neighbourPartI[nI];
-                    if (jCDW_job.partsParentI[nPI] != 0) return nPI;
+                    if (allPartsParentI[nPI] != 0) return nPI;
                 }
             }
 
@@ -4552,7 +4499,7 @@ namespace zombDestruction
                 for (int nI = 0; nI < fStruct.neighbourPartI_lenght; nI++)
                 {
                     short nPI = fStruct.neighbourPartI[nI];
-                    if (jCDW_job.partsParentI[nPI] != 0) return nPI;
+                    if (allPartsParentI[nPI] != 0) return nPI;
                 }
             }
 
@@ -4570,7 +4517,7 @@ namespace zombDestruction
             int partCount = allParts.Count;
             for (int partI = 0; partI < partCount; partI++)
             {
-                if (jCDW_job.partsParentI[partI] != 0) return partI;
+                if (allPartsParentI[partI] != 0) return partI;
                 if (jCDW_job.fStructs[partI].maxTransportUsed > 0.0f) return partI;
             }
 
@@ -4588,7 +4535,7 @@ namespace zombDestruction
             int partCount = allParts.Count;
             for (int partI = 0; partI < partCount; partI++)
             {
-                if (jCDW_job.partsParentI[partI] < 0) return partI;
+                if (allPartsParentI[partI] < 0) return partI;
             }
 
             return -1;
@@ -4640,6 +4587,27 @@ namespace zombDestruction
         public bool GetIfBrokenPartExists()
         {
             return allParents[0].partIndexes.Count != allParts.Count;
+        }
+
+        /// <summary>
+        /// Returns a valid DestructableObject that is a parent of trans, returns null if no valid exist in any parent
+        /// </summary>
+        public static DestructableObject TryGetValidDestructableObjectInParent(Transform trans)
+        {
+            DestructableObject fracThis = trans.GetComponentInParent<DestructableObject>();
+            if (fracThis == null)
+            {
+                Debug.LogError("There is no DestructableObject in any parent of " + trans.name);
+                return null;
+            }
+
+            if (fracThis.fractureIsValid == false)
+            {
+                Debug.LogError("There is no valid DestructableObject in any parent of " + trans.name);
+                return null;
+            }
+
+            return fracThis;
         }
 
         #endregion DestructionUserApi
@@ -4788,11 +4756,12 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Returns the rough force that partI can apply to X if partI would collide with X at the given velocity (If transCap > 0.0f, you may wanna clamp the returned float with it)
+        /// Returns the rough force that partI can apply to X if partI would collide with X at the given velocity
+        /// (If transCap > 0.0f, you may wanna clamp the returned float with it)
         /// </summary>
-        public float GuessMaxForceApplied(Vector3 velocity, short partI, out float transCap, float bouncyness = 0.0f)
+        public float GuessMaxForceApply(Vector3 velocity, short partI, out float transCap, float bouncyness = 0.0f)
         {
-            int parentI = jCDW_job.partsParentI[partI];
+            int parentI = allPartsParentI[partI];
             DestructionMaterial.DesProperties desProp = GetDesMatFromIntId(allParts[partI].groupIdInt).desProps;
             float velSpeed = velocity.magnitude;
             if (parentI < 0)
@@ -4824,7 +4793,7 @@ namespace zombDestruction
         private float lowestTransportCapacity = 0.0f;
 
         /// <summary>
-        /// Returns true if applying the given force on partI is likely to cause any noticiable destruction on the object
+        /// Returns true if applying the given force on partI is likely to cause any noticiable damage to the object
         /// </summary>
         public bool GuessIfForceCauseBreaking(float force, int partI, out float transCap, float bouncyness = 0.0f)
         {
@@ -4841,6 +4810,21 @@ namespace zombDestruction
         }
 
         /// <summary>
+        /// Returns the rough force that has to be applied to partI for it to break, if part cant break it returns the force needed if it could break but negative
+        /// (Its recommened to multiply returned value by ~1.1f if you wanna guarantee breaking)
+        /// </summary>
+        public float GuessForceNeededToBreakPart(int partI)
+        {
+            DestructionMaterial.DesProperties desProp = destructionMaterials[jCDW_job.partIToDesMatI[partI]].desProps;
+            float forceNeeded = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
+
+            if ((FracGlobalSettings.kinematicPartsCanBreak == false && jCDW_job.kinematicPartIndexes.Contains(partI) == true)
+                || allPartsParentI[partI] < 0) return -forceNeeded;
+
+            return forceNeeded;
+        }
+
+        /// <summary>
         /// Returns how many neighbours of fStruct has parentI as parent, if two parts has the same parent they are connected
         /// </summary>
         private unsafe int GetPartConnectionCount(ref FracStruct fStruct, int parentI)
@@ -4849,7 +4833,7 @@ namespace zombDestruction
 
             for (int nI = 0; nI < fStruct.neighbourPartI_lenght; nI++)
             {
-                if (jCDW_job.partsParentI[fStruct.neighbourPartI[nI]] != parentI) continue;
+                if (allPartsParentI[fStruct.neighbourPartI[nI]] != parentI) continue;
                 connectionCount++;
             }
 
