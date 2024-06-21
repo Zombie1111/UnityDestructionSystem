@@ -67,9 +67,25 @@ namespace zombDestruction
         }
 
         /// <summary>
+        /// Rezises the array and adds all elements from otherArray to the new array. otherArray is disposed
+        /// </summary>
+#if !FRAC_NO_BURST
+        [BurstCompile]
+#endif
+        public static void CombineArray<T>(this ref NativeArray<T> array, ref NativeArray<T> otherArray) where T : struct
+        {
+            int ogLenght = array.Length;
+            array.ResizeArray(ogLenght + otherArray.Length);
+            otherArray.CopyTo(array.GetSubArray(ogLenght, otherArray.Length));
+            otherArray.Dispose();
+        }
+
+        /// <summary>
         /// Returns the closest triangel index on the mesh
         /// </summary>
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public static int GetClosestTriOnMesh(ref NativeArray<Vector3> meshWorldVers, ref NativeArray<int> meshTris, ref Vector3 posA, ref Vector3 posB, ref Vector3 posC, float worldScale = 1.0f)
         {
             int bestI = 0;
@@ -130,7 +146,9 @@ namespace zombDestruction
             return bestI;
         }
 
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public static void ClosestPointOnTriangle(ref Vector3 p0, ref Vector3 p1, ref Vector3 p2, ref Vector3 queryPoint, ref Vector3 result)
         {
             //first get closest point on plane
@@ -181,7 +199,9 @@ namespace zombDestruction
             result = pLine2;
             return;
 
+#if !FRAC_NO_BURST
             [BurstCompile]
+#endif
             static bool PointInTriangle(ref Vector3 p, ref Vector3 p00, ref Vector3 p11, ref Vector3 p22)
             {
                 // Lets define some local variables, we can change these
@@ -213,7 +233,9 @@ namespace zombDestruction
         /// <summary>
         /// Returns the closest position to point on a line between start and end
         /// </summary>
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public static void ClosestPointOnLine(ref Vector3 lineStart, ref Vector3 lineEnd, ref Vector3 point, ref Vector3 result)
         {
             Vector3 lineDirection = lineEnd - lineStart;
@@ -227,7 +249,9 @@ namespace zombDestruction
             return;
         }
 
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public static void ClosestPointOnPlaneInfinit(ref Vector3 planePos, ref Vector3 planeNor, ref Vector3 queryPoint, ref Vector3 result)
         {
             result = queryPoint + (-Vector3.Dot(planeNor, queryPoint - planePos) / Vector3.Dot(planeNor, planeNor)) * planeNor;
@@ -237,7 +261,9 @@ namespace zombDestruction
         /// <summary>
         /// Returns 0 if possA is closest to pos, returns 2 if possC is closest to poss....
         /// </summary>
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public static int GetClosestPointOfPoss(ref Vector3 possA, ref Vector3 possB, ref Vector3 possC, ref Vector3 pos)
         {
             int bestI = 0;
@@ -271,7 +297,9 @@ namespace zombDestruction
             return bestI;
         }
 
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public static void DecomposeMatrix(ref Matrix4x4 matrix, ref Vector3 position, ref Quaternion rotation, ref Vector3 scale)
         {
             position = matrix.GetColumn(3);
@@ -279,7 +307,9 @@ namespace zombDestruction
             scale = new Vector3(matrix.GetColumn(0).magnitude, matrix.GetColumn(1).magnitude, matrix.GetColumn(2).magnitude);
         }
 
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public static void InterpolateMatrix(ref Matrix4x4 A, ref Matrix4x4 B, float t)
         {
             // Decompose matrices

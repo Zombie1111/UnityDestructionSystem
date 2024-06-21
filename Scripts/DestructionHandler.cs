@@ -83,7 +83,6 @@ namespace zombDestruction
             //Get ogFixedTimeStep
             if (handlers.Length == 0) ogFixedTimeStep = Time.fixedDeltaTime;
             else ogFixedTimeStep = handlers[0].ogFixedTimeStep;
-
         }
 
         private void Start()
@@ -602,10 +601,13 @@ namespace zombDestruction
             public HashSet<int> impPartIndexs;
 
             /// <summary>
-            /// The other rigidbody in the collision
+            /// The difference between desMass and rb mass (thisRbData.rbMass / thisRbData.desMass)
             /// </summary>
-            public Rigidbody sourceRb;
             public float thisRbDesMassDiff;
+
+            /// <summary>
+            /// The jgrvIndex of the rigidbody we collided with (The rigidbody on the destructable object)
+            /// </summary>
             public int thisRbI;
 
             /// <summary>
@@ -618,6 +620,15 @@ namespace zombDestruction
             /// </summary>
             public HashSet<int> impPairsIndexes;
         }
+
+        public delegate void Event_OnDestructionImpact(ref List<DestructionPoint> impactPoints, ref float totalImpactForce, ref Vector3 impactVelocity, int hitRbJgrvIndex);
+        
+        /// <summary>
+        /// You should only subscribe/unsubscribe to this event in the Awake/Start/Enable/Destroy/Disable methods.
+        /// The event can be invoked from any thread.
+        /// Its recommended that you add the data you need later to a concurrentQueue and read it in the next Update()
+        /// </summary>
+        public event Event_OnDestructionImpact OnDestructionImpact;
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
         {
@@ -759,6 +770,9 @@ namespace zombDestruction
                         }
                     }
                 }
+
+                //Invoke on destruction impact event
+                OnDestructionImpact?.Invoke(ref iPair.impPoints, ref maxImpF, ref iPair.impVel, iPair.thisRbI);
 
                 //notify destructable object about impact
                 iPair.impFrac.RegisterDestruction(new()
@@ -963,7 +977,6 @@ namespace zombDestruction
                         impPairsI = new(),
                         impPairsIndexes = new(),
                         impVel = Vector3.zero,
-                        sourceRb = otherRbI < 0 ? null : sourceRbData.rb,
                         thisRbDesMassDiff = thisRbI < 0 ? 1.0f : (thisRbData.rbMass / thisRbData.desMass),
                         thisRbI = thisRbI
                     };

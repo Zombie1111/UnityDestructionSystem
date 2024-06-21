@@ -3292,7 +3292,7 @@ namespace zombDestruction
         private RaycastHit[] rayHits = new RaycastHit[2];
 #pragma warning restore IDE0044 // Add readonly modifier
 
-        private void ComputeDestruction_start()
+        private unsafe void ComputeDestruction_start()
         {
 #if UNITY_EDITOR
             if (Application.isPlaying == false)
@@ -3327,17 +3327,20 @@ namespace zombDestruction
                 }
                 else
                 {
+                    //Get pointer
                     var source = destructionSources[deskeys[i]];
+                    var desPairs = destructionPairs[deskeys[i]];
+                    source.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(desPairs);
+                    source.desPoints_lenght = desPairs.Length;
                     jCDW_job.desSources[i] = source;
 
                     //get destruction points distance to wall
 #pragma warning disable CS0162
                     if (FracGlobalSettings.doDeformationCollision == false) continue;
-
-                    var desPairs = destructionPairs[deskeys[i]];
+                    
                     Vector3 impDir = source.impVel.normalized;
                     float impDisOg = source.impVel.magnitude;
-                    float impDis = impDisOg + partMaxExtent;
+                    float impDis = partMaxExtent;
                     float fixedDeltaTime = Time.fixedDeltaTime;
 
                     for (int desPI = 0; desPI < desPairs.Length; desPI++)
@@ -3346,8 +3349,7 @@ namespace zombDestruction
                         desP.disToWall = 69420.0f;
                         if (source.isExplosion == true) impDir = (desP.impPosW - source.centerImpPos).normalized;
 
-                        //int hitCount = Physics.RaycastNonAlloc(GetStructWorldPosition(desP.partI), impDir, rayHits, impDis, globalHandler.groundLayers, QueryTriggerInteraction.Ignore);
-                        Vector3 offset = (impDisOg * fixedDeltaTime * impDir);
+                        Vector3 offset = (impDis * 0.0f * impDir);
                         float offsetDis = offset.magnitude;
                         int hitCount = Physics.RaycastNonAlloc(desP.impPosW - offset, impDir, rayHits, impDis + offsetDis, globalHandler.groundLayers, QueryTriggerInteraction.Ignore);
                         bool isValid = false;
@@ -3363,7 +3365,7 @@ namespace zombDestruction
                             }
 
                             //float hDis = Math.Max(nHit.distance - (partMaxExtent * 0.5f), 0.001f);
-                            float hDis = Math.Max(nHit.distance - partMaxExtent - offsetDis, 0.001f);
+                            float hDis = Math.Max(nHit.distance - (partMaxExtent * 0.5f) - offsetDis, 0.001f);
                             
                             if (hDis < desP.disToWall) desP.disToWall = hDis;
                         }
@@ -3372,7 +3374,7 @@ namespace zombDestruction
                         {
                             //Debug.Log("Invalid");
                             //desP.force = 0.0f;//Seems to make stuff more stable, if we run into issues that stuff dont break try removing this
-                            desP.disToWall = 0.00001f;
+                            //desP.disToWall = 0.00001f;
                         }
                         desPairs[desPI] = desP;
                     }
@@ -4306,12 +4308,8 @@ namespace zombDestruction
         /// <param name="canOverwrite">If impactId already exists, true == overwrite existing source, false == merge with existing source</param>
         public unsafe void RegisterDestruction(DestructionSource impactData, NativeArray<DestructionPoint> impactPoints, int thisRbJGRVI, int impactId = 0, bool canOverwrite = false)
         {
-            //Debug.Log(impactId + " " + impactData.impVel.magnitude + " " + (impactData.impForceTotal / impactPoints.Count()));
             //Get stuff that does not need to be assigned when calling register function
-            impactData.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impactPoints);
-            impactData.desPoints_lenght = impactPoints.Length;
-
-            //if (globalHandler.rbInstancIdToJgrvIndex.TryGetValue(thisRbJGRVI, out int rbI) == true)
+            //The pointers are assigned when dispatching job
             if (thisRbJGRVI >= 0)
             {
                 var parentRbData = globalHandler.jGRV_job.rb_posData[thisRbJGRVI];
@@ -4323,7 +4321,6 @@ namespace zombDestruction
                 //parent has not been registered yet so get some "fake" matrixs, can happen if you try to break a parent the same frame it was created.
                 impactData.parentWToL_prev = Matrix4x4.identity;
                 impactData.parentLToW_now = Matrix4x4.identity.inverse;
-                //Debug.LogError("The parent rigidbody has not been registered by the globalHandler, unexpected behavior may occure!");
             }
 
             lock (destructionPairsLock)
@@ -4338,9 +4335,13 @@ namespace zombDestruction
                         destructionSources.TryGetValue(impactId, out DestructionSource impD);
                         destructionPairs.TryGetValue(impactId, out NativeArray<DestructionPoint> impP);
 
-                        int ogLenght = impP.Length;
-                        impP.ResizeArray(impP.Length + impactPoints.Length);
-                        impactPoints.CopyTo(impP.GetSubArray(ogLenght, impactPoints.Length));
+                        impP.CombineArray(ref impactPoints);
+
+                        //int ogLenght = impP.Length;
+                        //impP.ResizeArray(ogLenght + impactPoints.Length);
+                        //impactPoints.CopyTo(impP.GetSubArray(ogLenght, impactPoints.Length));
+                        //impactPoints.Dispose();
+
                         float tempTotalForce = impD.impForceTotal + impactData.impForceTotal;
 
                         if (impactData.impForceTotal > impD.impForceTotal)
@@ -4357,8 +4358,6 @@ namespace zombDestruction
                             impP[i] = desP;
                         }
 
-                        impD.desPoints_ptr = NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(impP);//We must update the pointer since we created a new instance
-                        impD.desPoints_lenght = impP.Length;
                         destructionSources.TryUpdate(impactId, impD, impD);
                         destructionPairs[impactId] = impP;
                     }
@@ -4369,6 +4368,7 @@ namespace zombDestruction
                 }
             }
         }
+
 
         #endregion ComputeDestruction
 
@@ -4776,12 +4776,14 @@ namespace zombDestruction
             }
 
             if (localPathToRbIndex.TryGetValue(partsLocalParentPath[partI], out int rbI) == false) rbI = -1;
+            float chockForce = desProp.stenght * (1.0f - desProp.chockResistance);
             float impForce = rbI < 0 || allParents[parentI].parentRbs[rbI].rbIsKin == true ?
-                float.MaxValue : (velSpeed * allParents[parentI].parentMass);
+                float.MaxValue : ((velSpeed * allParents[parentI].parentMass) + chockForce);
 
             FracStruct fStruct = jCDW_job.fStructs[partI];
 
-            transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation)) + (desProp.stenght * desProp.chockResistance);
+
+            transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation)) + chockForce;
             impForce -= impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
 
             return impForce;

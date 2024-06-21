@@ -129,6 +129,10 @@ namespace zombDestruction
         /// <param name="percentageChanged">How much it has changed since last invoke (0.0f - 1.0f)</param>
         /// <param name="currentBrokenPercentage">How broken it is (0.0f - 1.0f)</param>
         public delegate void Event_OnPercentageChanged(float percentageChanged, float currentBrokenPercentage);
+
+        /// <summary>
+        /// Gets invoked if percentageChanged is > invokeWhenBrokenPercentageHasChangedBy and if currentBrokenPercentage </or> alwaysInvokeIfOnMessuredSideOf
+        /// </summary>
         public event Event_OnPercentageChanged OnDestructionCallback;
 
         [System.NonSerialized] public float lastInvokeValue = 0.0f;

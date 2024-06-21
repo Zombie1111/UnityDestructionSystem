@@ -28,7 +28,7 @@ namespace zombDestruction
         public const float minimumImpactForce = 5.0f;
 
         //The minimum velocity a rigidbody must have for it to cause any destruction
-        public const float minimumImpactVelocity = 0.1f;
+        public const float minimumImpactVelocity = 2.0f;
 
         //If == 1.0f and a collider has a bouncyness of 1.0f the collider can not cause any destruction since all its energy gets "consumed" by the bounce
         public const float bouncynessEnergyConsumption = 1.0f;
@@ -48,14 +48,10 @@ namespace zombDestruction
         public const byte recalculateKinematicPartsOnLoad = 1;
 
         //How much weaker a material can be depending on the difference between force direction and structure direction
-        public const float transDirInfluenceReduction = 1.0f;//Seems to cause inconsistant destruction so we keep it at 1.0f
+        public const float transDirInfluenceReduction = 0.5f;
 
         //How many neighbours any part can have at most. Neighbours uses fixed buffers so it cant be dynamic. Higher = more memory, keep it as low as possible and look for warnings in console if its too low
         public const byte maxPartNeighbourCount = 32;
-
-        //How many deformation bones each vertex can have. Higher = more memory, keep it as low as possible and look for warnings in console if its too low
-        //maxDeformationBones IN UltimateFracture/Resources/ComputeGlobalSettings.cginc MUST ALSO BE THE SAME!!!
-        public const byte maxDeformationBones = 64;
 
         //If deformation is enabled, it has to sync all colliders with the deformed mesh.
         //Modifying a collider aint very fast, this limits how many colliders each destructable object can sync per frame
