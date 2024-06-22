@@ -58,7 +58,7 @@ namespace zombDestruction
         public class FracRb
         {
             public Rigidbody rb;
-            public int rbId;
+            //public int rbId;
             public float rbDesMass;
             public int rbKinCount;//This can be removed but if we do setPartKinematic() called by user wont work properly
             public int rbPartCount;
@@ -202,5 +202,13 @@ namespace zombDestruction
 #if !FRAC_NO_VERTEXCOLORSUPPORT
         public float colA;
 #endif
+    }
+
+
+    [System.Serializable]
+    public class GlobalFracData
+    {
+        public DestructableObject fracThis;
+        public short partIndex;
     }
 }

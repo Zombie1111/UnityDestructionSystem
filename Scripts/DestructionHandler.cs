@@ -57,11 +57,11 @@ namespace zombDestruction
 #pragma warning disable CS0162 // Unreachable code detected
                 if (FracGlobalSettings.canAutomaticallyRemoveAddedRigidbodies == false) partColsInstanceId.AddRange(handlers[i].partColsInstanceId);
                 else foreach (var idFrac in handlers[i].partColsInstanceId)
-                     {
-                         if (idFrac.Value.fracThis == null) continue;
-                         idFrac.Value.fracThis.globalHandler = this;
-                         partColsInstanceId.TryAdd(idFrac.Key, idFrac.Value);
-                     }
+                    {
+                        if (idFrac.Value.fracThis == null) continue;
+                        idFrac.Value.fracThis.globalHandler = this;
+                        partColsInstanceId.TryAdd(idFrac.Key, idFrac.Value);
+                    }
 #pragma warning restore CS0162 // Unreachable code detected
 
                 int rbCount = handlers[i].jGRV_rbData.Count;
@@ -172,11 +172,11 @@ namespace zombDestruction
                 updateStatus = 2
             }) == false)
             {
-                if (onlyUpdateMass == true)
+                if (onlyUpdateMass == true && rbInstancIdToJgrvIndex.TryGetValue(rbId, out int rbIndex) == true)
                 {
                     float ogDesMass = rbData.desMass;
                     float ogRbMass = rbData.rbMass;
-                    rbData = jGRV_rbData[rbId].ShallowCopy();
+                    rbData = jGRV_rbData[rbIndex].ShallowCopy();
                     rbData.desMass = ogDesMass;
                     rbData.rbMass = ogRbMass;
                 }
@@ -464,7 +464,9 @@ namespace zombDestruction
             }
         }
 
+#if !FRAC_NO_BURST
         [BurstCompile]
+#endif
         public struct GetRbVelocities_work : IJobParallelForTransform
         {
             [NativeDisableContainerSafetyRestriction]
@@ -482,7 +484,7 @@ namespace zombDestruction
 
                 posD.rbWToLPrev = posD.rbLToWNow.inverse;
                 posD.rbLToWNow = transform.localToWorldMatrix;
-                
+
                 rb_posData[index] = posD;
             }
         }
@@ -512,45 +514,6 @@ namespace zombDestruction
             //Get fixed deltaTime
             fixedDeltatime = Time.fixedDeltaTime;
 
-            //Update ignored ids
-            if (impIdsToIgnore.Count > 0)
-            {
-                //This feels extremely overcomplicated and slow, but everything else I have tried causes collection was modified error
-                //Get keys to update or remove
-                HashSet<int> keysToRemove = new();
-                List<int> keysToUpdate = new();
-                List<IgnoredImpIdData> updatedData = new();
-
-                foreach (var kvp in impIdsToIgnore)
-                {
-                    var impId = kvp.Key;
-                    var ignoreData = kvp.Value;
-
-                    if (ignoreData.timeLeft <= 0.0f)
-                    {
-                        keysToRemove.Add(impId);
-                    }
-                    else
-                    {
-                        ignoreData.timeLeft -= fixedDeltatime;
-                        keysToUpdate.Add(impId);
-                        updatedData.Add(ignoreData);
-                    }
-                }
-
-                //Remove keys
-                foreach (var key in keysToRemove)
-                {
-                    impIdsToIgnore.Remove(key);
-                }
-
-                //Update keys
-                for (int i = 0; i < keysToUpdate.Count; i++)
-                {
-                    impIdsToIgnore[keysToUpdate[i]] = updatedData[i];
-                }
-            }
-
             //end get rb velocities
             GetRbVelocities_end();
 
@@ -566,14 +529,6 @@ namespace zombDestruction
         }
 
         private float fixedDeltatime = 0.01f;
-        private Dictionary<int, IgnoredImpIdData> impIdsToIgnore = new();
-        private readonly object toIgnoreLock = new();
-
-        private class IgnoredImpIdData
-        {
-            public float timeLeft;
-            public Vector3 velDir;
-        }
 
         private class ImpPair
         {
@@ -622,7 +577,7 @@ namespace zombDestruction
         }
 
         public delegate void Event_OnDestructionImpact(ref List<DestructionPoint> impactPoints, ref float totalImpactForce, ref Vector3 impactVelocity, int hitRbJgrvIndex);
-        
+
         /// <summary>
         /// You should only subscribe/unsubscribe to this event in the Awake/Start/Enable/Destroy/Disable methods.
         /// The event can be invoked from any thread.
@@ -670,8 +625,6 @@ namespace zombDestruction
                 int maxImpI = 0;
                 int impCount = iPair.impPoints.Count;
 
-                HashSet<int> debug = new();
-
                 for (int i = 0; i < impCount; i++)
                 {
                     //get highest impact force
@@ -685,20 +638,14 @@ namespace zombDestruction
 
                     //Normlize impact force
                     impP.force /= iPair.impForceTotal;
-
-                    if (debug.Add(impP.partI) == false)
-                    {
-                        Debug.LogError("double " + impP.partI);
-                    }
-
                     iPair.impPoints[i] = impP;
-
                 }
 
                 if (iPair.sourceTransCapTotal > 0.0f && maxImpF > iPair.sourceTransCapTotal) maxImpF = iPair.sourceTransCapTotal;
 
                 //Get top 10% impact
-                float neededForce = maxImpF * 0.9f;
+                float neededForce = maxImpF * 0.9f;//This is wrong because maxImpF is taken before division
+                                                   //however it seems to still provide nicer result, wtf???
                 float totTopForce = 0.0f;
                 int totTopCount = 0;
 
@@ -728,7 +675,7 @@ namespace zombDestruction
                     if (somethingLikelyBreaks == true) continue;
 
                     var tempPair = pairs[iPair.impPairsI[i]];
-               
+
                     if (iPair.impFrac.GuessIfForceCauseBreaking(totTopForce * Mathf.Clamp01((desP.force / totTopForce) * Mathf.Max(1.0f, totTopCount / 2.0f))
                         , desP.partI, out float thisTransCap, tempPair.GetBounciness(0)) == true)
                     {
@@ -749,15 +696,9 @@ namespace zombDestruction
                 //if no impact is likely to cause breaking, mark contacts between source and frac to be ignored the next few physics frames
                 if (somethingLikelyBreaks == false)
                 {
-                    //Add to ids to ignore
-                    lock (toIgnoreLock)
-                    {
-                        impIdsToIgnore.TryAdd(impId, new() { timeLeft = 0.1f, velDir = iPair.impVel.normalized });
-                    }
-
                     transCap *= iPair.thisRbDesMassDiff;
                     transCap /= iPair.impPairsIndexes.Count;
-                    transCap /= Mathf.Max(1.0f, iPair.impPoints.Count / 2.0f);
+                    //transCap /= Mathf.Max(1.0f, iPair.impPoints.Count / 2.0f);
 
                     foreach (int pI in iPair.impPairsIndexes)
                     {
@@ -951,16 +892,6 @@ namespace zombDestruction
                 tempInputIds[2] = fracD.fracThis.fracInstanceId;
                 int thisImpId = FracHelpFuncBurst.GetHashFromInts(ref tempInputIds);
 
-                //Get if id is ignored
-                lock (toIgnoreLock)
-                {
-                    if (impIdsToIgnore.TryGetValue(thisImpId, out IgnoredImpIdData ignoreData) == true)
-                    {
-                        impactVel = ignoreData.velDir * impactVel.magnitude;
-                    }
-                }
-                //if (impIdsToIgnore.ContainsKey(thisImpId) == true) return;//return if imp should be ignored
-
                 //Get impact from dictorary
                 if (impIdToImpPair.TryGetValue(thisImpId, out ImpPair impPair) == false)
                 {
@@ -1054,7 +985,7 @@ namespace zombDestruction
 
             NativeArray<DestructionPoint> impPoints = new(1, Allocator.Persistent);
             impPoints[0] = new()
-            { 
+            {
                 force = impactForce,
                 impPosW = impactPoint,
                 partI = fracD.partIndex
@@ -1157,7 +1088,8 @@ namespace zombDestruction
 
                 RegImpactDic_key newK = new()
                 {
-                    frac = fracD.fracThis, parentIndex = fracD.fracThis.allPartsParentI[fracD.partIndex]
+                    frac = fracD.fracThis,
+                    parentIndex = fracD.fracThis.allPartsParentI[fracD.partIndex]
                 };
 
                 if (fracToListIndexes.ContainsKey(newK) == true) fracToListIndexes[newK].listIndexes.Add(listI);
@@ -1177,7 +1109,7 @@ namespace zombDestruction
                     partI = fracDatas[listI].partIndex;
 
                     impPoints[i] = new()
-                    { 
+                    {
                         force = impactForce,
                         impPosW = impactPoints[listI],
                         partI = partI
@@ -1267,7 +1199,7 @@ namespace zombDestruction
                 hitCount++;
             }
 
-            
+
             RegisterImpact(ref hitFracs, ref hitPoints, explosionForce / resolution, ref explosionPosition, ref explosionVel, true, false);
         }
 

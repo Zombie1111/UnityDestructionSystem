@@ -56,12 +56,8 @@ namespace zombDestruction
         public static void ResizeArray<T>(this ref NativeArray<T> array, int capacity) where T : struct
         {
             var newArray = new NativeArray<T>(capacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-
-            if (array.IsCreated)
-            {
-                NativeArray<T>.Copy(array, newArray, array.Length);
-                array.Dispose();
-            }
+            NativeArray<T>.Copy(array, newArray, array.Length);
+            array.Dispose();
 
             array = newArray;
         }

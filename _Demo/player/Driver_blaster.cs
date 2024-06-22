@@ -58,6 +58,12 @@ namespace GameLogic
 
         private void Update()
         {
+            // Get mouse wheel input
+            float scrollWheelInput = Input.GetAxis("Mouse ScrollWheel") * Mathf.Lerp(0.032f, 1.6f, Time.timeScale);
+
+            // Adjust speed based on mouse wheel input
+            Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);
+
             if (Input.GetKeyDown(KeyCode.Mouse0) == true) TryToShoot();
 
             if (Input.GetKeyDown(KeyCode.Mouse1) == true)

@@ -524,8 +524,8 @@ namespace zombDestruction
                     return false;
                 }
 
-                allParents[0].parentRbs[i].rbId = allParents[0].parentRbs[i].rb.GetInstanceID();
-                allParents[0].parentRbs[i].rbIsKinByDefualt = allParents[0].parentRbs[i].rb.isKinematic;
+                //allParents[0].parentRbs[i].rbId = allParents[0].parentRbs[i].rb.GetInstanceID();
+                //allParents[0].parentRbs[i].rbIsKinByDefualt = allParents[0].parentRbs[i].rb.isKinematic;
                 //(Not needed) allParents[0].parentRb.maxDepenetrationVelocity = FracGlobalSettings.desRbMaxDepenetrationVelocity;
             }
 
@@ -654,6 +654,7 @@ namespace zombDestruction
             localPathToRbIndex = new();
             parentsThatNeedsUpdating = new();
             syncFR_modifiedPartsI = new();
+            if (jGTD_hasMoved.IsCreated == true) jGTD_hasMoved.Clear();
             ClearUsedGpuAndCpuMemory();
             jCDW_job = new()
             {
@@ -800,7 +801,7 @@ namespace zombDestruction
             if (globalHandler == null)
             {
                 globalHandler = DestructionHandler.TryGetGlobalHandler(gameObject, this, true);
-                return false;
+                if (globalHandler == null) return false;
             }
 
             if (SaveOrLoadAsset(false) == false)
@@ -911,13 +912,13 @@ namespace zombDestruction
                 //Log the error
                 Debug.LogError("Exception: " + ex.Message);
                 Debug.LogError("StackTrace: " + ex.StackTrace);
-                
+
                 //Display an error message to the user
                 EditorUtility.DisplayDialog("Error", "An unexpected error occured while fracturing, look in console for more info", "OK");
-                
+
                 //remove the fracture
                 CancelFracturing();
-                
+
                 //set fracture as invalid
                 fractureIsValid = false;
                 return false;
@@ -1334,7 +1335,7 @@ namespace zombDestruction
                 bestCount = thisCount;
                 bestChild = thisChild;
             }
-            
+
             if (bestChild == null || bestChild == transform)
             {
                 Debug.LogError(transform.name + " does not have a valid transform to be used as defualt parent");
@@ -1688,7 +1689,7 @@ namespace zombDestruction
         public FracObject CreateFObjectFromObject(GameObject obj, List<float>[] groupIds = null)
         {
             FracObject fObj = new();
-            Debug.LogError(obj +  " Not implemented " + groupIds);
+            Debug.LogError(obj + " Not implemented " + groupIds);
             return fObj;
         }
 
@@ -2083,7 +2084,7 @@ namespace zombDestruction
                         return;
                     }
                 }
-                
+
                 //set transform
                 fr_bones[partI].SetParent(transform);
                 fr_bones[partI].gameObject.layer = partDesMat.objLayerBroken;
@@ -2189,13 +2190,17 @@ namespace zombDestruction
                 foreach (Rigidbody rb in transToUse.GetComponentsInChildren<Rigidbody>())
                 {
                     if (newParentI == 0 && rb.GetComponentInChildren<Renderer>(true) == null) continue;
+                    bool isKin = rb.isKinematic;
 
                     fRbs.Add(new()
                     {
                         rb = rb,
                         rbDesMass = 0.0f,
-                        rbId = rb.GetInstanceID(),
-                        rbKinCount = 0
+                        //rbId = rb.GetInstanceID(),
+                        rbKinCount = 0,
+                        rbIsKinByDefualt = isKin,
+                        rbIsKin = isKin,
+                        rbPartCount = 0
                     });
                 }
 
@@ -2739,7 +2744,7 @@ namespace zombDestruction
             return FracHelpFunc.SplitMeshByTrisIds(meshToSplit, trisIds, triIdToGroupId);
         }
 
-#endregion GenerateFractureSystem
+        #endregion GenerateFractureSystem
 
 
 
@@ -3323,11 +3328,11 @@ namespace zombDestruction
                     //get destruction points distance to wall
 #pragma warning disable CS0162
                     if (FracGlobalSettings.doDeformationCollision == false) continue;
-                    
+
                     Vector3 impDir = source.impVel.normalized;
                     float impDisOg = source.impVel.magnitude;
                     float impDis = partMaxExtent;
-                    float fixedDeltaTime = Time.fixedDeltaTime;
+                    float fixedDeltaTime = Time.fixedDeltaTime * 0.5f;
 
                     for (int desPI = 0; desPI < desPairs.Length; desPI++)
                     {
@@ -3335,7 +3340,7 @@ namespace zombDestruction
                         desP.disToWall = 69420.0f;
                         if (source.isExplosion == true) impDir = (desP.impPosW - source.centerImpPos).normalized;
 
-                        Vector3 offset = (impDis * 0.0f * impDir);
+                        Vector3 offset = (impDis * fixedDeltaTime * impDir);
                         float offsetDis = offset.magnitude;
                         int hitCount = Physics.RaycastNonAlloc(desP.impPosW - offset, impDir, rayHits, impDis + offsetDis, globalHandler.groundLayers, QueryTriggerInteraction.Ignore);
                         bool isValid = false;
@@ -3352,7 +3357,7 @@ namespace zombDestruction
 
                             //float hDis = Math.Max(nHit.distance - (partMaxExtent * 0.5f), 0.001f);
                             float hDis = Math.Max(nHit.distance - (partMaxExtent * 0.5f) - offsetDis, 0.001f);
-                            
+
                             if (hDis < desP.disToWall) desP.disToWall = hDis;
                         }
 
@@ -3631,7 +3636,8 @@ namespace zombDestruction
                         Vector3 oVel = defPoint.defVel / offsetPointCount;//This should be clamped to wall hit, max deformation and kinematic parts
 
                         int propI = _partIToDesMatI[defPoint.partI];
-                        oVel = Vector3.MoveTowards(oVel, Vector3.zero, _defOffsetW[defPoint.partI].magnitude * (1.0f - _desProps[propI].damageAccumulation));
+                        //oVel = Vector3.MoveTowards(oVel, Vector3.zero, _defOffsetW[defPoint.partI].magnitude * _desProps[propI].damageAccumulation);
+                        oVel = Vector3.MoveTowards(oVel, Vector3.zero, _defOffsetW[defPoint.partI].magnitude * 0.75f);
                         float maxDef = Math.Min(defPoint.disToWall > 0.0f ? defPoint.disToWall : 69420.0f, GetDisToKin(ref oPos, defPoint.parentI)) / offsetPointCount;
 
                         //At maxDef bendForceOg should be 0
@@ -3925,19 +3931,20 @@ namespace zombDestruction
                 {
                     //get the source
                     DestructionSource desSource = _desSources[sourceI];
-                    if (desSource.impForceTotal <= 0.0f || desSource.parentI < 0) return;
-                    //allTotImpForces += desSource.impForceTotal;
 
-                    //reset nativeArrays
-                    FracHelpFunc.SetWholeNativeArray(ref partsMoveMass, 0.0f);//To prevent devision by zero
-
-                    //add impact forces to forceCons
+                    //Get destruction points, must always run to garantee dispose
                     NativeArray<DestructionPoint> desPoints = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<DestructionPoint>(
                                         desSource.desPoints_ptr, desSource.desPoints_lenght, Allocator.Temp);
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                     NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref desPoints, AtomicSafetyHandle.GetTempMemoryHandle());
 #endif
+
+                    //Return if no force or invalid parent
+                    if (desSource.impForceTotal <= 0.0f || desSource.parentI < 0) return;
+
+                    //reset nativeArrays
+                    FracHelpFunc.SetWholeNativeArray(ref partsMoveMass, 0.0f);//To prevent devision by zero
 
                     //get all impacts that has higher force than the highest impact force * 0.9f
                     NativeArray<int> orderIToPartI = new(partCount, Allocator.Temp);//Index 0 is a impact part
@@ -4319,12 +4326,6 @@ namespace zombDestruction
                         destructionPairs.TryGetValue(impactId, out NativeArray<DestructionPoint> impP);
 
                         impP.CombineArray(ref impactPoints);
-
-                        //int ogLenght = impP.Length;
-                        //impP.ResizeArray(ogLenght + impactPoints.Length);
-                        //impactPoints.CopyTo(impP.GetSubArray(ogLenght, impactPoints.Length));
-                        //impactPoints.Dispose();
-
                         float tempTotalForce = impD.impForceTotal + impactData.impForceTotal;
 
                         if (impactData.impForceTotal > impD.impForceTotal)
@@ -4768,7 +4769,9 @@ namespace zombDestruction
 
 
             //transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation)) + chockForce;
-            transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation));
+            //transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation));
+            transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation))
+                + (impForce * (1.0f - desProp.chockResistance));
             impForce -= impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
 
             return impForce;
@@ -4792,7 +4795,7 @@ namespace zombDestruction
             //transCap *= Mathf.Clamp01(0.25f + FracGlobalSettings.transDirInfluenceReduction); 
             force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
             transCap -= transCap * bendProp.bendyness;
-            //transCap -= desProp.stenght * (1.0f - desProp.chockResistance);
+            transCap -= force * (1.0f - desProp.chockResistance);
 
             return force > transCap;
         }
@@ -4809,7 +4812,7 @@ namespace zombDestruction
 
             if ((FracGlobalSettings.kinematicPartsCanBreak == false && jCDW_job.kinematicPartIndexes.Contains(partI) == true)
                 || allPartsParentI[partI] < 0) return -forceNeeded;
-            
+
             return forceNeeded;
         }
 

@@ -11,7 +11,7 @@ namespace zombDestruction
     public class FracSavedState : ScriptableObject
     {
 #if UNITY_EDITOR
-        [MenuItem("Tools/Fracture/CreateSaveStateAsset")]
+        [MenuItem("Tools/Destruction/CreateSaveStateAsset")]
 #endif
         public static FracSavedState CreateSaveStateAsset()
         {

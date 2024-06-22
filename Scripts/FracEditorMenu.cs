@@ -9,25 +9,25 @@ namespace zombDestruction
 {
     public class FracEditorMenu : Editor
     {
-        [MenuItem("Tools/Fracture/Fracture All")]
+        [MenuItem("Tools/Destruction/Fracture All")]
         private static void FractureAll()
         {
             EditorCoroutineUtility.StartCoroutineOwnerless(FractureArray(GameObject.FindObjectsOfType<DestructableObject>(false)));
         }
 
-        [MenuItem("Tools/Fracture/Fracture Selected")]
+        [MenuItem("Tools/Destruction/Fracture Selected")]
         private static void FractureSelected()
         {
             EditorCoroutineUtility.StartCoroutineOwnerless(FractureArray(GetSelectedFractures().ToArray()));
         }
 
-        [MenuItem("Tools/Fracture/Remove All Fractures")]
+        [MenuItem("Tools/Destruction/Remove All Fractures")]
         private static void RemoveAllFractures()
         {
             RemoveFracturesArray(GameObject.FindObjectsOfType<DestructableObject>(false));
         }
 
-        [MenuItem("Tools/Fracture/Remove Selected Fractures")]
+        [MenuItem("Tools/Destruction/Remove Selected Fractures")]
         private static void RemoveSelectedFractures()
         {
             RemoveFracturesArray(GetSelectedFractures().ToArray());
@@ -54,7 +54,7 @@ namespace zombDestruction
             return selectedFracs;
         }
 
-        [MenuItem("Tools/Fracture/CopyPropertiesFromLastSelected")]
+        [MenuItem("Tools/Destruction/CopyPropertiesFromLastSelected")]
         private static void CopyPropertiesFromLastSelected()
         {
             if (Selection.activeTransform == null)

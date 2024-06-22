@@ -62,6 +62,7 @@ namespace zombDestruction
             public List<Vector3> saved_structs_posL = new();
             public List<int> saved_structs_parentI = new();
             public List<int> saved_fr_verToPartI = new();
+            public List<Matrix4x4> saved_fr_bindposes = new();
             public FracStruct[] saved_fracStructs = new FracStruct[0];
             public List<short> saved_parentPartCount = new();
             public int[] saved_partIToDesMatI = new int[0];
@@ -78,32 +79,30 @@ namespace zombDestruction
         [System.Serializable]
         public class SavableMesh
         {
-            public Matrix4x4[] sMesh_bindposes = null;
             public Vector3[] sMesh_vertics = null;
             public DestructableObject.IntList[] sMesh_triangels = null;
             public Vector2[] sMesh_uvs = null;
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+            public Color[] sMest_colors = null;
+#endif
 
             /// <summary>
-            /// Returns the saved data as a mesh, if ignoreSkin is true boneWeights and bindposes will be ignored
+            /// Returns the saved data as a mesh
             /// </summary>
-            /// <returns></returns>
-            public Mesh ToMesh(bool ignoreSkin = false)
+            public Mesh ToMesh()
             {
                 //load basics
                 Mesh newM = new()
                 {
                     vertices = sMesh_vertics,
-                    uv = sMesh_uvs
+                    uv = sMesh_uvs,
+                    subMeshCount = sMesh_triangels.Length,
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+                colors = sMest_colors
+#endif
                 };
 
-                if (ignoreSkin == false)
-                {
-                    newM.bindposes = sMesh_bindposes;
-                }
-
                 //load submeshes and tris
-                newM.subMeshCount = sMesh_triangels.Length;
-
                 for (int sI = 0; sI < sMesh_triangels.Length; sI++)
                 {
                     newM.SetTriangles(sMesh_triangels[sI].intList, sI);
@@ -120,16 +119,14 @@ namespace zombDestruction
             /// <summary>
             /// Saves the given mesh, if ignoreSkin is true boneWeights and bindposes will be ignored
             /// </summary>
-            public void FromMesh(Mesh mesh, bool ignoreSkin = false)
+            public void FromMesh(Mesh mesh)
             {
                 //save basic
-                if (ignoreSkin == false)
-                {
-                    sMesh_bindposes = mesh.bindposes;
-                }
-
                 sMesh_vertics = mesh.vertices;
                 sMesh_uvs = mesh.uv;
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+                sMest_colors = mesh.colors;
+#endif
 
                 //save submeshes and tris
                 sMesh_triangels = new DestructableObject.IntList[mesh.subMeshCount];
@@ -148,10 +145,12 @@ namespace zombDestruction
             /// </summary>
             public void Clear()
             {
-                sMesh_bindposes = null;
                 sMesh_vertics = null;
                 sMesh_triangels = null;
                 sMesh_uvs = null;
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+                sMest_colors = null;
+#endif
             }
 
             /// <summary>
@@ -219,6 +218,7 @@ namespace zombDestruction
             }
 
             fracSavedData.saved_fr_verToPartI = saveFrom.fr_verToPartI.ToList();
+            fracSavedData.saved_fr_bindposes = saveFrom.fr_bindPoses.ToList();
 
             fracSavedData.saved_partsLocalParentPath = saveFrom.partsLocalParentPath.ToArray();
             FracHelpFunc.DictoraryToArrays<int, int>(saveFrom.localPathToRbIndex, out fracSavedData.saved_localPathToRbIndex_keys, out fracSavedData.saved_localPathToRbIndex_values);
@@ -227,7 +227,7 @@ namespace zombDestruction
             if (saveFrom.fracPrefabType > 0)
             {
                 //save fracRend mesh
-                fracSavedData.saved_rendMesh.FromMesh(saveFrom.fracFilter.sharedMesh, true);
+                fracSavedData.saved_rendMesh.FromMesh(saveFrom.fracFilter.sharedMesh);
 
                 //if mesh colliders save the them too
                 if (saveFrom.allPartsCol[0] is MeshCollider)
@@ -249,9 +249,6 @@ namespace zombDestruction
                 fracSavedData.saved_rendMesh.Clear();
                 fracSavedData.sMesh_colsVers = null;
             }
-
-            //save skin stuff
-            fracSavedData.saved_rendMesh.sMesh_bindposes = saveFrom.fr_bindPoses.ToArray();
 
             ////because ScriptableObject cannot save actual components we save it on DestructableObject
             //saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Count];
@@ -333,7 +330,7 @@ namespace zombDestruction
             //load fracRend mesh if was prefab
             if (fracSavedData.saved_rendMesh.IsValidMeshSaved() == true)
             {
-                loadTo.fracFilter.sharedMesh = fracSavedData.saved_rendMesh.ToMesh(true);
+                loadTo.fracFilter.sharedMesh = fracSavedData.saved_rendMesh.ToMesh();
             }
 
             //load meshColliders mesh if was prefab
@@ -361,9 +358,9 @@ namespace zombDestruction
 #if !FRAC_NO_VERTEXCOLORSUPPORT
             loadTo.fr_colors = fracRendMesh.colors.ToList();
 #endif
-            loadTo.fr_bindPoses = fracSavedData.saved_rendMesh.sMesh_bindposes.ToList();
             loadTo.fr_subTris = new();
             loadTo.fr_verToPartI = fracSavedData.saved_fr_verToPartI.ToList();
+            loadTo.fr_bindPoses = fracSavedData.saved_fr_bindposes.ToList();
 
             for (int sI = 0; sI < fracRendMesh.subMeshCount; sI++)
             {

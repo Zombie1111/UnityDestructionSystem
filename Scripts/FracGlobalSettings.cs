@@ -37,10 +37,10 @@ namespace zombDestruction
         public const bool canGetImpactNormalFromPlane = false;
 
         //A higher value will cause the impact angle/normal to have less affect on the damage done by the impact, a value of 1 will cause it to have 0 affect
-        public const float normalInfluenceReduction = 0.0f;
+        public const float normalInfluenceReduction = 0.5f;
 
         //Same as above but overrides it for impacts caused by itself, example if the object falls and hit the ground 
-        public const float normalInfluenceReductionSelf = 0.0f;
+        public const float normalInfluenceReductionSelf = 0.5f;
 
         //If fracture.MainPhyiscsType == OverlappingIsKinematic, the overlapping colliders will always be calculated when fracturing.
         //But it may be useful to also recalculate it when loading a fracture, recalculating will increase loading time!
@@ -48,7 +48,7 @@ namespace zombDestruction
         public const byte recalculateKinematicPartsOnLoad = 1;
 
         //How much weaker a material can be depending on the difference between force direction and structure direction
-        public const float transDirInfluenceReduction = 0.5f;
+        public const float transDirInfluenceReduction = 1.0f;
 
         //How many neighbours any part can have at most. Neighbours uses fixed buffers so it cant be dynamic. Higher = more memory, keep it as low as possible and look for warnings in console if its too low
         public const byte maxPartNeighbourCount = 32;
@@ -85,6 +85,6 @@ namespace zombDestruction
         public const bool canAutomaticallyRemoveAddedRigidbodies = true;
 
         //A multiplier on the velocity a part that breaks actually gets
-        public const float partBreakVelocityMultiplier = 0.5f;
+        public const float partBreakVelocityMultiplier = 1.0f;
     }
 }
