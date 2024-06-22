@@ -22,7 +22,7 @@ namespace zombDestruction
         /// Creates a new saveAsset in the folder that is currently selected in the editor project tab (returns the newly saveAsset, null if no valid folder selected)
         /// Editor only
         /// </summary>
-        [MenuItem("Tools/Fracture/CreateSaveAsset")]
+        [MenuItem("Tools/Destruction/CreateSaveAsset")]
         public static FracSaveAsset CreateSaveAsset()
         {
             //get current selected folder (To make it open the panel there)
@@ -253,7 +253,7 @@ namespace zombDestruction
             //save skin stuff
             fracSavedData.saved_rendMesh.sMesh_bindposes = saveFrom.fr_bindPoses.ToArray();
 
-            ////because ScriptableObject cannot save actual components we save it on FractureThis
+            ////because ScriptableObject cannot save actual components we save it on DestructableObject
             //saveFrom.saved_allPartsCol = new Collider[saveFrom.allParts.Count];
             //for (int i = 0; i < saveFrom.allParts.Count; i += 1)
             //{
@@ -269,7 +269,7 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Returns true if was able to load savedData to the given fracture
+        /// Returns true if was able to load savedData to the given DestructableObject
         /// </summary>
         /// <param name="loadTo"></param>
         public bool Load(DestructableObject loadTo)
@@ -284,7 +284,7 @@ namespace zombDestruction
                 return false;
             }
 
-            //Apply saved data to the provided FractureThis instance
+            //Apply saved data to the provided DestructableObject instance
             //Load compute destruction job
             loadTo.allPartsParentI = fracSavedData.saved_structs_parentI.ToList();
 

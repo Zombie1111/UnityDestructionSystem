@@ -718,7 +718,7 @@ namespace zombDestruction
 
                 //Multiply normlized impact forces with highest impact force, Because we want more impact points to result in less force at each impact point
                 bool somethingLikelyBreaks = false;
-                float transCap = 0.0f;
+                float transCap = float.MaxValue;
 
                 for (int i = 0; i < impCount; i++)
                 {
@@ -743,7 +743,7 @@ namespace zombDestruction
                         }
                     }
 
-                    if (thisTransCap > transCap) transCap = thisTransCap;
+                    if (thisTransCap < transCap) transCap = thisTransCap;
                 }
 
                 //if no impact is likely to cause breaking, mark contacts between source and frac to be ignored the next few physics frames
@@ -1281,7 +1281,7 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Returns the fractureThis script and the part index the given collider instanceId is for, null if no part col with instanceId exist
+        /// Returns the DestructableObject script and the part index the given collider instanceId is for, null if no part col with instanceId exist
         /// </summary>
         /// <param name="instanceId">The instance id for a collider (Use collider.GetInstanceId())</param>
         public GlobalFracData TryGetFracPartFromColInstanceId(int instanceId)
@@ -1292,26 +1292,26 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Returns a valid FractureGlobalHandler, returns null if no valid FractureGlobalHandler exist in scene
+        /// Returns a valid DestructionHandler, returns null if no valid DestructionHandler exist in scene
         /// </summary>
         public static DestructionHandler TryGetGlobalHandler(GameObject sourceObj, DestructableObject sourceFrac = null, bool canLogError = true)
         {
             DestructionHandler[] handlers = GameObject.FindObjectsOfType<DestructionHandler>(true);
             if (handlers == null || handlers.Length < 1 || handlers[0].isActiveAndEnabled == false)
             {
-                if (canLogError == true) Debug.LogError("There is no active FractureGlobalHandler script in " + sourceObj.scene.name + " (Scene), make sure a active Gameobject has the script attatch to it");
+                if (canLogError == true) Debug.LogError("There is no active DestructionHandler script in " + sourceObj.scene.name + " (Scene), make sure a active Gameobject has the script attatch to it");
                 return null;
             }
             else if (handlers.Length > 1)
             {
-                if (canLogError == true) Debug.LogError("There are more than one FractureGlobalHandler script in " + sourceObj.scene.name + " (Scene), please remove all but one and refracture all objects");
+                if (canLogError == true) Debug.LogError("There are more than one DestructionHandler script in " + sourceObj.scene.name + " (Scene), please remove all but one and refracture all objects");
                 return null;
             }
 
             if (handlers[0].gameObject.scene != sourceObj.scene)
             {
                 int prefabT = sourceFrac != null ? sourceFrac.GetFracturePrefabType() : 0;
-                if (prefabT != 2 && canLogError == true) Debug.LogError("The FractureGlobalHandler script must be in the same scene as " + sourceObj.transform.name);
+                if (prefabT != 2 && canLogError == true) Debug.LogError("The DestructionHandler script must be in the same scene as " + sourceObj.transform.name);
                 return prefabT == 2 ? handlers[0] : null;
             }
 

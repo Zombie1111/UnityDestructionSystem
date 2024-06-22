@@ -781,7 +781,7 @@ namespace zombDestruction
         #region GenerateFractureSystem
 
         /// <summary>
-        /// Returns true if the fracture is valid and sets fractureIsValid
+        /// Returns true if the DestructableObject is valid and sets fractureIsValid
         /// </summary>
         private bool VerifyFracture()
         {
@@ -906,22 +906,22 @@ namespace zombDestruction
             {
                 return Execute();
             }
-            //catch (Exception ex)
-            //{
-            //    // Handle the error
-            //    Debug.LogError("Exception: " + ex.Message);
-            //    Debug.LogError("StackTrace: " + ex.StackTrace);
-            //    
-            //    //Display an error message to the user
-            //    EditorUtility.DisplayDialog("Error", "An unexpected error occured while fracturing, look in console for more info", "OK");
-            //    
-            //    //remove the fracture
-            //    CancelFracturing();
-            //    
-            //    //set fracture as invalid
-            //    fractureIsValid = false;
-            //    return false;
-            //}
+            catch (Exception ex)
+            {
+                //Log the error
+                Debug.LogError("Exception: " + ex.Message);
+                Debug.LogError("StackTrace: " + ex.StackTrace);
+                
+                //Display an error message to the user
+                EditorUtility.DisplayDialog("Error", "An unexpected error occured while fracturing, look in console for more info", "OK");
+                
+                //remove the fracture
+                CancelFracturing();
+                
+                //set fracture as invalid
+                fractureIsValid = false;
+                return false;
+            }
             finally
             {
 #if UNITY_EDITOR
@@ -2610,7 +2610,7 @@ namespace zombDestruction
                     //When regular renderer with meshFilter
                     if (rend.transform == transform)
                     {
-                        Debug.LogError("The Renderer to fracture cannot be attatched to the same object as the FractureThis script (It must be a child of it)");
+                        Debug.LogError("The Renderer to fracture cannot be attatched to the same object as the DestructableObject script (It must be a child of it)");
                         return null;
                     }
 
@@ -2854,7 +2854,6 @@ namespace zombDestruction
                 }
 
                 //verify if generate status does not match
-                //if (shouldBeFractured != fractureIsValid || (allParts != null && allParts.Count > 0 && allParts[0].trans == null)
                 if (shouldBeFractured != fractureIsValid
                     || (saveAsset != null && saved_fracId >= 0 && saveAsset.fracSavedData.id != saved_fracId))
                 {
@@ -2915,7 +2914,6 @@ namespace zombDestruction
         private void GlobalUpdate()
         {
             //return if fracture is invalid
-            //if (fractureIsValid == false && VerifyFracture() == false) return;
             if (fractureIsValid != shouldBeFractured && VerifyFracture() != shouldBeFractured) return;
             if (fractureIsValid == false) return;
 
@@ -3111,8 +3109,6 @@ namespace zombDestruction
 
             if (jGTD_hasMoved.IsCreated == false)
             {
-                //if (fractureIsValid == false) return;
-
                 //make sure the job has ben setup
                 GetTransformData_start();
                 GetTransformData_end();
@@ -3223,16 +3219,6 @@ namespace zombDestruction
         [System.NonSerialized] public HashSet<int>[] des_deformedParts = new HashSet<int>[2];
         [System.NonSerialized] public byte des_deformedPartsIndex = 0;
         private AsyncGPUReadbackRequest gpuMeshRequest;
-
-        [System.Serializable]
-        public struct GpuMeshVertex
-        {
-            public Vector3 pos;
-            public Vector3 nor;
-#if !FRAC_NO_VERTEXCOLORSUPPORT
-            public float colA;
-#endif
-        }
 
         /// <summary>
         /// Set to true to request gpuMesh as soon as possible
@@ -4117,13 +4103,11 @@ namespace zombDestruction
                             if (usedNeighbourCount == 0) continue;
 
                             float forceRequired = totForceOgklk * Mathf.Clamp01((pTransCap / totTransCap) * Mathf.Max(1.0f, usedTPI.Length / 2.0f));
-                            //float forceRequired = totForceOgklk * Mathf.Clamp01((pTransCap / totTransCap));
                             forceRequired = Mathf.Min((velDis * partsMoveMass[pI]) + (forceRequired - (forceRequired * Mathf.Clamp01(desProp.chockResistance * layerI))), forceRequired);
                             forceRequired -= forceRequired * Mathf.Clamp01((layerI - 1) * desProp.falloff);
 
                             //transDir /= usedNeighbourCount;
                             transDir.Normalize();//Maybe we should use the best dir instead of avg?
-                            //pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(velDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
                             Vector3 partVelDir = partsVelDir[pI];
                             pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(partVelDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
 
@@ -4136,7 +4120,6 @@ namespace zombDestruction
                                 {
                                     partI = pI,
                                     velForce = pTransCap * 0.5f,
-                                    //velTarget = (velDir * velDis) + FractureHelperFunc.GetObjectVelocityAtPoint(desSource.parentWToL_prev, desSource.parentLToW_now, partWPos, _fixedDeltaTime),
                                     velTarget = (partVelDir * velDis) + FracHelpFunc.GetObjectVelocityAtPoint(ref desSource.parentWToL_prev, ref desSource.parentLToW_now, ref partWPos, _fixedDeltaTime),
                                     layerI = layerI,
                                     forceLeft = forceRequired - pTransCap
@@ -4300,7 +4283,7 @@ namespace zombDestruction
         private ConcurrentDictionary<int, DestructionSource> destructionSources;//For some weird reason it does not work correctly if I replace this with a Dictionary
 
         /// <summary>
-        /// For advanced users, its recommended to use FractureGlobalHandler RegisterImpact and RegisterExplosion instead
+        /// For advanced users, its recommended to use DestructionHandler RegisterImpact and RegisterExplosion instead
         /// </summary>
         /// <param name="impactPoints">The nativeArray must have a Persistent allocator, it will be disposed by the destructableObject. DO NOT DISPOSE IT ANYWHERE ELSE</param>
         /// <param name="sourceRb">The rb that caused the impact, null if caused by self or misc</param>
@@ -4776,14 +4759,16 @@ namespace zombDestruction
             }
 
             if (localPathToRbIndex.TryGetValue(partsLocalParentPath[partI], out int rbI) == false) rbI = -1;
-            float chockForce = desProp.stenght * (1.0f - desProp.chockResistance);
+            //float chockForce = desProp.stenght * (1.0f - desProp.chockResistance);
             float impForce = rbI < 0 || allParents[parentI].parentRbs[rbI].rbIsKin == true ?
-                float.MaxValue : ((velSpeed * allParents[parentI].parentMass) + chockForce);
+                //float.MaxValue : ((velSpeed * allParents[parentI].parentMass) + chockForce);
+                float.MaxValue : ((velSpeed * allParents[parentI].parentMass));
 
             FracStruct fStruct = jCDW_job.fStructs[partI];
 
 
-            transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation)) + chockForce;
+            //transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation)) + chockForce;
+            transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation));
             impForce -= impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
 
             return impForce;
@@ -4807,6 +4792,7 @@ namespace zombDestruction
             //transCap *= Mathf.Clamp01(0.25f + FracGlobalSettings.transDirInfluenceReduction); 
             force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
             transCap -= transCap * bendProp.bendyness;
+            //transCap -= desProp.stenght * (1.0f - desProp.chockResistance);
 
             return force > transCap;
         }
@@ -4819,10 +4805,11 @@ namespace zombDestruction
         {
             DestructionMaterial.DesProperties desProp = destructionMaterials[jCDW_job.partIToDesMatI[partI]].desProps;
             float forceNeeded = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
+            //forceNeeded -= desProp.stenght * (1.0f - desProp.chockResistance);
 
             if ((FracGlobalSettings.kinematicPartsCanBreak == false && jCDW_job.kinematicPartIndexes.Contains(partI) == true)
                 || allPartsParentI[partI] < 0) return -forceNeeded;
-
+            
             return forceNeeded;
         }
 

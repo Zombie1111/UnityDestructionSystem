@@ -193,4 +193,14 @@ namespace zombDestruction
         public int partI;
         public float disToWall;
     }
+
+    [System.Serializable]
+    public struct GpuMeshVertex
+    {
+        public Vector3 pos;
+        public Vector3 nor;
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+        public float colA;
+#endif
+    }
 }

@@ -47,7 +47,7 @@ namespace zombDestruction
         public DestructableObject.MeshData[] savedVertexStates;
 
 #if !FRAC_NO_VERTEXCOLORSUPPORT && !FRAC_NO_VERTEXCOLORSAVESTATESUPPORT
-        public FractureThis.GpuMeshVertex[] savedColorStates;
+        public GpuMeshVertex[] savedColorStates;
 #endif
 
         [System.Serializable]
@@ -149,7 +149,7 @@ namespace zombDestruction
 
 #if !FRAC_NO_VERTEXCOLORSUPPORT && !FRAC_NO_VERTEXCOLORSAVESTATESUPPORT
             //Save color states
-            savedColorStates = new FractureThis.GpuMeshVertex[saveFrom.buf_gpuMeshVertexs.count];
+            savedColorStates = new GpuMeshVertex[saveFrom.buf_gpuMeshVertexs.count];
             saveFrom.buf_gpuMeshVertexs.GetData(savedColorStates);
 #endif
 
