@@ -476,13 +476,24 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Sets the mass of the given rigidbody to newMass clamped with FracGlobalSettings.rbMinMass and  FracGlobalSettings.rbMaxMass
+        /// Sets the mass of the given rigidbody to newMass clamped with FracGlobalSettings.rbMinMass and  FracGlobalSettings.rbMaxMass,
+        /// Returns the mass the rigidbody actually got 
         /// </summary>
-        public static void SetRbMass(ref Rigidbody rb, float newMass)
+        public static float SetRbMass(ref Rigidbody rb, float newMass)
         {
-            if (newMass > FracGlobalSettings.rbMaxMass) rb.mass = FracGlobalSettings.rbMaxMass;
-            else if (newMass < FracGlobalSettings.rbMinMass) rb.mass = FracGlobalSettings.rbMinMass;
-            else rb.mass = newMass;
+            if (newMass > FracGlobalSettings.rbMaxMass)
+            {
+                rb.mass = FracGlobalSettings.rbMaxMass;
+                return FracGlobalSettings.rbMaxMass;
+            }
+            else if (newMass < FracGlobalSettings.rbMinMass)
+            {
+                rb.mass = FracGlobalSettings.rbMinMass;
+                return newMass;
+            }
+
+            rb.mass = newMass;
+            return newMass;
         }
 
         /// <summary>

@@ -2276,7 +2276,7 @@ namespace zombDestruction
             {
                 float newRbMass = fRb.rbDesMass
                      * (fRb.rbPartCount * phyMainOptions.massMultiplier > 1.0f ? phyMainOptions.massMultiplier : 1.0f);
-                FracHelpFunc.SetRbMass(ref fRb.rb, newRbMass);
+                newRbMass = FracHelpFunc.SetRbMass(ref fRb.rb, newRbMass);
 
                 if (fRb.rbPartCount <= 0) fRb.rbIsKin = true;
                 else if ((phyMainOptions.mainPhysicsType == OptMainPhysicsType.overlappingIsManuall && allParents[parentI].parentKinematic <= 0)
@@ -4290,7 +4290,7 @@ namespace zombDestruction
         private ConcurrentDictionary<int, DestructionSource> destructionSources;//For some weird reason it does not work correctly if I replace this with a Dictionary
 
         /// <summary>
-        /// For advanced users, its recommended to use DestructionHandler RegisterImpact and RegisterExplosion instead
+        /// Only for advanced users, its recommended to use DestructionHandler RegisterImpact and RegisterExplosion instead
         /// </summary>
         /// <param name="impactPoints">The nativeArray must have a Persistent allocator, it will be disposed by the destructableObject. DO NOT DISPOSE IT ANYWHERE ELSE</param>
         /// <param name="sourceRb">The rb that caused the impact, null if caused by self or misc</param>
@@ -4787,16 +4787,12 @@ namespace zombDestruction
         /// </summary>
         public bool GuessIfForceCauseBreaking(float force, int partI, out float transCap, float bouncyness = 0.0f)
         {
-            //fix later, we have changed what stiffness does
             DestructionMaterial.DesProperties desProp = destructionMaterials[jCDW_job.partIToDesMatI[partI]].desProps;
             DestructionMaterial.BendProperties bendProp = destructionMaterials[jCDW_job.partIToDesMatI[partI]].bendProps;
 
-            transCap = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
-            //transCap *= Mathf.Clamp01(0.25f + FracGlobalSettings.transDirInfluenceReduction); 
             force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
+            transCap = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
             transCap -= transCap * bendProp.bendyness;
-            transCap -= force * (1.0f - desProp.chockResistance);
-
             return force > transCap;
         }
 
@@ -4807,13 +4803,11 @@ namespace zombDestruction
         public float GuessForceNeededToBreakPart(int partI)
         {
             DestructionMaterial.DesProperties desProp = destructionMaterials[jCDW_job.partIToDesMatI[partI]].desProps;
-            float forceNeeded = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
-            //forceNeeded -= desProp.stenght * (1.0f - desProp.chockResistance);
+            DestructionMaterial.BendProperties bendProp = destructionMaterials[jCDW_job.partIToDesMatI[partI]].bendProps;
 
-            if ((FracGlobalSettings.kinematicPartsCanBreak == false && jCDW_job.kinematicPartIndexes.Contains(partI) == true)
-                || allPartsParentI[partI] < 0) return -forceNeeded;
-
-            return forceNeeded;
+            float transCap = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
+            transCap -= transCap * bendProp.bendyness;
+            return transCap;
         }
 
         /// <summary>
