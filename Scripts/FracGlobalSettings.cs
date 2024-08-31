@@ -6,7 +6,7 @@ namespace zombDestruction
 
         FRAC_NO_WARNINGS //If defined, no warnings will be logged to console + minor performance boost
         FRAC_NO_VERIFICATION //If defined, no verify saving before fracturing and no notices
-        FRAC_NO_BURST //If defined, burst wont be used in Zombie1111_uDestruction namespace
+        FRAC_NO_BURST //If defined, burst wont be used in zombDestruction namespace
         FRAC_NO_VERTEXCOLORSUPPORT //If defined, vertex colors wont be supported, also change SUPPORTVERTEXCOLORS in ComputeGlobalSettings.cginc
         FRAC_NO_VERTEXCOLORSAVESTATESUPPORT //If defined, VERTEXCOLORS wont be loaded/saved by fracSaveStates
     */
@@ -19,10 +19,11 @@ namespace zombDestruction
         //Its highly recommended that the objects in your scene has a neutral scale/size. If for whatever reason you cant have that you can try to change this value
         public const float worldScale = 1.0f;
 
-        //if true, fixedUpdate will run rougly as often as Update but no less than it did on awake. Since 90% of the destruction system runs on fixedUpdate,
+        //if > 0.0f, fixedUpdate will run rougly as often as Update but no less than it did on awake. Since 90% of the destruction system runs on fixedUpdate,
         //if fixedUpdate = 50fps and Update = 200fps you may get a noticable fps drop every 4 frames.
-        //This will try to prevent this by also increasing fixedUpdate if update is > 50fps
-        public const bool syncFixedTimestepWithFps = false;
+        //This will try to prevent this by also increasing fixedUpdate if update is > orginal fixedUpdate
+        public const float minDynamicFixedTimeStep = 0.02f;
+        public const float maxDynamicFixedTimeStep = 0.007f;//Inverse, I thought about fps not ms when making it
 
         //The minimum force a impact must cause for it to cause any destruction 
         public const float minimumImpactForce = 5.0f;
@@ -50,7 +51,8 @@ namespace zombDestruction
         //How much weaker a material can be depending on the difference between force direction and structure direction
         public const float transDirInfluenceReduction = 1.0f;
 
-        //How many neighbours any part can have at most. Neighbours uses fixed buffers so it cant be dynamic. Higher = more memory, keep it as low as possible and look for warnings in console if its too low
+        //How many neighbours any part can have at most. Neighbours uses fixed buffers so it cant be dynamic.
+        //Higher = more memory, keep it as low as possible and look for warnings in console if its too low
         public const byte maxPartNeighbourCount = 32;
 
         //If deformation is enabled, it has to sync all colliders with the deformed mesh.
@@ -61,7 +63,8 @@ namespace zombDestruction
         //If false it may sync too few colliders, if true it may sync too many colliders
         public const bool sensitiveColliderSync = false;
 
-        //How many parts a parent must have for it to be created when destoying stuff, used to prevent hundreds of tiny parents from potentially being created when destroying stuff
+        //How many parts a parent must have for it to be created when destoying stuff,
+        //used to prevent hundreds of tiny parents from potentially being created when destroying stuff
         public const byte minParentPartCount = 3;
 
         //If false, parts that are kinematic wont break from impacts (Kinematic parts are usually parts that are overlapping with other geometry if
@@ -69,9 +72,8 @@ namespace zombDestruction
         public const bool kinematicPartsCanBreak = true;
 
         //The min&max mass a rigidbody created by the destruction system can have,
-        //due to limitations in the physics engine if two rigidbodies with largly different masses collide unexpected behavior may occure.
-        public const float rbMinMass = 0.1f;
-        public const float rbMaxMass = 5.0f;
+        public const float rbMinMass = 0.01f;
+        public const float rbMaxMass = 10.0f;
 
         //If true, it will try to prevent a mesh from being deformed through another object (Comes at a performance cost and not 100% accurate)
         public const bool doDeformationCollision = true;
@@ -86,5 +88,23 @@ namespace zombDestruction
 
         //A multiplier on the velocity a part that breaks actually gets
         public const float partBreakVelocityMultiplier = 1.0f;
+
+        //When guessing force needed to break part, the result is multiplied with this value.
+        public const float guessStrenghtMultiplier = 0.9f;
+
+        //When guessing how much force part can apply to X, the result is multiplied with this value.
+        public const float guessStrenghtApplyMultiplier = 1.1f;
+
+        //A lot of stuff is lerped by this value to smooth movement
+        public const float smoothLerp = 0.45f;
+
+        //When creating parent template, these component types will be included in the template
+        //(Rigidbody&Transform&Collider&Renderer&MeshFilter is always included and should never be in this array)
+        public static string[] componentTypeNamesToInclude = new string[] { }; //Example if you wanna include a script called ObjectChildData: { "ObjectChildData" }
+
+        //If true, the mass of all parts that has the same rigidbody will be added togehter when computing combined mass
+        //Otherwise its the total mass of all parts that has the same parent
+        public const bool rbMassIsPerRigidbody = true;
+        public const bool desMassIsPerRigidbody = false;
     }
 }

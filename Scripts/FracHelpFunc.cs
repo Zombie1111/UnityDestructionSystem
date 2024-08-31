@@ -7,11 +7,10 @@ using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Burst;
 using Unity.Mathematics;
-using UnityEditor.SceneManagement;
-
-
+using System.Reflection;
 
 #if UNITY_EDITOR
+using UnityEditor.SceneManagement;
 using UnityEditor;
 #endif
 
@@ -245,6 +244,9 @@ namespace zombDestruction
             return;
         }
 
+        /// <summary>
+        /// Returns the closest position on a plane at the given position with the given normal
+        /// </summary>
 #if !FRAC_NO_BURST
         [BurstCompile]
 #endif
@@ -323,10 +325,118 @@ namespace zombDestruction
             // Recompose matrix
             A = Matrix4x4.TRS(pos, rot, scale);
         }
+
+#if !FRAC_NO_BURST
+        [BurstCompile]
+#endif
+        public static void AddNoiseToVectorArray(ref NativeArray<Vector3> array, float currentTime, float maxOffset, float scale, int seed)
+        {
+            Vector3 temp = new();
+            float xPos = currentTime;
+            int lenght = array.Length - 1;
+
+            for (int i = 1; i < lenght; i++)
+            {
+                xPos += (array[i] - array[i + 1]).magnitude * scale;
+
+                temp.x = (Mathf.PerlinNoise(xPos, seed) - 0.5f) * maxOffset;
+                temp.y = (Mathf.PerlinNoise(xPos, seed + 100) - 0.5f) * maxOffset;
+                temp.z = (Mathf.PerlinNoise(xPos, seed + 200) - 0.5f) * maxOffset;
+                array[i] = array[i] + temp;
+            }
+        }
+
+        /// <summary>
+        /// Returns positions along a bezier curve and makes sure the average distance between is position is equal to spacing
+        /// (The returned nativeArray will have a temp allocator)
+        /// </summary>
+#if !FRAC_NO_BURST
+        [BurstCompile]
+#endif
+        public static void GetPointsAlongCurve(ref Vector3 start, ref Vector3 startOffset,
+            ref Vector3 endOffset, ref Vector3 end, ref float spacing, ref NativeArray<Vector3> result)
+        {
+            //Get step size to get a similar distance between each point
+            float lineDis = (end - start).magnitude + ((startOffset - start).magnitude * 0.25f)
+                + ((end - endOffset).magnitude * 0.25f);
+
+            //Create the points
+            result = new((int)Math.Floor(lineDis / spacing) + 1, Allocator.Temp);
+            int maxCount = result.Length;
+
+            int i = 0;
+            for (float linePos = 0.0f; linePos <= lineDis; linePos += spacing)
+            {
+                if (i >= maxCount) break;//Happens very rarely
+
+                float t = linePos / lineDis;
+
+                float u = 1 - t;
+                float tt = t * t;
+                float uu = u * u;
+                float uuu = uu * u;
+                float ttt = tt * t;
+
+                Vector3 p = uuu * start; // (1-t)^3 * p0
+                p += 3 * uu * t * startOffset; // 3 * (1-t)^2 * t * p1
+                p += 3 * u * tt * endOffset; // 3 * (1-t) * t^2 * p2
+                p += ttt * end; // t^3 * p3
+
+                result[i] = p;
+                i++;
+            }
+        }
+
+        /// <summary>
+        /// Returns the position on the bezier curve at T
+        /// </summary>
+#if !FRAC_NO_BURST
+        [BurstCompile]
+#endif
+        public static void GetPointOnCurve(ref Vector3 start, ref Vector3 startOffset,
+            ref Vector3 endOffset, ref Vector3 end, ref float t, ref Vector3 result)
+        {
+                float u = 1 - t;
+                float tt = t * t;
+                float uu = u * u;
+                float uuu = uu * u;
+                float ttt = tt * t;
+
+                result = uuu * start; // (1-t)^3 * p0
+                result += 3 * uu * t * startOffset; // 3 * (1-t)^2 * t * p1
+                result += 3 * u * tt * endOffset; // 3 * (1-t) * t^2 * p2
+                result += ttt * end; // t^3 * p3
+        }
     }
 
     public static class FracHelpFunc
     {
+        private static System.Random random = new System.Random();
+
+        /// <summary>
+        /// Returns the closest position on a plane at the given position with the given normal
+        /// </summary>
+        public static Vector3 ClosestPointOnPlane(ref Vector3 planePos, ref Vector3 planeNor, Vector3 queryPoint)
+        {
+            return queryPoint + (-Vector3.Dot(planeNor, queryPoint - planePos) / Vector3.Dot(planeNor, planeNor)) * planeNor;
+        }
+
+        /// <summary>
+        /// Returns a random index, example array[GetRandomIndex(array.Lenght)]
+        /// </summary>
+        public static int GetRandomIndex(int containerLenght)
+        {
+            return random.Next(0, containerLenght);
+        }
+
+        /// <summary>
+        /// 0.8 = 80% chance to return true
+        /// </summary>
+        public static bool RandomChance(float chance)
+        {
+            return random.NextDouble() < chance;
+        }
+
         /// <summary>
         /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN Array WILL BE MODIFIED!
         /// </summary>
@@ -362,9 +472,9 @@ namespace zombDestruction
         /// <summary>
         /// Returns current lerped towards target by t and moved current towards target by at least min distance (Cant move past target)
         /// </summary>
-        public static Vector3 Vec3LerpMin(Vector3 current, Vector3 target, float t, float min, out bool reachedTarget)
+        public static float FloatLerpMin(float current, float target, float t, float min, out bool reachedTarget)
         {
-            float dis = (target - current).magnitude;
+            float dis = target - current;
             if (dis <= min)
             {
                 reachedTarget = true;
@@ -375,7 +485,40 @@ namespace zombDestruction
             if (dis < min) dis = min;
 
             reachedTarget = false;
-            return Vector3.MoveTowards(current, target, dis);
+            return Mathf.MoveTowards(current, target, dis);
+        }
+
+        /// <summary>
+        /// Returns current lerped towards target by t and moved current towards target by at least min distance (Cant move past target)
+        /// </summary>
+        public static Vector3 Vec3LerpMin(Vector3 current, Vector3 target, float t, float min)
+        {
+            float3 vel = target - current;
+            float dis = math.sqrt(Vector3.Dot(vel, vel));
+            if (dis <= min)
+            {
+                //reachedTarget = true;
+                return target;
+            }
+
+            dis *= t; //Expecting t to always be within 0.0-1.0 range
+            if (dis < min) dis = min;
+
+            //reachedTarget = false;
+            return current + (Vector3.Normalize(vel) * dis);
+
+            //float dis = (target - current).magnitude;
+            //if (dis <= min)
+            //{
+            //    reachedTarget = true;
+            //    return target;
+            //}
+            //
+            //dis *= t;
+            //if (dis < min) dis = min;
+            //
+            //reachedTarget = false;
+            //return Vector3.MoveTowards(current, target, dis);
         }
 
         /// <summary>
@@ -452,7 +595,7 @@ namespace zombDestruction
         public static void SetVelocityAtPosition(Vector3 targetVelocity, Vector3 positionOfForce, Rigidbody rb)
         {
             //rb.AddForceAtPosition(rb.mass * (targetVelocity - rb.velocity) / Time.fixedDeltaTime, positionOfForce, ForceMode.Force);
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
             rb.AddForceAtPosition(targetVelocity - rb.linearVelocity, positionOfForce, ForceMode.VelocityChange);
 #else
             rb.AddForceAtPosition(targetVelocity - rb.velocity, positionOfForce, ForceMode.VelocityChange);
@@ -503,15 +646,16 @@ namespace zombDestruction
         {
             Vector3[] directions = new Vector3[directionCount];
 
-            float goldenRatio = (1 + Mathf.Sqrt(5)) / 2;
+            float goldenRatio = (1 + (float)Math.Sqrt(5)) / 2;
             float angleIncrement = Mathf.PI * 2 * goldenRatio;
 
             for (int i = 0; i < directionCount; i++)
             {
-                float inclination = Mathf.Acos(1 - 2 * ((float)i / directionCount));
+                float inclination = (float)Math.Acos(1 - 2 * ((float)i / directionCount));
                 float azimuth = angleIncrement * i;
 
-                directions[i] = new Vector3(Mathf.Sin(inclination) * Mathf.Cos(azimuth), Mathf.Sin(inclination) * Mathf.Sin(azimuth), Mathf.Cos(inclination));
+                directions[i] = new Vector3((float)Math.Sin(inclination) * (float)Math.Cos(azimuth),
+                    (float)Math.Sin(inclination) * (float)Math.Sin(azimuth), (float)Math.Cos(inclination));
             }
 
             return directions;
@@ -550,7 +694,7 @@ namespace zombDestruction
                 }
             });
 
-            return Mathf.Abs(volume);
+            return Math.Abs(volume);
         }
 
         /// <summary>
@@ -611,6 +755,17 @@ namespace zombDestruction
             return localPoss;
         }
 
+        public static List<Vector3> ConvertPositionsWithMatrix(List<Vector3> localPoss, Matrix4x4 lTwMat)
+        {
+            for (int i = localPoss.Count - 1; i >= 0; i--)
+            {
+                //localPoss[i] = localTrans.TransformPoint(localPoss[i]);
+                localPoss[i] = lTwMat.MultiplyPoint(localPoss[i]);
+            }
+
+            return localPoss;
+        }
+
         public static Vector3[] ConvertDirectionsWithMatrix(Vector3[] localDirs, Matrix4x4 lTwMat)
         {
             for (int i = localDirs.Length - 1; i >= 0; i--)
@@ -643,7 +798,7 @@ namespace zombDestruction
             /// <summary>
             /// [indexValue] = the sortValue that indexValue has
             /// </summary>
-            public NativeHashMap<int, float> indexValueToSortValue;
+            public NativeParallelHashMap<int, float> indexValueToSortValue;
 
             /// <summary>
             /// [0] = the lowest sortValue that exists (The floats are always sorted from lowest to highest)
@@ -837,7 +992,7 @@ namespace zombDestruction
 
             public NativeSortedIndexes(Allocator allocator, int initialCapacity = 4)
             {
-                indexValueToSortValue = new NativeHashMap<int, float>(initialCapacity, allocator);
+                indexValueToSortValue = new NativeParallelHashMap<int, float>(initialCapacity, allocator);
                 sortIndexToIndexValue = new NativeList<int>(initialCapacity, allocator);
                 sortIndexToSortValue = new NativeList<float>(initialCapacity, allocator);
             }
@@ -878,7 +1033,7 @@ namespace zombDestruction
 
         public static void SetVelocityUsingForce(Vector3 targetVelocity, Rigidbody rb)
         {
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
             rb.AddForce(rb.mass * (targetVelocity - rb.linearVelocity) / Time.fixedDeltaTime, ForceMode.Force);
 #else
             rb.AddForce(rb.mass * (targetVelocity - rb.velocity) / Time.fixedDeltaTime, ForceMode.Force);
@@ -906,7 +1061,7 @@ namespace zombDestruction
             return list;
         }
 
-        public static Dictionary<TKey, TValue> NativeHashMapToDictorary<TKey, TValue>(NativeHashMap<TKey, TValue> nativeHashMap)
+        public static Dictionary<TKey, TValue> NativeHashMapToDictorary<TKey, TValue>(NativeParallelHashMap<TKey, TValue> nativeHashMap)
        where TKey : unmanaged, System.IEquatable<TKey>
        where TValue : unmanaged
         {
@@ -950,7 +1105,9 @@ namespace zombDestruction
             if (desiredLength > currentLength)
             {
                 //Add items
+                list.Capacity = desiredLength;
                 int elementsToAdd = desiredLength - currentLength;
+
                 for (int i = 0; i < elementsToAdd; i++)
                 {
                     list.Add(default);
@@ -1049,10 +1206,10 @@ namespace zombDestruction
             List<int> newVerts = new();
             int[] map = new int[verts.Length];
 
-            //create mapping and find duplicates, dictionaries are like hashtables, mean fast
+            //create mapping and find duplicates
             for (int i = 0; i < verts.Length; i++)
             {
-                if (!duplicateHashTable.ContainsKey(verts[i]))
+                if (duplicateHashTable.ContainsKey(verts[i]) == false)
                 {
                     duplicateHashTable.Add(verts[i], newVerts.Count);
                     map[i] = newVerts.Count;
@@ -1104,9 +1261,10 @@ namespace zombDestruction
         /// </summary>
         public static void MergeSimilarVectors(ref List<Vector3> vectors, float tolerance = 0.001f)
         {
-            for (int i = 0; i < vectors.Count; i += 1)
+            for (int i = 0; i < vectors.Count; i++)
             {
-                for (int ii = i + 1; ii < vectors.Count; ii += 1)
+                //for (int ii = i + 1; ii < vectors.Count; ii++)
+                for (int ii = vectors.Count - 1; ii > i; ii--)
                 {
                     if ((vectors[i] - vectors[ii]).sqrMagnitude > tolerance) continue;
 
@@ -1124,6 +1282,25 @@ namespace zombDestruction
         {
             if (dir1.sqrMagnitude < 0.00001f || dir2.sqrMagnitude < 0.00001f) return 1.0f;
             return Vector3.Dot(dir1, dir2);
+        }
+
+        /// <summary>
+        /// Returns the direction in availableDirs that is the most similar to targetDir
+        /// </summary>
+        public static Vector3 GetMostSimilarDirection(Vector3 targetDir, Vector3[] availableDirs)
+        {
+            float bestDot = float.MinValue;
+            Vector3 bestDir = availableDirs[0];
+
+            foreach (var dir in availableDirs)
+            {
+                float thisDot = Vector3.Dot(targetDir, dir);
+                if (thisDot < bestDot) continue;
+                bestDot = thisDot;
+                bestDir = dir;
+            }
+
+            return bestDir;
         }
 
         /// <summary>
@@ -2380,19 +2557,19 @@ namespace zombDestruction
             // no rotation?
             // You may want to increase this closer to 1 if you want to handle very small rotations.
             // Beware, if it is too close to one your answer will be Nan
-            if (Mathf.Abs(q.w) > 1023.5f / 1024.0f)
+            if (Math.Abs(q.w) > 1023.5f / 1024.0f)
                 return new Vector3(0, 0, 0);
             float gain;
             // handle negatives, we could just flip it but this is faster
             if (q.w < 0.0f)
             {
-                var angle = Mathf.Acos(-q.w);
-                gain = -2.0f * angle / (Mathf.Sin(angle) * deltaTime);
+                var angle = (float)Math.Acos(-q.w);
+                gain = -2.0f * angle / ((float)Math.Sin(angle) * deltaTime);
             }
             else
             {
-                var angle = Mathf.Acos(q.w);
-                gain = 2.0f * angle / (Mathf.Sin(angle) * deltaTime);
+                var angle = (float)Math.Acos(q.w);
+                gain = 2.0f * angle / ((float)Math.Sin(angle) * deltaTime);
             }
 
             return new Vector3(q.x * gain, q.y * gain, q.z * gain);
@@ -2574,8 +2751,8 @@ namespace zombDestruction
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
-                bCol.size = extents * 2.0f;
-                extents = colTrans.TransformVector(extents);
+                bCol.size = colTrans.InverseTransformVector(extents) * 2.0f;
+
             }
             else if (col is SphereCollider sCol)
             {
@@ -2669,21 +2846,36 @@ namespace zombDestruction
         /// <summary>
         /// Returns the geometric/(not average) center of given positions
         /// </summary>
-        /// <param name="positions"></param>
-        /// <returns></returns>
         public static Vector3 GetGeometricCenterOfPositions(Vector3[] positions)
         {
             Vector3 min = positions[0];
             Vector3 max = positions[0];
 
-            // Find the minimum and maximum coordinates along each axis
+            //Find the minimum and maximum coordinates along each axis
             for (int i = 1; i < positions.Length; i++)
             {
                 min = Vector3.Min(min, positions[i]);
                 max = Vector3.Max(max, positions[i]);
             }
 
-            // Calculate the geometric center as the midpoint of the bounding box
+            return (min + max) * 0.5f;
+        }
+
+        /// <summary>
+        /// Returns the geometric/(not average) center of given positions
+        /// </summary>
+        public static Vector3 GetGeometricCenterOfPositions(List<Vector3> positions)
+        {
+            Vector3 min = positions[0];
+            Vector3 max = positions[0];
+
+            //Find the minimum and maximum coordinates along each axis
+            for (int i = 1; i < positions.Count; i++)
+            {
+                min = Vector3.Min(min, positions[i]);
+                max = Vector3.Max(max, positions[i]);
+            }
+
             return (min + max) * 0.5f;
         }
 
@@ -2832,168 +3024,9 @@ namespace zombDestruction
             }
         }
 
-#if UNITY_EDITOR
-        public static void Debug_doesMeshContainUnusedVers(Mesh mesh)
-        {
-            HashSet<int> usedV = new();
-
-            foreach (int vI in mesh.triangles)
-            {
-                usedV.Add(vI);
-            }
-
-            if (usedV.Count != mesh.vertexCount) Debug.LogError("Unused faces");
-        }
-
-        public static void Debug_createMeshRend(Mesh meshW, Material mat = null)
-        {
-            GameObject newO = new("Debug_meshRend");
-            MeshFilter meshF = newO.AddComponent<MeshFilter>();
-            MeshRenderer meshR = newO.AddComponent<MeshRenderer>();
-
-            meshF.mesh = meshW;
-            Material[] mats = new Material[meshW.subMeshCount];
-            for (int i = 0; i < mats.Length; i++)
-            {
-                mats[i] = mat;
-            }
-
-            meshR.sharedMaterials = mats;
-        }
-
-        /// <summary>
-        /// Draw line between all vertics in the worldspace mesh. 
-        /// </summary>
-        /// <param name="mesh"></param>
-        /// <param name="drawNormals"></param>
-        public static void Debug_drawMesh(Mesh mesh, bool drawNormals = false, float durration = 0.1f)
-        {
-            Vector3[] vertices = mesh.vertices;
-            int[] triangles = mesh.triangles;
-
-            // Draw lines between triangle vertices
-            for (int i = 0; i < triangles.Length; i += 3)
-            {
-                Vector3 v0 = vertices[triangles[i]];
-                Vector3 v1 = vertices[triangles[i + 1]];
-                Vector3 v2 = vertices[triangles[i + 2]];
-
-                Debug.DrawLine(v0, v1, Color.red, durration);
-                Debug.DrawLine(v1, v2, Color.green, durration);
-                Debug.DrawLine(v2, v0, Color.blue, durration);
-            }
-
-            // Draw normals from each vertex
-            if (drawNormals)
-            {
-                Vector3[] normals = mesh.normals;
-
-                for (int i = 0; i < vertices.Length; i++)
-                {
-                    Vector3 vertex = vertices[i];
-                    Vector3 normal = normals[i];
-
-                    // Adjust the length of the normal line as needed
-                    float normalLength = 1f;
-                    Vector3 endPos = vertex + normal * normalLength;
-
-                    Debug.DrawLine(vertex, endPos, Color.yellow, durration);
-                }
-            }
-        }
-
-        public static void Debug_drawDisc(Vector3 discCenter, Vector3 discNormal, float discRadius, int segments)
-        {
-            // Calculate two vectors perpendicular to the normal
-            Vector3 from = Vector3.Cross(discNormal, Vector3.up).normalized;
-            Vector3 to = Vector3.Cross(discNormal, from).normalized;
-
-            // Calculate the world position of the disc center
-            Vector3 worldCenter = discCenter;
-
-            // Draw the disc circumference using line segments
-            for (int i = 0; i < segments; i++)
-            {
-                float angle = i * 2 * Mathf.PI / segments;
-                Vector3 start = worldCenter + discRadius * Mathf.Cos(angle) * from + discRadius * Mathf.Sin(angle) * to;
-                angle = (i + 1) * 2 * Mathf.PI / segments;
-                Vector3 end = worldCenter + discRadius * Mathf.Cos(angle) * from + discRadius * Mathf.Sin(angle) * to;
-                Debug.DrawLine(start, end, Color.red, 0.5f);
-            }
-        }
-
-        public static void Debug_drawBox(Vector3 position, float size, Color color, float duration = 0.1f, bool doOcclusion = true)
-        {
-            Vector3 halfSize = 0.5f * size * Vector3.one;
-
-            // Calculate the corners of the box
-            Vector3[] corners = new Vector3[8];
-            corners[0] = position + new Vector3(-halfSize.x, -halfSize.y, -halfSize.z);
-            corners[1] = position + new Vector3(halfSize.x, -halfSize.y, -halfSize.z);
-            corners[2] = position + new Vector3(halfSize.x, -halfSize.y, halfSize.z);
-            corners[3] = position + new Vector3(-halfSize.x, -halfSize.y, halfSize.z);
-            corners[4] = position + new Vector3(-halfSize.x, halfSize.y, -halfSize.z);
-            corners[5] = position + new Vector3(halfSize.x, halfSize.y, -halfSize.z);
-            corners[6] = position + new Vector3(halfSize.x, halfSize.y, halfSize.z);
-            corners[7] = position + new Vector3(-halfSize.x, halfSize.y, halfSize.z);
-
-            // Draw lines between corners to form the box
-            Debug.DrawLine(corners[0], corners[1], color, duration, doOcclusion);
-            Debug.DrawLine(corners[1], corners[2], color, duration, doOcclusion);
-            Debug.DrawLine(corners[2], corners[3], color, duration, doOcclusion);
-            Debug.DrawLine(corners[3], corners[0], color, duration, doOcclusion);
-
-            Debug.DrawLine(corners[4], corners[5], color, duration, doOcclusion);
-            Debug.DrawLine(corners[5], corners[6], color, duration, doOcclusion);
-            Debug.DrawLine(corners[6], corners[7], color, duration, doOcclusion);
-            Debug.DrawLine(corners[7], corners[4], color, duration, doOcclusion);
-
-            Debug.DrawLine(corners[0], corners[4], color, duration, doOcclusion);
-            Debug.DrawLine(corners[1], corners[5], color, duration, doOcclusion);
-            Debug.DrawLine(corners[2], corners[6], color, duration, doOcclusion);
-            Debug.DrawLine(corners[3], corners[7], color, duration, doOcclusion);
-        }
-
-        public static Rigidbody CopyRigidbody(Rigidbody source, GameObject destination)
-        {
-            Rigidbody newRb = destination.GetOrAddComponent<Rigidbody>();
-
-            newRb.isKinematic = source.isKinematic;
-            newRb.inertiaTensor = source.inertiaTensor;
-            newRb.includeLayers = source.includeLayers;
-            newRb.useGravity = source.useGravity;
-            newRb.interpolation = source.interpolation;
-            newRb.mass = source.mass;
-            newRb.maxAngularVelocity = source.maxAngularVelocity;
-            newRb.maxLinearVelocity = source.maxLinearVelocity;
-            newRb.maxDepenetrationVelocity = source.maxDepenetrationVelocity;
-#if UNITY_2023_1_OR_NEWER
-            newRb.angularDamping = source.angularDamping;
-            newRb.linearDamping = source.linearDamping;
-#else
-            newRb.angularDrag = source.angularDrag;
-            newRb.drag = source.drag;
-#endif
-            newRb.freezeRotation = source.freezeRotation;
-            newRb.constraints = source.constraints;
-            if (newRb.isKinematic == false)
-            {
-#if UNITY_2023_1_OR_NEWER
-                newRb.linearVelocity = source.linearVelocity;
-#else
-                newRb.velocity = source.velocity;
-#endif
-                newRb.angularVelocity = source.angularVelocity;
-            }
-            newRb.collisionDetectionMode = source.collisionDetectionMode;
-
-            return newRb;
-        }
-
         public static int EncodeHierarchyPath(Transform child, Transform parent)
         {
             if (child == parent) return -1;
-
             int path = 0;
             int shift = 0;
             Transform current = child;
@@ -3004,6 +3037,7 @@ namespace zombDestruction
                 if (parentTransform == null) return -1;
 
                 int index = current.GetSiblingIndex();
+
                 path |= (index + 1) << shift; // Store index + 1 to avoid issues with 0 index
                 shift += 5; // Assuming a maximum of 32 children, 5 bits are enough (2^5 = 32)
 
@@ -3017,14 +3051,22 @@ namespace zombDestruction
         {
             if (path == -1) return parent;
 
-            Transform current = parent;
-            int shift = 0;
+
+            //int shift = 0;
+            Stack<int> kidPath = new(2);
 
             while (path != 0)
             {
-                int index = ((path >> shift) & 31) - 1; // Extract 5 bits and subtract 1 to get original index
-                current = current.GetChild(index);
+                int index = ((path >> 0) & 31) - 1; // Extract 5 bits and subtract 1 to get original index
+                kidPath.Push(index);//Is adding + removing from stack fastest way to reverse order?
                 path >>= 5;
+            }
+
+            Transform current = parent;
+
+            while (kidPath.TryPop(out int kidIndex) == true)
+            {
+                current = current.GetChild(kidIndex);
             }
 
             return current;
@@ -3181,6 +3223,197 @@ namespace zombDestruction
                 newJoint.massScale = ogJoint.massScale;
                 newJoint.axis = ogJoint.axis;
             }
+        }
+
+        public static Rigidbody CopyRigidbody(Rigidbody source, GameObject destination)
+        {
+            Rigidbody newRb = destination.GetOrAddComponent<Rigidbody>();
+
+            newRb.isKinematic = source.isKinematic;
+            newRb.inertiaTensor = source.inertiaTensor;
+            newRb.centerOfMass = source.centerOfMass;
+            newRb.includeLayers = source.includeLayers;
+            newRb.useGravity = source.useGravity;
+            newRb.interpolation = source.interpolation;
+            newRb.mass = source.mass;
+            newRb.maxAngularVelocity = source.maxAngularVelocity;
+            newRb.maxLinearVelocity = source.maxLinearVelocity;
+            newRb.maxDepenetrationVelocity = source.maxDepenetrationVelocity;
+#if UNITY_2023_3_OR_NEWER
+            newRb.angularDamping = source.angularDamping;
+            newRb.linearDamping = source.linearDamping;
+#else
+            newRb.angularDrag = source.angularDrag;
+            newRb.drag = source.drag;
+#endif
+            newRb.freezeRotation = source.freezeRotation;
+            newRb.constraints = source.constraints;
+            if (newRb.isKinematic == false)
+            {
+#if UNITY_2023_3_OR_NEWER
+                newRb.linearVelocity = source.linearVelocity;
+#else
+                newRb.velocity = source.velocity;
+#endif
+                newRb.angularVelocity = source.angularVelocity;
+            }
+            newRb.collisionDetectionMode = source.collisionDetectionMode;
+            newRb.automaticCenterOfMass = source.automaticCenterOfMass;
+            newRb.automaticInertiaTensor = source.automaticInertiaTensor;
+            newRb.excludeLayers = source.excludeLayers;
+            newRb.includeLayers = source.includeLayers;
+
+            return newRb;
+        }
+
+        /// <summary>
+        /// Adds the given component to the destination object and tries to copy as many values from source component as possible
+        /// </summary>
+        public static T CopyComponent<T>(T source, GameObject destination) where T : Component
+        {
+            //Create new component
+            Type type = source.GetType();
+
+            T copy = (T)destination.AddComponent(type);
+            if (copy == null) return null;
+
+            //Copy all values we can from source to new 
+            foreach (FieldInfo field in type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
+            {
+                field.SetValue(copy, field.GetValue(source));
+            }
+
+            foreach (PropertyInfo prop in type.GetProperties(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
+            {
+                if (prop.CanWrite && prop.GetIndexParameters().Length == 0)
+                {
+                    prop.SetValue(copy, prop.GetValue(source, null), null);
+                }
+            }
+
+            return copy;
+        }
+
+#if UNITY_EDITOR
+        public static void Debug_doesMeshContainUnusedVers(Mesh mesh)
+        {
+            HashSet<int> usedV = new();
+
+            foreach (int vI in mesh.triangles)
+            {
+                usedV.Add(vI);
+            }
+
+            if (usedV.Count != mesh.vertexCount) Debug.LogError("Unused faces");
+        }
+
+        public static void Debug_createMeshRend(Mesh meshW, Material mat = null)
+        {
+            GameObject newO = new("Debug_meshRend");
+            MeshFilter meshF = newO.AddComponent<MeshFilter>();
+            MeshRenderer meshR = newO.AddComponent<MeshRenderer>();
+
+            meshF.mesh = meshW;
+            Material[] mats = new Material[meshW.subMeshCount];
+            for (int i = 0; i < mats.Length; i++)
+            {
+                mats[i] = mat;
+            }
+
+            meshR.sharedMaterials = mats;
+        }
+
+        /// <summary>
+        /// Draw line between all vertics in the worldspace mesh. 
+        /// </summary>
+        /// <param name="mesh"></param>
+        /// <param name="drawNormals"></param>
+        public static void Debug_drawMesh(Mesh mesh, bool drawNormals = false, float durration = 0.1f)
+        {
+            Vector3[] vertices = mesh.vertices;
+            int[] triangles = mesh.triangles;
+
+            // Draw lines between triangle vertices
+            for (int i = 0; i < triangles.Length; i += 3)
+            {
+                Vector3 v0 = vertices[triangles[i]];
+                Vector3 v1 = vertices[triangles[i + 1]];
+                Vector3 v2 = vertices[triangles[i + 2]];
+
+                Debug.DrawLine(v0, v1, Color.red, durration);
+                Debug.DrawLine(v1, v2, Color.green, durration);
+                Debug.DrawLine(v2, v0, Color.blue, durration);
+            }
+
+            // Draw normals from each vertex
+            if (drawNormals)
+            {
+                Vector3[] normals = mesh.normals;
+
+                for (int i = 0; i < vertices.Length; i++)
+                {
+                    Vector3 vertex = vertices[i];
+                    Vector3 normal = normals[i];
+
+                    // Adjust the length of the normal line as needed
+                    float normalLength = 1f;
+                    Vector3 endPos = vertex + normal * normalLength;
+
+                    Debug.DrawLine(vertex, endPos, Color.yellow, durration);
+                }
+            }
+        }
+
+        public static void Debug_drawDisc(Vector3 discCenter, Vector3 discNormal, float discRadius, int segments)
+        {
+            // Calculate two vectors perpendicular to the normal
+            Vector3 from = Vector3.Cross(discNormal, Vector3.up).normalized;
+            Vector3 to = Vector3.Cross(discNormal, from).normalized;
+
+            // Calculate the world position of the disc center
+            Vector3 worldCenter = discCenter;
+
+            // Draw the disc circumference using line segments
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = i * 2 * Mathf.PI / segments;
+                Vector3 start = worldCenter + discRadius * (float)Math.Cos(angle) * from + discRadius * (float)Math.Sin(angle) * to;
+                angle = (i + 1) * 2 * Mathf.PI / segments;
+                Vector3 end = worldCenter + discRadius * (float)Math.Cos(angle) * from + discRadius * (float)Math.Sin(angle) * to;
+                Debug.DrawLine(start, end, Color.red, 0.5f);
+            }
+        }
+
+        public static void Debug_drawBox(Vector3 position, float size, Color color, float duration = 0.1f, bool doOcclusion = true)
+        {
+            Vector3 halfSize = 0.5f * size * Vector3.one;
+
+            // Calculate the corners of the box
+            Vector3[] corners = new Vector3[8];
+            corners[0] = position + new Vector3(-halfSize.x, -halfSize.y, -halfSize.z);
+            corners[1] = position + new Vector3(halfSize.x, -halfSize.y, -halfSize.z);
+            corners[2] = position + new Vector3(halfSize.x, -halfSize.y, halfSize.z);
+            corners[3] = position + new Vector3(-halfSize.x, -halfSize.y, halfSize.z);
+            corners[4] = position + new Vector3(-halfSize.x, halfSize.y, -halfSize.z);
+            corners[5] = position + new Vector3(halfSize.x, halfSize.y, -halfSize.z);
+            corners[6] = position + new Vector3(halfSize.x, halfSize.y, halfSize.z);
+            corners[7] = position + new Vector3(-halfSize.x, halfSize.y, halfSize.z);
+
+            // Draw lines between corners to form the box
+            Debug.DrawLine(corners[0], corners[1], color, duration, doOcclusion);
+            Debug.DrawLine(corners[1], corners[2], color, duration, doOcclusion);
+            Debug.DrawLine(corners[2], corners[3], color, duration, doOcclusion);
+            Debug.DrawLine(corners[3], corners[0], color, duration, doOcclusion);
+
+            Debug.DrawLine(corners[4], corners[5], color, duration, doOcclusion);
+            Debug.DrawLine(corners[5], corners[6], color, duration, doOcclusion);
+            Debug.DrawLine(corners[6], corners[7], color, duration, doOcclusion);
+            Debug.DrawLine(corners[7], corners[4], color, duration, doOcclusion);
+
+            Debug.DrawLine(corners[0], corners[4], color, duration, doOcclusion);
+            Debug.DrawLine(corners[1], corners[5], color, duration, doOcclusion);
+            Debug.DrawLine(corners[2], corners[6], color, duration, doOcclusion);
+            Debug.DrawLine(corners[3], corners[7], color, duration, doOcclusion);
         }
 #endif
             }

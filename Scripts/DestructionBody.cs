@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -16,7 +15,9 @@ namespace zombDestruction
 
         private void Start()
         {
-            globalHandler = DestructionHandler.TryGetGlobalHandler(gameObject);
+            //Get rigidbodies to use
+            globalHandler = DestructionHandler.TryGetDestructionHandler(gameObject);
+
             if (globalHandler == null) return;
 
             if (includeChildren == false)
@@ -32,14 +33,8 @@ namespace zombDestruction
                 }
             }
 
-            foreach (Rigidbody rb in usedRigidbodies)
-            {
-                var rbData = customRigidbodyProperties.ShallowCopy();
-                rbData.rb = rb;
-                rbData.rbMass = rb.mass;
-                rbData.desMass = rbData.rbMass * desMassMultiplier;
-                globalHandler.OnAddOrUpdateRb(rbData);
-            }
+            //Apply properties, we dont wanna update mass since it should not override if set by destructableObject
+            ApplyRigidbodyProperties(false, true);
         }
 
         private void OnDestroy()
@@ -47,10 +42,9 @@ namespace zombDestruction
 #pragma warning disable CS0162 // Unreachable code detected
             if (FracGlobalSettings.canAutomaticallyRemoveAddedRigidbodies == false) return;
 
-
             if (globalHandler == null)
             {
-                globalHandler = DestructionHandler.TryGetGlobalHandler(gameObject, null, false);
+                globalHandler = DestructionHandler.TryGetDestructionHandler(gameObject, null, false);
                 if (globalHandler == null) return;
             }
 
@@ -65,6 +59,32 @@ namespace zombDestruction
                 globalHandler.OnRemoveRigidbody(rb);
             }
 #pragma warning restore CS0162 // Unreachable code detected
+        }
+
+        /// <summary>
+        /// Should be called if you have changed the customRigidbodyProperties or the mass of the rigidbody
+        /// </summary>
+        public void ApplyRigidbodyProperties(bool onlyUpdateMass = true, bool onlyUpdateOther = true)
+        {
+            foreach (Rigidbody rb in usedRigidbodies)
+            {
+                if (rb == null) continue;
+
+                var rbData = customRigidbodyProperties.ShallowCopy();
+                rbData.rb = rb;
+                rbData.rbMass = rb.mass;
+                rbData.desMass = rbData.rbMass * desMassMultiplier;
+                globalHandler.OnAddOrUpdateRb(rbData, onlyUpdateMass, onlyUpdateOther);
+            }
+        }
+
+        /// <summary>
+        /// Sets and updates the buoyancy of the rigidbody
+        /// </summary>
+        public void SetRbBuoyancy(float newBuoyancy)
+        {
+            customRigidbodyProperties.buoyancy = newBuoyancy;
+            ApplyRigidbodyProperties(false, true);
         }
     }
 }

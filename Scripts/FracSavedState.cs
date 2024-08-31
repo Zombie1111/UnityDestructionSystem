@@ -213,6 +213,8 @@ namespace zombDestruction
                 {
                     loadTo.des_deformedParts[loadTo.des_deformedPartsIndex].Add(pI);
                 }
+
+                loadTo.canSyncAllCollidersNextSyncs = loadTo.des_deformedParts[1 - loadTo.des_deformedPartsIndex].Count > 0 ? 2 : 1;
             }
 
 #if !FRAC_NO_VERTEXCOLORSUPPORT && !FRAC_NO_VERTEXCOLORSAVESTATESUPPORT

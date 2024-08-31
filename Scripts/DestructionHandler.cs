@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,7 +7,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
-using Unity.Mathematics;
+
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.Compilation;
@@ -21,8 +20,14 @@ namespace zombDestruction
     [DefaultExecutionOrder(-10)]
     public class DestructionHandler : MonoBehaviour
     {
+#if UNITY_EDITOR
+        [System.NonSerialized] public DestructableObject desCopySource = null;
+#endif
+
         #region InstanceIds
-        private ConcurrentDictionary<int, GlobalFracData> partColsInstanceId = new();
+        //private ConcurrentDictionary<int, GlobalFracData> partColsInstanceId = new();
+        private Dictionary<int, GlobalFracData> partColsInstanceId = new();//I did run into weird issues when using Dictionary instead of ConcurrentDictionary
+        //when I tested it months ago, but seems to work now? Race conditions should not be able to happen since im only reading it in multithreading
 
         private class GlobalRbDataToSet
         {
@@ -49,7 +54,7 @@ namespace zombDestruction
             //verify global handlers
             //If more than one global handler exists merge other with this one
             DestructionHandler[] handlers = GameObject.FindObjectsByType<DestructionHandler>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            for (int i = 0; i < handlers.Length; i += 1)
+            for (int i = 0; i < handlers.Length; i++)
             {
                 if (handlers[i] == this) continue;
                 handlers[i].GetRbVelocities_end();//make sure the job aint running
@@ -81,8 +86,21 @@ namespace zombDestruction
             }
 
             //Get ogFixedTimeStep
-            if (handlers.Length == 0) ogFixedTimeStep = Time.fixedDeltaTime;
-            else ogFixedTimeStep = handlers[0].ogFixedTimeStep;
+            if (handlers.Length <= 1)
+            {
+                prevFixedStep = FracGlobalSettings.minDynamicFixedTimeStep;
+            }
+            else
+            {
+                var othHandler = handlers[0] == this ? handlers[1] : handlers[0];
+                prevFixedStep = othHandler.prevFixedStep;
+            }
+
+            ////CUSTOM contact rule example
+            //playerColInstanceId = GameObject.FindAnyObjectByType<PM_mainMove>(FindObjectsInactive.Include).plMotor.GetComponent<Collider>().GetInstanceID();
+            //playerColBlockInstanceId = GameObject.FindAnyObjectByType<PM_mainMove>(FindObjectsInactive.Include).plMotor.GetComponentInChildren<Rigidbody>(true)
+            //    .GetComponent<Collider>().GetInstanceID();
+            ////CUSTOM END
         }
 
         private void Start()
@@ -109,7 +127,8 @@ namespace zombDestruction
         {
             for (int i = 0; i < destroyedFrac.allParts.Count; i++)
             {
-                partColsInstanceId.TryRemove(destroyedFrac.allPartsCol[i].GetInstanceID(), out _);
+                //partColsInstanceId.TryRemove(destroyedFrac.allPartsCol[i].GetInstanceID(), out _);
+                partColsInstanceId.Remove(destroyedFrac.allPartsCol[i].GetInstanceID(), out _);
             }
         }
 
@@ -157,8 +176,9 @@ namespace zombDestruction
         /// </summary>
         /// <param name="desMass">The mass the rigidbody should have for the destruction system</param>
         /// <param name="rbMass">The mass the rigidbody actually has, should always be equal to rbToAddOrUpdate.mass</param>
-        public void OnAddOrUpdateRb(GlobalRbData rbData, bool onlyUpdateMass = false)
+        public void OnAddOrUpdateRb(GlobalRbData rbData, bool onlyUpdateMass = false, bool onlyUpdateCustom = false)
         {
+            //Get rb id and if kinematic
             int rbId = rbData.rb.GetInstanceID();
             if (rbData.rb.isKinematic == true)
             {
@@ -166,19 +186,41 @@ namespace zombDestruction
                 rbData.rbMass *= -1;
             }
 
+            //Only update the stuff we want
+            if (onlyUpdateMass == true && rbInstancIdToJgrvIndex.TryGetValue(rbId, out int rbIndex) == true)
+            {
+                float ogDesMass = rbData.desMass;
+                float ogRbMass = rbData.rbMass;
+                rbData = jGRV_rbData[rbIndex].ShallowCopy();
+                rbData.desMass = ogDesMass;
+                rbData.rbMass = ogRbMass;
+            }
+            else if (onlyUpdateCustom == true && rbInstancIdToJgrvIndex.TryGetValue(rbId, out rbIndex) == true)
+            {
+                rbData.desMass = jGRV_rbData[rbIndex].desMass;
+                rbData.rbMass = jGRV_rbData[rbIndex].rbMass;
+            }
+
+            //Add to stuff to update
             if (jGRV_rbToSet.TryAdd(rbId, new()
             {
                 rbData = rbData,
                 updateStatus = 2
             }) == false)
             {
-                if (onlyUpdateMass == true && rbInstancIdToJgrvIndex.TryGetValue(rbId, out int rbIndex) == true)
+                //Only update the stuff we want
+                if (onlyUpdateMass == true)
                 {
                     float ogDesMass = rbData.desMass;
                     float ogRbMass = rbData.rbMass;
-                    rbData = jGRV_rbData[rbIndex].ShallowCopy();
+                    rbData = jGRV_rbToSet[rbId].rbData.ShallowCopy();
                     rbData.desMass = ogDesMass;
                     rbData.rbMass = ogRbMass;
+                }
+                else if (onlyUpdateCustom == true)
+                {
+                    rbData.desMass = jGRV_rbToSet[rbId].rbData.desMass;
+                    rbData.rbMass = jGRV_rbToSet[rbId].rbData.rbMass;
                 }
 
                 jGRV_rbToSet[rbId].rbData = rbData;
@@ -204,7 +246,8 @@ namespace zombDestruction
             {
                 if (idFrac.Value.fracThis != null) continue;
 
-                partColsInstanceId.TryRemove(idFrac.Key, out _);
+                //partColsInstanceId.TryRemove(idFrac.Key, out _);
+                partColsInstanceId.Remove(idFrac.Key, out _);
             }
         }
 
@@ -300,24 +343,37 @@ namespace zombDestruction
 
         private float syncTime = 0.0f;
         private int syncFrames = 0;
-        private float ogFixedTimeStep;
+        private float prevFixedStep;
+        private int hasSynced = 0;
+        //private float lowestStep = 69420.0f;
 
-        private void Update()
+        private void LateUpdate()
         {
 #pragma warning disable IDE0079
 #pragma warning disable 0162
             //sync fixedTimestep with fps
-            if (FracGlobalSettings.syncFixedTimestepWithFps == true)
+            if (FracGlobalSettings.minDynamicFixedTimeStep > 0.0f && Time.timeScale > 0.9f)
             {
-                syncTime += Time.unscaledDeltaTime;
+                syncTime += Time.smoothDeltaTime;
                 syncFrames++;
+                //float thisStep = Time.unscaledDeltaTime;
+                //if (thisStep < lowestStep) lowestStep = thisStep;
 
-                if (syncTime >= 10.0f)
+                if (syncTime >= (hasSynced > 2 ? 5.0f : 0.5f))
                 {
-                    Time.fixedDeltaTime = MathF.Min(syncTime / syncFrames, ogFixedTimeStep);
+                    float newStep = Mathf.Min(Mathf.Max(syncTime / syncFrames, FracGlobalSettings.maxDynamicFixedTimeStep), FracGlobalSettings.minDynamicFixedTimeStep);
+                    float currentStep = Time.fixedDeltaTime;
 
+                    if (Math.Abs(newStep - currentStep) > newStep * (newStep > currentStep ? 0.2f : 0.1f))
+                    {
+                        Time.fixedDeltaTime = newStep > prevFixedStep ? ((prevFixedStep + newStep) / 2.0f) : newStep;
+                    }
+                
+                    prevFixedStep = newStep;
                     syncTime = 0.0f;
                     syncFrames = 0;
+                    hasSynced++;
+                    //lowestStep = 69420.0f;
                 }
             }
 #pragma warning restore 0162
@@ -588,6 +644,11 @@ namespace zombDestruction
         /// </summary>
         public event Event_OnDestructionImpact OnDestructionImpact;
 
+        ////CUSTOM contact rule example
+        //private int playerColInstanceId;
+        //private int playerColBlockInstanceId;
+        ////CUSTOM END
+
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
         {
             //variabels used durring calculations
@@ -684,18 +745,40 @@ namespace zombDestruction
 
             void CalcImpPair()
             {
+                int colInstanceId = pair.colliderInstanceID;
+                int othColInstanceId = pair.otherColliderInstanceID;
+
+                ////CUSTOM contact rule example
+                //if (colInstanceId == playerColInstanceId || othColInstanceId == playerColInstanceId)
+                //{
+                //    for (int i = 0; i < pair.contactCount; i++)
+                //    {
+                //        pair.IgnoreContact(i);
+                //    }
+                //
+                //    return;
+                //}
+                //
+                //if (colInstanceId == playerColBlockInstanceId || othColInstanceId == playerColBlockInstanceId)
+                //{
+                //    return;
+                //}
+                ////CUSTOM END
+
                 //get the destructable object we hit, or return if we did not hit one
-                if (partColsInstanceId.TryGetValue(pair.colliderInstanceID, out GlobalFracData fracD_a) == true
+                if (partColsInstanceId.TryGetValue(colInstanceId, out GlobalFracData fracD_a) == true
                     && fracD_a.fracThis.allPartsParentI[fracD_a.partIndex] < 0)
                 {
-                    if (rbInstancIdToJgrvIndex.TryGetValue(pair.bodyInstanceID, out _) == false) return;
+                    //if (rbInstancIdToJgrvIndex.TryGetValue(pair.bodyInstanceID, out _) == false) return;
+                    if (rbInstancIdToJgrvIndex.ContainsKey(pair.bodyInstanceID) == false) return;
                     fracD_a = null;
                 }
 
-                if (partColsInstanceId.TryGetValue(pair.otherColliderInstanceID, out GlobalFracData fracD_b) == true
+                if (partColsInstanceId.TryGetValue(othColInstanceId, out GlobalFracData fracD_b) == true
                     && fracD_b.fracThis.allPartsParentI[fracD_b.partIndex] < 0)
                 {
-                    if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out _) == false) return;
+                    //if (rbInstancIdToJgrvIndex.TryGetValue(pair.otherBodyInstanceID, out _) == false) return;
+                    if (rbInstancIdToJgrvIndex.ContainsKey(pair.otherBodyInstanceID) == false) return;
                     fracD_b = null;
                 }
 
@@ -716,19 +799,21 @@ namespace zombDestruction
                 }
                 else
                 {
-                    //Is it really worth getting avg?
-                    impNormal = Vector3.zero;
-                    impPos = Vector3.zero;
+                    ////Is it really worth getting avg?
+                    //impNormal = Vector3.zero;
+                    //impPos = Vector3.zero;
+                    //
+                    //for (int contI = 0; contI < contactCount; contI++)
+                    //{
+                    //    impNormal += -pair.GetNormal(contI);
+                    //    impPos += pair.GetPoint(contI);
+                    //}
+                    //
+                    //impPos /= contactCount;
+                    //impNormal.Normalize();
 
-                    for (int contI = 0; contI < contactCount; contI++)
-                    {
-                        impNormal += -pair.GetNormal(contI);
-                        impPos += pair.GetPoint(contI);
-                    }
-
-                    impPos /= contactCount;
-                    impNormal /= contactCount;
-                    impNormal.Normalize();
+                    impNormal = pair.GetNormal(0);//roulgy 0.4ms and 0.6ms with avg in total, seems to be almost as good as avg so avg is not worth it
+                    impPos = pair.GetPoint(0);
                 }
 
                 //Get pair contct friction and bouncy
@@ -834,7 +919,7 @@ namespace zombDestruction
 
             void CalcImpContact(GlobalFracData fracD, Vector3 impactVel, float forceApplied, int otherRbI, float sourceTransCap, int thisRbI)
             {
-                //Ignore impact if too weak
+                //Ignore impact if too weak, we may wanna add a minimumImpactForce relative to material stenght?
                 if (forceApplied < FracGlobalSettings.minimumImpactForce) return;
 
                 //Get impact id
@@ -916,7 +1001,7 @@ namespace zombDestruction
                 transCap = 0.0f;
 
                 if (rbI_hit < 0 || rbIsKinematic == true) return float.MaxValue;
-                float forceConsume = forceVel.magnitude * Mathf.Abs(jGRV_rbData[rbI_hit].desMass);
+                float forceConsume = forceVel.magnitude * Math.Abs(jGRV_rbData[rbI_hit].desMass);
                 return forceConsume - (forceConsume * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption);
             }
         }
@@ -955,11 +1040,11 @@ namespace zombDestruction
 
             fracD.fracThis.RegisterDestruction(new()
             {
-                centerImpPos = impactPoint,
+                centerImpPos = impactPoint - (velocity.normalized * 0.1f),
                 impForceTotal = impactForce,
                 impVel = velocity,
                 isExplosion = treatAsExplosion,
-                parentI = fracD.fracThis.allPartsParentI[fracD.partIndex],
+                parentI = fracD.fracThis.allPartsParentI[fracD.partIndex]
             }, impPoints, thisRbI, 0, false);
 
             return true;
@@ -1186,7 +1271,7 @@ namespace zombDestruction
         /// <summary>
         /// Returns a valid DestructionHandler, returns null if no valid DestructionHandler exist in scene
         /// </summary>
-        public static DestructionHandler TryGetGlobalHandler(GameObject sourceObj, DestructableObject sourceFrac = null, bool canLogError = true)
+        public static DestructionHandler TryGetDestructionHandler(GameObject sourceObj, DestructableObject sourceFrac = null, bool canLogError = true)
         {
             DestructionHandler[] handlers = GameObject.FindObjectsOfType<DestructionHandler>(true);
             if (handlers == null || handlers.Length < 1 || handlers[0].isActiveAndEnabled == false)
@@ -1200,7 +1285,7 @@ namespace zombDestruction
                 return null;
             }
 
-            if (handlers[0].gameObject.scene != sourceObj.scene)
+            if (handlers[0].gameObject.scene != sourceObj.scene && Application.isPlaying == false)
             {
                 int prefabT = sourceFrac != null ? sourceFrac.GetFracturePrefabType() : 0;
                 if (prefabT != 2 && canLogError == true) Debug.LogError("The DestructionHandler script must be in the same scene as " + sourceObj.transform.name);
@@ -1242,7 +1327,7 @@ namespace zombDestruction
 
             private static void OnMemoryClear()
             {
-                foreach (DestructableObject frac in GameObject.FindObjectsOfType<DestructableObject>(true))
+                foreach (DestructableObject frac in GameObject.FindObjectsByType<DestructableObject>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 {
                     frac.eOnly_ignoreNextDraw = true;
                     frac.ClearUsedGpuAndCpuMemory();

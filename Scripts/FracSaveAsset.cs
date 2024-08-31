@@ -5,10 +5,6 @@ using JetBrains.Annotations;
 using System.Linq;
 using Unity.Collections;
 
-
-
-
-
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -282,7 +278,11 @@ namespace zombDestruction
             }
 
             //Apply saved data to the provided DestructableObject instance
+            //Clear mem
+            loadTo.ClearUsedGpuAndCpuMemory();
+
             //Load compute destruction job
+
             loadTo.allPartsParentI = fracSavedData.saved_structs_parentI.ToList();
 
             loadTo.jCDW_job = new()
@@ -294,6 +294,10 @@ namespace zombDestruction
                 partIToDesMatI = new(fracSavedData.saved_partIToDesMatI.Length, Allocator.Persistent),
                 parentPartCount = fracSavedData.saved_parentPartCount.ToNativeList(Allocator.Persistent) 
             };
+
+            //load local paths
+            loadTo.partsLocalParentPath = fracSavedData.saved_partsLocalParentPath.ToList();
+            loadTo.localPathToRbIndex = FracHelpFunc.CreateDictionaryFromArrays<int, int>(fracSavedData.saved_localPathToRbIndex_keys, fracSavedData.saved_localPathToRbIndex_values);
 
             //Load kinematic parts, and maybe recalculate kinematic parts depending on global setting
             foreach (int partI in fracSavedData.saved_kinematicPartsStatus)
@@ -344,10 +348,6 @@ namespace zombDestruction
                     };
                 }
             }
-
-            //load local paths
-            loadTo.partsLocalParentPath = fracSavedData.saved_partsLocalParentPath.ToList();
-            loadTo.localPathToRbIndex = FracHelpFunc.CreateDictionaryFromArrays<int, int>(fracSavedData.saved_localPathToRbIndex_keys, fracSavedData.saved_localPathToRbIndex_values);
 
             //restore fr_[] variabels from fracRend mesh
             Mesh fracRendMesh = loadTo.fracFilter.sharedMesh;

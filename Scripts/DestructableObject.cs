@@ -14,11 +14,6 @@ using UnityEngine.Rendering;
 using System.Collections.Concurrent;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.SceneManagement;
-using UnityEditor.Experimental.GraphView;
-
-
-
-
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -31,7 +26,6 @@ namespace zombDestruction
     [DefaultExecutionOrder(0)]
     public class DestructableObject : MonoBehaviour
     {
-
         #region EditorAndOptions
 
 #if UNITY_EDITOR
@@ -42,7 +36,7 @@ namespace zombDestruction
             private static readonly string[] noFracSpecial = new string[]
             {
                 "m_Script", "debugMode", "ogData", "allPartsCol", "saved_fracId", "shouldBeFractured", "partMaxExtent", "fracFilter",
-                "fracRend", "fr_bones", "allParents", "globalHandler", "fracPrefabType"
+                "fracRend", "fr_bones", "allParents", "globalHandler", "fracPrefabType", "parentTemplate", "allPartsParentI"
             };
 
             public override void OnInspectorGUI()
@@ -137,6 +131,12 @@ namespace zombDestruction
                 }
 
                 //Apply changes
+                if (serializedObject.hasModifiedProperties == true)
+                {
+                    EditorUtility.SetDirty(target);
+                    if (Application.isPlaying == false) EditorSceneManager.MarkAllScenesDirty();
+                }
+
                 serializedObject.ApplyModifiedProperties();
             }
         }
@@ -152,6 +152,13 @@ namespace zombDestruction
             phyPartsOptions = from.phyPartsOptions;
             insideMat_fallback = from.insideMat_fallback;
             insideMat_nameAddition = from.insideMat_nameAddition;
+            defualtDestructionMaterial = from.defualtDestructionMaterial;
+            selfCollisionRule = from.selfCollisionRule;
+            remeshing = from.remeshing;
+            interpolationSpeedTarget = from.interpolationSpeedTarget;
+            interpolationSharpness = from.interpolationSharpness;
+            splitDisconnectedFaces = from.splitDisconnectedFaces;
+            useGroupIds = from.useGroupIds;
         }
 #endif
 
@@ -169,6 +176,11 @@ namespace zombDestruction
 
         [Space(10)]
         [Header("Physics")]
+        public int maxColliderMergeCount = 6;//Not yet implemented, after lots of profilling,
+                                             //By far biggest performance bottleneck seems to be unity physics,
+                                             //only reasonable way I can think of to potentially fix it is to merge neighbour
+                                             //colliders. Since its always convex that would mean less faces and less colliders
+                                             //But would probably also mean way less accurate destruction input?
         [SerializeField] private ColliderType colliderType = ColliderType.mesh;
         [SerializeField] private SelfCollisionRule selfCollisionRule = SelfCollisionRule.ignoreNeighbours;
         public OptPhysicsMain phyMainOptions = new();
@@ -196,7 +208,7 @@ namespace zombDestruction
         /// <summary>
         /// Contains all destruction materials, 0 is always defualt, > 0 is for groupIds that has overrides
         /// </summary>
-        [SerializeField] private List<DestructionMaterial> destructionMaterials = new();
+        [SerializeField] internal List<DestructionMaterial> destructionMaterials = new();
 
         [System.Serializable]
         public class FracVolume
@@ -539,8 +551,8 @@ namespace zombDestruction
         /// <summary>
         /// Restores all components on the previous saved objToUse, returns true if anything changed
         /// </summary>
-        /// <param name="doSave">If true, objToUse og data will be saved (Make sure its okay to save)</param>
-        public bool Gen_loadAndMaybeSaveOgData(bool doSave = false)
+        /// <param name="doSave">If true, objToUse og data will be saved (Make sure its okay to save and validChild is assigned)</param>
+        public bool Gen_loadAndMaybeSaveOgData(bool doSave = false, Transform validChild = null)
         {
             //make sure we can load and save
 #if UNITY_EDITOR
@@ -550,7 +562,7 @@ namespace zombDestruction
                 return false;
             }
 #endif
-            GameObject objToUse = gameObject;
+
             bool didChangeAnything = false;
             if (doSave == true) goto SkipLoadingOg;
 
@@ -656,12 +668,13 @@ namespace zombDestruction
             syncFR_modifiedPartsI = new();
             if (jGTD_hasMoved.IsCreated == true) jGTD_hasMoved.Clear();
             ClearUsedGpuAndCpuMemory();
+
             jCDW_job = new()
             {
                 structPosL = new NativeList<Vector3>(Allocator.Persistent),
                 partsParentI = new NativeList<int>(Allocator.Persistent),
                 parentPartCount = new NativeList<short>(Allocator.Persistent),
-                kinematicPartIndexes = new NativeHashSet<int>(0, Allocator.Persistent),
+                kinematicPartIndexes = new NativeParallelHashSet<int>(0, Allocator.Persistent),
                 fStructs = new NativeList<FracStruct>(Allocator.Persistent),
                 partIToDesMatI = new NativeList<int>(Allocator.Persistent)
             };
@@ -678,7 +691,7 @@ namespace zombDestruction
 
             //return if dont save og
 #if UNITY_EDITOR
-            if (didChangeAnything == true) EditorUtility.SetDirty(objToUse);
+            if (didChangeAnything == true) EditorUtility.SetDirty(gameObject);
 #endif
             if (doSave == false) return didChangeAnything;
 
@@ -716,9 +729,7 @@ namespace zombDestruction
             if (rend != null) CopyRendProperties(rend, fracRend, new Material[0], true);
 
             //save og components
-            bool newBoolValue;
-
-            foreach (Component comp in objToUse.GetComponentsInChildren<Component>())
+            foreach (Component comp in validChild.GetComponentsInChildren<Component>())
             {
                 if (comp == fracRend || comp == fracFilter || comp == null) continue;
 
@@ -726,15 +737,13 @@ namespace zombDestruction
                 Type targetType = comp.GetType();
                 if (IsValidType(targetType) == false) continue;
 
-                newBoolValue = false;
-
                 var enabledProperty = targetType.GetProperty("enabled");
 
                 if (enabledProperty == null || enabledProperty.PropertyType != typeof(bool)) continue;
 
                 newOgD.wasEnabled = (bool)enabledProperty.GetValue(comp);
                 newOgD.comp = comp;
-                enabledProperty.SetValue(comp, newBoolValue, null);
+                enabledProperty.SetValue(comp, false, null);
 
                 ogData.ogCompData.Add(newOgD);
             }
@@ -743,7 +752,8 @@ namespace zombDestruction
 
             bool IsValidType(Type typeToCheck)
             {
-                return typeof(Renderer).IsAssignableFrom(typeToCheck) == true || typeof(Collider).IsAssignableFrom(typeToCheck) == true;
+                //return typeof(Renderer).IsAssignableFrom(typeToCheck) == true || typeof(Collider).IsAssignableFrom(typeToCheck) == true;
+                return typeToCheck == typeof(MeshRenderer) || typeof(Collider).IsAssignableFrom(typeToCheck) == true;
             }
 
             void CopyRendProperties(Renderer source, Renderer target, Material[] targetMats, bool targetEnable)
@@ -800,7 +810,7 @@ namespace zombDestruction
             if (fracRend == null || fracFilter == null) return false;
             if (globalHandler == null)
             {
-                globalHandler = DestructionHandler.TryGetGlobalHandler(gameObject, this, true);
+                globalHandler = DestructionHandler.TryGetDestructionHandler(gameObject, this, true);
                 if (globalHandler == null) return false;
             }
 
@@ -813,6 +823,13 @@ namespace zombDestruction
             if (fr_verticesL == null || fr_verticesL.Count == 0 || fr_bones == null || fr_bones.Count == 0)
             {
                 Debug.LogError(transform.name + " destruction does not have any bones or vertics");
+                RemoveCorrupt();
+                return false;
+            }
+
+            if (parentTemplate == null)
+            {
+                Debug.LogError("The parent template for " + transform.name + " is missing, have you deleted it?");
                 RemoveCorrupt();
                 return false;
             }
@@ -835,7 +852,7 @@ namespace zombDestruction
 
             if (SystemInfo.supportsAsyncGPUReadback == false)
             {
-                Debug.LogWarning("The current device does not support AsyncGPUReadback, destruction can be expected to cause noticeable fps drops!");
+                Debug.Log("The current device does not support AsyncGPUReadback, destruction can be expected to cause noticeable fps drops!");
             }
 
             fractureIsValid = true;
@@ -912,13 +929,15 @@ namespace zombDestruction
                 //Log the error
                 Debug.LogError("Exception: " + ex.Message);
                 Debug.LogError("StackTrace: " + ex.StackTrace);
-
+            
+                #if UNITY_EDITOR
                 //Display an error message to the user
                 EditorUtility.DisplayDialog("Error", "An unexpected error occured while fracturing, look in console for more info", "OK");
-
+                #endif
+            
                 //remove the fracture
                 CancelFracturing();
-
+            
                 //set fracture as invalid
                 fractureIsValid = false;
                 return false;
@@ -963,13 +982,18 @@ namespace zombDestruction
                 List<FracMesh> partMeshesW = Gen_fractureMeshes(meshesToFracW, fractureCount, dynamicFractureCount, worldScaleDis, seed);
                 if (partMeshesW == null) return CancelFracturing();
 
+                //Get valid child that can be used as defualt parent
+                if (UpdateProgressBar("Getting defualt parent") == false) return CancelFracturing();
+                Transform validChild = Gen_getValidChild(meshesToFracW);
+                if (validChild == null) return CancelFracturing();
+
                 //save orginal data (save as late as possible)
                 if (UpdateProgressBar("Saving orginal objects") == false) return CancelFracturing();
-                Gen_loadAndMaybeSaveOgData(true);
+                Gen_loadAndMaybeSaveOgData(true, validChild);
 
                 //setup fracture renderer
                 if (UpdateProgressBar("Creating renderer") == false) return CancelFracturing();
-                Gen_setupFracRend(meshesToFracW);
+                if (Gen_setupFracRend(meshesToFracW, validChild) == false) return CancelFracturing();
 
                 //create fracObjects and add them to the destruction
                 if (UpdateProgressBar("Creating destruction structure") == false) return CancelFracturing();
@@ -986,11 +1010,10 @@ namespace zombDestruction
                 if (UpdateProgressBar("Verifying") == false) return CancelFracturing();
 
                 if (GetConnectedPartCount(0, out int missingPart) != allParts.Count) Debug.LogWarning("Not all parts in " + transform.name + " are connected with each other, part " + missingPart + " is not connected");
-                if (fr_bones.Count > 500) Debug.LogWarning(transform.name + " has " + fr_bones.Count + " bones (skinnedMeshRenderers seems to have a limitation of ~500 bones before it breaks)");
+                if (fr_bones.Count > 420) Debug.LogWarning(transform.name + " has " + fr_bones.Count + " parts, there seems to be a weird issue where too many parts causes some to not render");
                 if (Mathf.Approximately(transform.lossyScale.x, transform.lossyScale.y) == false || Mathf.Approximately(transform.lossyScale.z, transform.lossyScale.y) == false) Debug.LogWarning(transform.name + " lossy scale XYZ should all be the same. If not stretching may accure when rotating parts");
                 if (transform.TryGetComponent<Rigidbody>(out _) == true) Debug.LogWarning(transform.name + " has a rigidbody and it may cause issues. Its recommended to remove it and use the fracture physics options instead");
                 Debug.Log("Fractured " + transform.name + " into " + partMeshesW.Count + " parts, total vertex count = " + partMeshesW.Sum(meshWG => meshWG.meshW.vertexCount));
-
 
                 return true;
             }
@@ -1137,7 +1160,7 @@ namespace zombDestruction
         public class DestructionMaterial
         {
             public List<int> affectedGroupIndexes = new();
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
             public PhysicsMaterial phyMat;
 #else
             public PhysicMaterial phyMat;
@@ -1189,7 +1212,7 @@ namespace zombDestruction
         [System.Serializable]
         private class DefualtDesMatOptions
         {
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
             public PhysicsMaterial phyMat;
 #else
             public PhysicMaterial phyMat;
@@ -1280,9 +1303,45 @@ namespace zombDestruction
         [SerializeField] private GameObject parentTemplate = null;
 
         /// <summary>
+        /// Returns a child that can be used as defualtParent, returns null if no valid child exists
+        /// </summary>
+        private Transform Gen_getValidChild(List<FracSource> fracSources)
+        {
+            Transform bestChild = null;
+            int bestCount = -1;
+
+            for (int childI = 0; childI < transform.childCount; childI++)
+            {
+                Transform thisChild = transform.GetChild(childI);
+                if (FracHelpFunc.TransformHasUniformScale(thisChild) == false) continue;
+
+                int thisCount = 0;
+
+                foreach (FracSource source in fracSources)
+                {
+                    if (source.sRend == null || FracHelpFunc.GetIfTransformIsAnyParent(thisChild, source.sRend.transform) == false) continue;
+                    thisCount++;
+                }
+
+                if (thisCount <= bestCount) continue;
+
+                bestCount = thisCount;
+                bestChild = thisChild;
+            }
+
+            if (bestChild == null || bestChild == transform)
+            {
+                Debug.LogError(transform.name + " does not have a valid transform to be used as defualt parent, is the lossy scale not uniform?");
+                return null;
+            }
+
+            return bestChild;
+        }
+
+        /// <summary>
         /// Sets fracRend defualt values so its ready to get parts added to it, returns true if valid fracRend
         /// </summary>
-        private bool Gen_setupFracRend(List<FracSource> fracSources)
+        private bool Gen_setupFracRend(List<FracSource> fracSources, Transform validChild)
         {
             //return if no fracRend
             if (fracRend == null)
@@ -1313,45 +1372,19 @@ namespace zombDestruction
 
             SyncFracRendData();
 
-            //create defualt parent
-            Transform bestChild = null;
-            int bestCount = -1;
-
-            for (int childI = 0; childI < transform.childCount; childI++)
-            {
-                Transform thisChild = transform.GetChild(childI);
-                if (FracHelpFunc.TransformHasUniformScale(thisChild) == false) continue;
-
-                int thisCount = 0;
-
-                foreach (FracSource source in fracSources)
-                {
-                    if (source.sRend == null || FracHelpFunc.GetIfTransformIsAnyParent(thisChild, source.sRend.transform) == false) continue;
-                    thisCount++;
-                }
-
-                if (thisCount <= bestCount) continue;
-
-                bestCount = thisCount;
-                bestChild = thisChild;
-            }
-
-            if (bestChild == null || bestChild == transform)
-            {
-                Debug.LogError(transform.name + " does not have a valid transform to be used as defualt parent");
-                return false;
-            }
+            //Get defualt parent
+            //(Now done before saveOg in seperate function since we need to know defualtParent when saving)
 
             //Create parent template
             parentTemplate = new GameObject(transform.name + "_parent");
             parentTemplate.transform.SetParent(transform);
-            CreateTemplateIteration(bestChild, parentTemplate.transform);
+            CreateTemplateIteration(validChild, parentTemplate.transform);
             List<Rigidbody> rbOrder = new();
             parentTemplate.GetComponentsInChildren<Rigidbody>(rbOrder);
 
             foreach (Transform child in parentTemplate.GetComponentsInChildren<Transform>())
             {
-                Rigidbody rb = child.GetComponentInParent<Rigidbody>();
+                Rigidbody rb = child.GetComponentInParent<Rigidbody>(false);
                 if (rb == null) continue;
                 localPathToRbIndex.Add(FracHelpFunc.EncodeHierarchyPath(child, parentTemplate.transform), rbOrder.IndexOf(rb));
 
@@ -1366,22 +1399,41 @@ namespace zombDestruction
                 }
             }
 
+            parentTemplate.name = transform.name + "_parent";
             parentTemplate.SetActive(false);
-            CreateNewParent(bestChild);
-
+            CreateNewParent(validChild);
 
             return true;
 
             static void CreateTemplateIteration(Transform sourceTrans, Transform templateTrans)
             {
+                //Copy components to template
                 if (sourceTrans.TryGetComponent(out Rigidbody rb) == true) FracHelpFunc.CopyRigidbody(rb, templateTrans.gameObject);
-                bool keepRest = false;
+                foreach (string typeName in FracGlobalSettings.componentTypeNamesToInclude)
+                {
+                    Type compType = Type.GetType(typeName, false, true);
+                    if (compType == null || compType.IsSubclassOf(typeof(Component)) == false)
+                    {
+                        Debug.LogError("There is no component called " + typeName);
+                        continue;
+                    }
 
+                    var comp = sourceTrans.GetComponent(compType);
+                    if (comp == null) continue;
+
+                    FracHelpFunc.CopyComponent(comp, templateTrans.gameObject);
+                }
+
+                //Get if any child should be included in template
+                bool keepRest = false;
+                
                 for (int i = sourceTrans.childCount - 1; i >= 0; i--)
                 {
                     Transform child = sourceTrans.GetChild(i);
-                    if (keepRest == false && (child.GetComponentInChildren<Renderer>(true) == false || child.gameObject.activeInHierarchy == false)) continue;
+                    if (keepRest == false && (child.GetComponentInChildren<MeshRenderer>(true) == null || child.gameObject.activeInHierarchy == false)) continue;
 
+                    //We only support meshRenderers
+                    Debug.Log(child.name + " " + keepRest + " " + child.GetComponentInChildren<MeshRenderer>(true));
                     keepRest = true;
                     Transform newTrans = new GameObject(child.name + "_parentChild" + i).transform;
                     newTrans.SetParent(templateTrans);
@@ -1440,6 +1492,11 @@ namespace zombDestruction
         {
             gpuIsReady = false;
             wantToSyncFracRendData = false;
+            if (fracRend == null)
+            {
+                Debug.LogError(transform.name + " fracRend is somehow null in SyncFracRendData(), did another error occure before?");
+                return;
+            }
 
             //set basics arrays
             if (des_deformedParts[0] == null)
@@ -1541,7 +1598,7 @@ namespace zombDestruction
 
                     //sync fracRend mesh vertics and normals for gpu write
                     Mesh mesh = fracFilter.sharedMesh;
-                    fracRendDividedVerCount = Mathf.CeilToInt(fr_verticesL.Count / 128.0f);
+                    fracRendDividedVerCount = (int)Math.Ceiling(fr_verticesL.Count / 128.0f);
                     computeDestructionSolver.SetInt("fracRendVerCount", fr_verticesL.Count);
                     mesh.vertexBufferTarget |= GraphicsBuffer.Target.Raw;
 
@@ -1591,6 +1648,18 @@ namespace zombDestruction
                 if (gpuMeshVertexData != null && gpuMeshVertexData.Length == verCount) return;
 
                 gpuMeshVertexData = new GpuMeshVertex[verCount];
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+                if (fr_colors.Count != verCount)
+                {
+                    //This seems to happen quite often in builds, it may be caused by some optimization unity only do in builds?
+                    //But only for meshes where it does not matter so its fine??
+                    Debug.Log("Expected " + transform.name + " to have vertex colors saved but found none," +
+                        " please define FRAC_NO_VERTEXCOLORSUPPORT if this is intentionall");
+
+                    FracHelpFunc.SetListLenght(ref fr_colors, verCount);
+                }
+#endif
+
                 for (int vI = 0; vI < verCount; vI++)
                 {
                     gpuMeshVertexData[vI].pos = fr_verticesL[vI];
@@ -1673,12 +1742,22 @@ namespace zombDestruction
 
             Transform GetDefualtParent(Transform trans)
             {
+                bool changedParent = false;
                 while (trans != null && FracHelpFunc.TransformHasUniformScale(trans) == false)
                 {
                     trans = trans.parent;
+                    changedParent = true;
                 }
 
-                if (trans == null || FracHelpFunc.GetIfTransformIsAnyParent(allParents[0].parentTrans, trans) == false) return null;
+                if (trans == null || FracHelpFunc.GetIfTransformIsAnyParent(allParents[0].parentTrans, trans) == false)
+                {
+                    Debug.LogError("Unable to find valid defualtParent for " + transform.name + ", unexpected behavior is likely to occure!");
+                    return null;
+                }
+
+                if (changedParent == true) Debug.LogWarning("Unable to use orginal parent as defualtParent since the orginal parent did not have a uniformScale, " +
+                    trans.name + " will be used as defualtParent instead!");
+
                 return trans;
             }
         }
@@ -1694,7 +1773,7 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Returns the groupData for the given intId (Use FractureHelperFunc.Gd_getIntIdFromId() to get intId)
+        /// Returns the DestructionMaterial for the given intId (Use FractureHelperFunc.Gd_getIntIdFromId() to get intId)
         /// </summary>
         private DestructionMaterial GetDesMatFromIntId(int intId)
         {
@@ -1734,7 +1813,7 @@ namespace zombDestruction
                 groupLinks = fObj.groupLinks,
                 //col = fObj.col,
                 //trans = fObj.col.transform,
-                partColVerts = new(),
+                partColVerts = new(8),
                 //neighbourStructs = new()
             };
 
@@ -1757,7 +1836,6 @@ namespace zombDestruction
                     SceneManager.MoveGameObjectToScene(fObj.col.gameObject, gameObject.scene);
             }
 
-            //partsDefualtParentTrans.Add(fObj.defualtParent);
             allParts.Add(newPart);
             fr_bones.Add(newTrans);
             allPartsCol.Add(fObj.col);
@@ -1988,6 +2066,8 @@ namespace zombDestruction
 
         public delegate void Event_OnPartParentChanged(int partI, int oldParentI, int newParentI);
         public event Event_OnPartParentChanged OnPartParentChanged;
+        public delegate void Event_OnParentUpdated(int parentI);
+        public event Event_OnParentUpdated OnParentUpdated;
 
         /// <summary>
         /// Sets the given parts parent to newParentI, if -1 the part will become lose
@@ -2009,7 +2089,7 @@ namespace zombDestruction
             {
                 jCDW_job.parentPartCount[oldParentI]--;
                 allParents[oldParentI].partIndexes.RemoveSwapBack(partI);
-                allParents[oldParentI].parentMass -= partDesMat.desProps.mass;
+                allParents[oldParentI].parentDesMass -= partDesMat.desProps.mass;
                 allParents[oldParentI].totalStiffness -= partDesMat.bendProps.bendyness;
                 allParents[oldParentI].totalTransportCoEfficiency -= partDesMat.desProps.falloff;
                 FracParent.FracRb ofRb;
@@ -2046,7 +2126,7 @@ namespace zombDestruction
             fr_bones[partI].SetParent(FracHelpFunc.DecodeHierarchyPath(allParents[newParentI].parentTrans, partsLocalParentPath[partI]));
             jCDW_job.parentPartCount[newParentI]++;
             allParents[newParentI].partIndexes.Add(partI);
-            allParents[newParentI].parentMass += partDesMat.desProps.mass;
+            allParents[newParentI].parentDesMass += partDesMat.desProps.mass;
             allParents[newParentI].totalStiffness += partDesMat.bendProps.bendyness;
             allParents[newParentI].totalTransportCoEfficiency += partDesMat.desProps.falloff;
             FracParent.FracRb fRb;
@@ -2075,7 +2155,7 @@ namespace zombDestruction
                 if (Application.isPlaying == true)
 #endif
                 {
-                    if (UnityEngine.Random.Range(0.0f, 1.0f) < phyPartsOptions.lifeChance)
+                    if (UnityEngine.Random.Range(0.0f, 1.0f) > phyPartsOptions.lifeChance)
                     {
                         des_deformedParts[0].Remove(partI);
                         des_deformedParts[1].Remove(partI);
@@ -2096,7 +2176,7 @@ namespace zombDestruction
 
                 FracHelpFunc.SetRbMass(ref newRb, partDesMat.desProps.mass * phyPartsOptions.massMultiplier);
 
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
                 newRb.linearDamping = phyPartsOptions.drag;
                 newRb.angularDamping = phyPartsOptions.angularDrag;
                 newRb.linearVelocity = losePartVelocity * FracGlobalSettings.partBreakVelocityMultiplier;
@@ -2209,7 +2289,7 @@ namespace zombDestruction
                     parentTrans = transToUse,
                     parentRbs = fRbs,
                     partIndexes = new(),
-                    parentMass = 0.0f
+                    parentDesMass = 0.0f
                 });
 
                 jCDW_job.parentPartCount.Add(new());
@@ -2238,7 +2318,7 @@ namespace zombDestruction
             if (allParents[parentI].partIndexes.Count == 0)
             {
                 allParents[parentI].parentTrans.gameObject.SetActive(false);
-                return;//why bother updating other stuff if its disabled
+                goto SkipUpdateParentRb;//why bother updating other stuff if its disabled
             }
 
             allParents[parentI].parentTrans.gameObject.SetActive(true);//Is it worth checking if its already enabled?
@@ -2253,7 +2333,7 @@ namespace zombDestruction
 
                     for (int i = allParents[parentI].parentRbs.Count - 1; i >= 0; i--)
                     {
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
                         allParents[newParentI].parentRbs[i].rb.linearVelocity = allParents[parentI].parentRbs[i].rb.linearVelocity;
                         allParents[newParentI].parentRbs[i].rb.angularVelocity = allParents[parentI].parentRbs[i].rb.angularVelocity;
 #else
@@ -2267,14 +2347,15 @@ namespace zombDestruction
                         SetPartParent(allParents[parentI].partIndexes[i], newParentI, Vector3.zero);
                     }
 
-                    return;
+                    goto SkipUpdateParentRb;
                 }
             }
 
             //update parent rigidbody
             foreach (var fRb in allParents[parentI].parentRbs)
             {
-                float newRbMass = fRb.rbDesMass
+                //float newRbMass = fRb.rbDesMass
+                float newRbMass = (FracGlobalSettings.rbMassIsPerRigidbody == true ? fRb.rbDesMass : allParents[parentI].parentDesMass)
                      * (fRb.rbPartCount * phyMainOptions.massMultiplier > 1.0f ? phyMainOptions.massMultiplier : 1.0f);
                 newRbMass = FracHelpFunc.SetRbMass(ref fRb.rb, newRbMass);
 
@@ -2289,11 +2370,17 @@ namespace zombDestruction
                 {
                     var rbData = phyMainOptions.customRbProperties.ShallowCopy();
                     rbData.rb = fRb.rb;
-                    rbData.desMass = fRb.rbDesMass;
+                    //rbData.desMass = fRb.rbDesMass;
+                    rbData.desMass = FracGlobalSettings.desMassIsPerRigidbody == true ? fRb.rbDesMass : allParents[parentI].parentDesMass;
                     rbData.rbMass = newRbMass;
                     globalHandler.OnAddOrUpdateRb(rbData, true);
                 }
             }
+
+            SkipUpdateParentRb:;
+
+            //Invoke update parent event
+            OnParentUpdated?.Invoke(parentI);
         }
 
         /// <summary>
@@ -2347,7 +2434,7 @@ namespace zombDestruction
 
             //return if required stuff is missing
             didFracOther = false;
-            globalHandler = DestructionHandler.TryGetGlobalHandler(gameObject, this, true);
+            globalHandler = DestructionHandler.TryGetDestructionHandler(gameObject, this, true);
             if (globalHandler == null) return false;
 
             if (saveAsset == null && (globalHandler == null || globalHandler.TryCreateTempSaveAsset(this) == false))
@@ -2372,7 +2459,7 @@ namespace zombDestruction
         }
 
         private Collider Gen_createPartCollider(Transform partTrans, Mesh partColMeshW,
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
             PhysicsMaterial
 #else
             PhysicMaterial
@@ -2381,7 +2468,7 @@ namespace zombDestruction
         {
             //This is the only place we add new colliders to the parts in
             //(We do also add colliders in the copyColliders function but since it copies all collider properties it does not really matter)
-            partColMeshW = FracHelpFunc.MergeVerticesInMesh(Instantiate(partColMeshW));
+            // = FracHelpFunc.MergeVerticesInMesh(Instantiate(partColMeshW));
             //partColMesh = FractureHelperFunc.MakeMeshConvex(partColMesh, true);
             Collider newCol;
 
@@ -2412,16 +2499,22 @@ namespace zombDestruction
                 newCol = sCol;
             }
 
-            Vector3[] partWVers = partColMeshW.vertices;
+            //Vector3[] partWVers = partColMeshW.vertices;
+            List<Vector3> partWVers = new(partColMeshW.vertexCount);
+            partColMeshW.GetVertices(partWVers);
+            FracHelpFunc.MergeSimilarVectors(ref partWVers, FracGlobalSettings.worldScale * 0.0001f);
 
             partTrans.position = FracHelpFunc.GetGeometricCenterOfPositions(partWVers);
 
             FracHelpFunc.SetColliderFromFromPoints(
                 newCol,
-                FracHelpFunc.ConvertPositionsWithMatrix(partWVers, partTrans.worldToLocalMatrix), ref partMaxExtent);
+                FracHelpFunc.ConvertPositionsWithMatrix(partWVers, partTrans.worldToLocalMatrix).ToArray(), ref partMaxExtent);
 
             newCol.sharedMaterial = phyMat;
             newCol.hasModifiableContacts = true; //This must always be true for all fracture colliders
+            if (newCol is MeshCollider meshCol) meshCol.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation
+                    | MeshColliderCookingOptions.EnableMeshCleaning//May not be needed?
+                    | MeshColliderCookingOptions.UseFastMidphase;//Weld vertics is not needed since its done maually
             return newCol;
         }
 
@@ -2441,10 +2534,10 @@ namespace zombDestruction
             float[] meshScales = FracHelpFunc.GetPerMeshScale(meshes, generationQuality == GenerationQuality.high);
             Bounds meshBounds = FracHelpFunc.GetCompositeMeshBounds(meshes);
 
-            if (dynamicChunkCount == true) totalChunkCount = Mathf.CeilToInt(totalChunkCount * FracHelpFunc.GetBoundingBoxVolume(meshBounds));
+            if (dynamicChunkCount == true) totalChunkCount = (int)Math.Ceiling(totalChunkCount * FracHelpFunc.GetBoundingBoxVolume(meshBounds));
 
 #if UNITY_EDITOR
-            if (mustConfirmHighCount == true && totalChunkCount > 500 && Application.isPlaying == false)
+            if (mustConfirmHighCount == true && totalChunkCount > 1000 && Application.isPlaying == false)
             {
                 mustConfirmHighCount = false;
                 Debug.LogError("You are trying to fracture a mesh into ~" + totalChunkCount + " parts, thats a lot (Fracture again to fracture anyway)");
@@ -2458,9 +2551,7 @@ namespace zombDestruction
 
             for (int i = 0; i < meshesToFrac.Count; i++)
             {
-                //meshesToFrac[i].meshW = FractureHelperFunc.MergeSubMeshes(meshesToFrac[i].meshW);
-
-                Gen_fractureMesh(meshesToFrac[i], ref fracedMeshes, Mathf.CeilToInt(totalChunkCount * meshScales[i]));
+                Gen_fractureMesh(meshesToFrac[i], ref fracedMeshes, (int)Math.Ceiling(totalChunkCount * meshScales[i]));
 
                 nextOgMeshId++;
             }
@@ -2500,7 +2591,6 @@ namespace zombDestruction
                 {
                     if (seed < 0)
                     {
-                        //seed = UnityEngine.Random.Range(0, int.MaxValue);
                         NvBlastExtUnity.setSeed(UnityEngine.Random.Range(0, int.MaxValue));
                     }
 
@@ -2528,9 +2618,9 @@ namespace zombDestruction
                         float chunkVolume = totalVolume / (chunkCount / 3.0f);
 
                         // Calculate the number of slices needed in each axis
-                        int slicesX = Mathf.FloorToInt(meshBounds.size.x / Mathf.Pow(chunkVolume, 1f / 3f));
-                        int slicesY = Mathf.FloorToInt(meshBounds.size.y / Mathf.Pow(chunkVolume, 1f / 3f));
-                        int slicesZ = Mathf.FloorToInt(meshBounds.size.z / Mathf.Pow(chunkVolume, 1f / 3f));
+                        int slicesX = (int)Math.Floor(meshBounds.size.x / (float)Math.Pow(chunkVolume, 1f / 3f));
+                        int slicesY = (int)Math.Floor(meshBounds.size.y / (float)Math.Pow(chunkVolume, 1f / 3f));
+                        int slicesZ = (int)Math.Floor(meshBounds.size.z / (float)Math.Pow(chunkVolume, 1f / 3f));
 
                         fractureTool.slicing(0, new() { slices = new Vector3Int(slicesX, slicesY, slicesZ), angle_variations = randomness * 1.1f, offset_variations = randomness * 0.6f }, false);
                     }
@@ -2543,7 +2633,6 @@ namespace zombDestruction
                     {
                         //extract the mesh and verify it
                         newMeshesTemp.Add(ExtractChunkMesh(fractureTool, i));
-                        //if (FractureHelperFunc.IsMeshValid(newMeshesTemp[^1], false, worldScaleDis) == false)
                         if (FracHelpFunc.IsMeshValid(newMeshesTemp[^1], true, worldScaleDis) == false) //is true better?
                         {
                             if (loopMaxAttempts > 0)
@@ -2579,7 +2668,6 @@ namespace zombDestruction
                 //warn if unable to frac a chunk
                 if (meshIsValid == false || hadInvalidChunkPart == true)
                 {
-                    //Debug.LogError("Unable to properly fracture chunk " + nextOgMeshId + " of " + transform.name + " (Some parts of the mesh may be missing)");
                     Debug.LogWarning("Chunk " + nextOgMeshId + " of " + transform.name + " was difficult to fracture (Some parts of the mesh may be missing)");
                 }
             }
@@ -2604,9 +2692,9 @@ namespace zombDestruction
         {
             //Get all the meshes to fracture
             List<FracSource> meshesToFrac = new();
-            foreach (Renderer rend in obj.GetComponentsInChildren<Renderer>(true))
+            foreach (MeshRenderer rend in obj.GetComponentsInChildren<MeshRenderer>(true))
             {
-                if (rend.gameObject.activeInHierarchy == false) continue;
+                if (rend.gameObject.activeInHierarchy == false || rend.enabled == false) continue;
 
                 FracSource newToFrac = new();
 
@@ -2619,9 +2707,15 @@ namespace zombDestruction
                         return null;
                     }
 
+                    if (meshF.sharedMesh == null)
+                    {
+                        Debug.LogError("The mesh filter attatched to " + meshF.transform.name + " has no mesh assigned to it");
+                        return null;
+                    }
+
                     newToFrac.meshW = Instantiate(meshF.sharedMesh);
                 }
-                else continue; //ignore if no MeshRenderer with meshfilter or skinnedMeshRenderer
+                else continue; //ignore if no MeshRenderer with meshfilter
 
                 if (FracHelpFunc.IsMeshValid(newToFrac.meshW, false, worldScaleDis) == false) continue; //continue if mesh is invalid
 
@@ -2663,7 +2757,7 @@ namespace zombDestruction
                 return meshesToFrac;
             }
 
-            //Debug fix later, splitDisconnectedFaces causes textures/uvs to break (SplitMeshInTwo() seems to be cause of issue!?)
+            //Debug fix later, splitDisconnectedFaces causes textures/uvs to break (SplitMeshInTwo() seems to be cause of issue!?), should be fixed?
             //split meshes into chunks
             List<FracSource> splittedMeshes;
             for (int i = meshesToFrac.Count - 1; i >= 0; i--)
@@ -2700,8 +2794,6 @@ namespace zombDestruction
         /// <summary>
         /// Splits the given mesh into chunks
         /// </summary>
-        /// <param name="meshToSplit"></param>
-        /// <returns></returns>
         private List<FracSource> Gen_splitMeshIntoChunks(FracSource meshToSplit, float worldScaleDis = 0.0001f)
         {
             if (useGroupIds == false && splitDisconnectedFaces == false) return new() { meshToSplit };
@@ -2814,10 +2906,8 @@ namespace zombDestruction
                 lowestTransportCapacity = destructionMaterials[i].desProps.stenght;
             }
 
-            //if (groupDataDefualt.transportCapacity < lowestTransportCapacity) lowestTransportCapacity = groupDataDefualt.transportCapacity;
-
             //setup compute destruction
-            interpolationSpeedActual = interpolationSpeedTarget;
+            interpolationSpeedActual = interpolationSpeedTarget * 0.9f;//Multiply to make sure gpu speed is updated atleast once
             ComputeDestruction_setup();
 
             //setup gpu readback
@@ -2926,7 +3016,8 @@ namespace zombDestruction
             if (des_deformedParts[1 - des_deformedPartsIndex].Count > 0 || gpuMeshRequest_do == true) UpdateGpuMeshReadback();
 
             //Interpolate gpu mesh
-            interpolationSpeedActual = Mathf.MoveTowards(interpolationSpeedActual, interpolationSpeedTarget, interpolationSharpness * Time.deltaTime);
+            bool newSpeed = interpolationSpeedActual != interpolationSpeedTarget;
+            if (newSpeed == true) interpolationSpeedActual = Mathf.MoveTowards(interpolationSpeedActual, interpolationSpeedTarget, interpolationSharpness * Time.deltaTime);
 
             if (gpuIsReady == true && interpolationSpeedTarget >= 0.0f
 #if UNITY_EDITOR
@@ -2934,7 +3025,8 @@ namespace zombDestruction
 #endif
                 )
             {
-                computeDestructionSolver.SetFloat("speedDelta", Mathf.Min(interpolationSpeedActual * Time.deltaTime, 1.0f));
+                if (newSpeed == true) computeDestructionSolver.SetFloat("speedDelta", interpolationSpeedActual == interpolationSpeedTarget
+                    ? FracGlobalSettings.smoothLerp : Mathf.Min(interpolationSpeedActual * Time.deltaTime, 1.0f));
                 computeDestructionSolver.Dispatch(cpKernelId_InterpolateSkinDef, fracRendDividedVerCount, 1, 1);
             }
         }
@@ -3026,9 +3118,10 @@ namespace zombDestruction
             if (jGTD_fracBoneTrans.isCreated == true) jGTD_fracBoneTrans.Dispose();
             if (jGTD_job.fracBonesLToW.IsCreated == true) jGTD_job.fracBonesLToW.Dispose();
             if (jGTD_job.fracBonesPosW.IsCreated == true) jGTD_job.fracBonesPosW.Dispose();
+            if (jGTD_job.partIsDisabled.IsCreated == true) jGTD_job.partIsDisabled.Dispose();
             if (jGTD_job.fracBonesLocValue.IsCreated == true) jGTD_job.fracBonesLocValue.Dispose();
 
-            //disepose computeDestruction job
+            //disepose computeDestruction job 
             if (jCDW_job.structPosL.IsCreated == true) jCDW_job.structPosL.Dispose();
             if (jCDW_job.partsParentI.IsCreated == true) jCDW_job.partsParentI.Dispose();
             if (jCDW_job.kinematicPartIndexes.IsCreated == true) jCDW_job.kinematicPartIndexes.Dispose();
@@ -3043,7 +3136,9 @@ namespace zombDestruction
             if (jCDW_job.partsNewParentI.IsCreated == true) jCDW_job.partsNewParentI.Dispose();
             if (jCDW_job.defOffsetW.IsCreated == true) jCDW_job.defOffsetW.Dispose();
             if (jCDW_job.defPoints.IsCreated == true) jCDW_job.defPoints.Dispose();
+            if (jCDW_job.defBendForce.IsCreated == true) jCDW_job.defBendForce.Dispose();
             if (jCDW_job.deformedPartsI.IsCreated == true) jCDW_job.deformedPartsI.Dispose();
+            if (jCDW_job.parentPartCount.IsCreated == true) jCDW_job.parentPartCount.Dispose();
         }
 
         private int cpKernelId_ComputeSkinDef = -1;
@@ -3237,8 +3332,8 @@ namespace zombDestruction
             jCDW_job.desSources = new NativeArray<DestructionSource>(0, Allocator.Persistent);
             jCDW_job.desProps = destructionMaterials.Select(desMat => desMat.desProps).ToList().ToNativeArray(Allocator.Persistent);
             jCDW_job.bendProps = destructionMaterials.Select(desMat => desMat.bendProps).ToList().ToNativeArray(Allocator.Persistent);
-            jCDW_job.partsToBreak = new NativeHashMap<int, DesPartToBreak>(8, Allocator.Persistent);
-            jCDW_job.newParentsData = new NativeHashMap<byte, DesNewParentData>(4, Allocator.Persistent);
+            jCDW_job.partsToBreak = new NativeParallelHashMap<int, DesPartToBreak>(8, Allocator.Persistent);
+            jCDW_job.newParentsData = new NativeParallelHashMap<byte, DesNewParentData>(4, Allocator.Persistent);
             jCDW_job.partsNewParentI = new NativeArray<byte>(allParts.Count, Allocator.Persistent);
             jCDW_job.defOffsetW = new NativeArray<Vector3>(allParts.Count, Allocator.Persistent);
             jCDW_job.optMainPhyType = phyMainOptions.mainPhysicsType;
@@ -3302,6 +3397,7 @@ namespace zombDestruction
             {
                 if (jCDW_job.desSources.IsCreated == true) jCDW_job.desSources.Dispose();
                 desSLenght = desOCount;
+
                 jCDW_job.desSources = new NativeArray<DestructionSource>(desSLenght, Allocator.Persistent);
             }
 
@@ -3343,7 +3439,7 @@ namespace zombDestruction
                         Vector3 offset = (impDis * fixedDeltaTime * impDir);
                         float offsetDis = offset.magnitude;
                         int hitCount = Physics.RaycastNonAlloc(desP.impPosW - offset, impDir, rayHits, impDis + offsetDis, globalHandler.groundLayers, QueryTriggerInteraction.Ignore);
-                        bool isValid = false;
+                        //bool isValid = false;
 
                         if (hitCount == 0) continue;
                         foreach (RaycastHit nHit in rayHits)
@@ -3351,7 +3447,7 @@ namespace zombDestruction
                             var fracD = globalHandler.TryGetFracPartFromColInstanceId(nHit.colliderInstanceID);
                             if (fracD != null && fracD.fracThis == this)
                             {
-                                isValid = true;
+                                //isValid = true;
                                 continue;
                             }
 
@@ -3361,12 +3457,12 @@ namespace zombDestruction
                             if (hDis < desP.disToWall) desP.disToWall = hDis;
                         }
 
-                        if (isValid == false)
-                        {
-                            //Debug.Log("Invalid");
-                            //desP.force = 0.0f;//Seems to make stuff more stable, if we run into issues that stuff dont break try removing this
-                            //desP.disToWall = 0.00001f;
-                        }
+                        //if (isValid == false)
+                        //{
+                        //    Debug.Log("Invalid");
+                        //    desP.force = 0.0f;//Seems to make stuff more stable, if we run into issues that stuff dont break try removing this
+                        //    desP.disToWall = 0.00001f;//We did run into issues of stuff not breaking, I think that fact overweight the advatage of more stable 
+                        //}
                         desPairs[desPI] = desP;
                     }
 #pragma warning restore CS0162
@@ -3534,15 +3630,15 @@ namespace zombDestruction
             /// <summary>
             /// Contains all part indexes that are kinematic
             /// </summary>
-            public NativeHashSet<int> kinematicPartIndexes;
+            public NativeParallelHashSet<int> kinematicPartIndexes;
             public NativeArray<DestructionSource> desSources;
             public NativeList<FracStruct> fStructs;
             public NativeList<int> partIToDesMatI;
             public NativeArray<DestructionMaterial.DesProperties> desProps;
             public NativeArray<DestructionMaterial.BendProperties> bendProps;
             public NativeArray<Matrix4x4>.ReadOnly bonesLToW;
-            public NativeHashMap<int, DesPartToBreak> partsToBreak;
-            public NativeHashMap<byte, DesNewParentData> newParentsData;
+            public NativeParallelHashMap<int, DesPartToBreak> partsToBreak;
+            public NativeParallelHashMap<byte, DesNewParentData> newParentsData;
             public NativeArray<byte> partsNewParentI;
 
             /// <summary>
@@ -3563,6 +3659,9 @@ namespace zombDestruction
 
             public unsafe void Execute()
             {
+                //We may wanna rewrite the stress solver to use a more physically accurate approach? The only advantage of my own solver is that it does not need iterations,
+                //it just solves it instatly but severly faked. If rewrite may take more inspiration from nvBlast
+                //https://github.com/NVIDIAGameWorks/Blast/blob/master/sdk/extensions/stress/source/NvBlastExtStressSolver.cpp
                 //Since its useless and you cant access fields from localLocal functions, I have to assign it like this
                 var _desSources = desSources;
                 var _partsParentI = partsParentI;
@@ -3587,7 +3686,7 @@ namespace zombDestruction
                 _partsToBreak.Clear();
                 _newParentsData.Clear();
                 NativeArray<float> partsMoveMass = new(partCount, Allocator.Temp); //The resistance each part can make to movement
-                NativeHashSet<int> partsThatWillBreak = new(8, Allocator.Temp);
+                NativeParallelHashSet<int> partsThatWillBreak = new(8, Allocator.Temp);
                 float allTotImpForces = 0.0f;
 
                 //get all parts world position
@@ -3599,7 +3698,7 @@ namespace zombDestruction
                 }
 
                 //Loop all sources and compute them
-                NativeHashMap<int, byte> impPartIToImpSourceI = new(8, Allocator.Temp);
+                NativeParallelHashMap<int, byte> impPartIToImpSourceI = new(8, Allocator.Temp);
                 _defPoints.Clear();
 
                 for (byte sourceI = 0; sourceI < desSources.Length; sourceI++)
@@ -3707,14 +3806,18 @@ namespace zombDestruction
                 void CalcChunks()
                 {
                     //declare native containers and clear
+#if UNITY_2023_3_OR_NEWER
                     int breakCount = _partsToBreak.Count;
+#else
+                    int breakCount = _partsToBreak.Count();
+#endif
                     if (breakCount == 0) return;
 
-                    NativeHashSet<int> p_breakSources = new(breakCount, Allocator.Temp);
+                    NativeParallelHashSet<int> p_breakSources = new(breakCount, Allocator.Temp);
                     NativeArray<int> p_parts = new(partCount - breakCount, Allocator.Temp);
-                    NativeHashSet<int> p_partsUsed = new(p_parts.Length, Allocator.Temp);
+                    NativeParallelHashSet<int> p_partsUsed = new(p_parts.Length, Allocator.Temp);
                     NativeArray<int> toBreakKeys = _partsToBreak.GetKeyArray(Allocator.Temp);
-                    NativeHashSet<int> kinSourceParentsI = new(2, Allocator.Temp);
+                    NativeParallelHashSet<int> kinSourceParentsI = new(2, Allocator.Temp);
                     FracHelpFunc.SetWholeNativeArray<byte>(ref _partsNewParentI, 0);
                     byte nextNewParentI = 0;
                     float totUsedForce = 0.0f;
@@ -3795,7 +3898,11 @@ namespace zombDestruction
                         }
 
                         //get break dir and break force
-                        int resistanceLayer = Mathf.CeilToInt(avgBreakSourceLayerI / (float)p_breakSources.Count) + 1;
+#if UNITY_2023_3_OR_NEWER
+                        int resistanceLayer = (int)Math.Ceiling(avgBreakSourceLayerI / (float)p_breakSources.Count) + 1;
+#else
+                        int resistanceLayer = (int)Math.Ceiling(avgBreakSourceLayerI / (float)p_breakSources.Count()) + 1;
+#endif
                         float breakForce = 0.0f;
                         Vector3 breakVel = Vector3.zero;
                         Vector3 breakPos = Vector3.zero;
@@ -3867,7 +3974,11 @@ namespace zombDestruction
                     }
 
                     //get the velocity broken parts should get
+#if UNITY_2023_3_OR_NEWER
                     breakCount = _partsToBreak.Count;
+#else
+                    breakCount = _partsToBreak.Count();
+#endif
                     if (toBreakKeys.Length != breakCount) toBreakKeys = _partsToBreak.GetKeyArray(Allocator.Temp);
                     float breakForceLeft = (allTotImpForces - totUsedForce) / breakCount;
                     if (breakForceLeft < 0.0f)
@@ -3891,9 +4002,13 @@ namespace zombDestruction
                     }
 
                     //get what parent to keep (Keep the one with most parts as it is the slowest to set)
+#if UNITY_2023_3_OR_NEWER
                     int newPCount = _newParentsData.Count;
+#else
+                    int newPCount = _newParentsData.Count();
+#endif
                     NativeArray<byte> newPKeys = _newParentsData.GetKeyArray(Allocator.Temp);
-                    NativeHashSet<int> usedSourcePI = new(newPCount, Allocator.Temp);
+                    NativeParallelHashSet<int> usedSourcePI = new(newPCount, Allocator.Temp);
 
                     for (int newPI = 0; newPI < newPCount; newPI++)
                     {
@@ -4032,9 +4147,9 @@ namespace zombDestruction
 
                     //get the mass each part would need to "push"
                     int usedStartCount = Mathf.NextPowerOfTwo(partCount / nextLayerI);
-                    NativeHashSet<int> usedPI = new(partCount, Allocator.Temp);
+                    NativeParallelHashSet<int> usedPI = new(partCount, Allocator.Temp);
                     NativeList<int> usedTPI = new(usedStartCount, Allocator.Temp);
-                    NativeHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
+                    NativeParallelHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
 
                     //bool alwaysKin = (desSource.parentI == 0 && _optMainPhyType == OptMainPhysicsType.orginalIsKinematic) || _optMainPhyType == OptMainPhysicsType.alwaysKinematic;
                     //We currently dont know if a part is kinematic if orginalIsManuall or Manuall is selected,
@@ -4116,7 +4231,7 @@ namespace zombDestruction
                             //transDir /= usedNeighbourCount;
                             transDir.Normalize();//Maybe we should use the best dir instead of avg?
                             Vector3 partVelDir = partsVelDir[pI];
-                            pTransCap *= Mathf.Clamp01(Mathf.Abs(Vector3.Dot(partVelDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
+                            pTransCap *= Mathf.Clamp01(Math.Abs(Vector3.Dot(partVelDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
 
                             if (pTransCap <= forceRequired)
                             {
@@ -4208,6 +4323,11 @@ namespace zombDestruction
         private Matrix4x4[] gpuMeshBonesLToW;
         private GpuMeshVertex[] gpuMeshVertexData;
 
+        /// <summary>
+        /// If > 0 FracGlobalSettings.maxColliderUpdatesPerFrame will be ignored next sync (Reduced by one every sync)
+        /// </summary>
+        [System.NonSerialized] public int canSyncAllCollidersNextSyncs = 0;
+
         private void UpdateGpuMeshReadback()
         {
             //get mesh data from readback
@@ -4233,10 +4353,16 @@ namespace zombDestruction
                 }
 
                 //Update colliders from new mesh
-                byte maxLoops = FracGlobalSettings.maxColliderUpdatesPerFrame;
+                int maxLoops = FracGlobalSettings.maxColliderUpdatesPerFrame;
+                if (canSyncAllCollidersNextSyncs > 0)
+                {
+                    maxLoops = allParts.Count;
+                    canSyncAllCollidersNextSyncs--;
+                }
+
                 while (maxLoops > 0 && des_deformedParts.Length > 0)
                 {
-                    maxLoops--;
+                    maxLoops--;//We should be able to bake colliders on a different thread but requires too much rewrite
                     int partI = des_deformedParts[oppositeI].FirstOrDefault();
                     if (des_deformedParts[oppositeI].Remove(partI) == false) break;
 
@@ -4354,7 +4480,7 @@ namespace zombDestruction
         }
 
 
-        #endregion ComputeDestruction
+#endregion ComputeDestruction
 
 
 
@@ -4748,6 +4874,7 @@ namespace zombDestruction
             int parentI = allPartsParentI[partI];
             DestructionMaterial.DesProperties desProp = GetDesMatFromIntId(allParts[partI].groupIdInt).desProps;
             float velSpeed = velocity.magnitude;
+
             if (parentI < 0)
             {
                 //if no parent, it cant break so it has infinit stenght
@@ -4760,18 +4887,14 @@ namespace zombDestruction
             }
 
             if (localPathToRbIndex.TryGetValue(partsLocalParentPath[partI], out int rbI) == false) rbI = -1;
-            //float chockForce = desProp.stenght * (1.0f - desProp.chockResistance);
+
             float impForce = rbI < 0 || allParents[parentI].parentRbs[rbI].rbIsKin == true ?
-                //float.MaxValue : ((velSpeed * allParents[parentI].parentMass) + chockForce);
-                float.MaxValue : ((velSpeed * allParents[parentI].parentMass));
+                float.MaxValue : ((velSpeed * allParents[parentI].parentDesMass));
 
             FracStruct fStruct = jCDW_job.fStructs[partI];
-
-
-            //transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation)) + chockForce;
-            //transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation));
             transCap = (desProp.stenght - (desProp.stenght * fStruct.maxTransportUsed * desProp.damageAccumulation))
                 + (impForce * (1.0f - desProp.chockResistance));
+            transCap *= FracGlobalSettings.guessStrenghtApplyMultiplier;
             impForce -= impForce * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
 
             return impForce;
@@ -4793,6 +4916,7 @@ namespace zombDestruction
             force -= force * bouncyness * FracGlobalSettings.bouncynessEnergyConsumption;
             transCap = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
             transCap -= transCap * bendProp.bendyness;
+            transCap *= FracGlobalSettings.guessStrenghtMultiplier;
             return force > transCap;
         }
 
@@ -4807,7 +4931,7 @@ namespace zombDestruction
 
             float transCap = desProp.stenght - (desProp.stenght * jCDW_job.fStructs[partI].maxTransportUsed * desProp.damageAccumulation);
             transCap -= transCap * bendProp.bendyness;
-            return transCap;
+            return transCap * FracGlobalSettings.guessStrenghtMultiplier;
         }
 
         /// <summary>
@@ -4824,6 +4948,23 @@ namespace zombDestruction
             }
 
             return connectionCount;
+        }
+
+        public void TryLoadAssignedSaveState()
+        {
+            if (saveState == null) return;
+            saveState.Load(this);
+        }
+
+        public void TrySaveAssignedSaveState()
+        {
+            if (saveState == null) return;
+            saveState.Save(this, false);
+        }
+
+        public void SetSaveStateAsset(FracSavedState saveStateAsset)
+        {
+            saveState = saveStateAsset;
         }
 
         #endregion HelperFunctions

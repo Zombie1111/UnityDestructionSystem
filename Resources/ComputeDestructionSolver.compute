@@ -205,6 +205,7 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     
             meshD.vertexL += mul((float3x3) inverse(boneMatrixLToW), offsetW);
             //meshD.normalL is currently not deformed, we probably also need mesh triangels to be able to calculate new normal??
+            //I have not noticed any significant artifacts as long as stuff is only deformed a reasonable amount, so not worth implementing normal deformation???
             fr_meshData[id.x] = meshD;
 
 #if SUPPORTVERTEXCOLORS_ON
@@ -228,9 +229,7 @@ void ComputeSkinDef(uint3 id : SV_DispatchThreadID)
     }
     
     //Write updated vertics and normals to mesh
-    //verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2, asuint(mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz));
     meshVerx.pos = mul(fracRendWToL, mul(boneMatrixLToW, float4(meshD.vertexL, 1.0))).xyz;
-    //verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2, asuint(mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL))));
     meshVerx.nor = mul((float3x3) fracRendWToL, mul((float3x3) boneMatrixLToW, meshD.normalL));
     meshVertexs[id.x] = meshVerx;
 }
@@ -252,20 +251,20 @@ void InterpolateSkinDef(uint3 id : SV_DispatchThreadID)
     float3 oldVPos = asfloat(verNors.Load3((id.x * VERTEX_32BIT_STRIDE) << 2));
     
     verNors.Store3((id.x * VERTEX_32BIT_STRIDE) << 2,
-        asuint(vec3LerpMin(oldVPos, meshVerx.pos, speedDelta, speedDelta * 2.0f)));
+        asuint(lerp(oldVPos, meshVerx.pos, speedDelta)));
     
     //interpolate normal
     float3 oldVNor = asfloat(verNors.Load3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2));
     
     verNors.Store3(((id.x * VERTEX_32BIT_STRIDE) + NORMAL_OFFSET) << 2,
-        asuint(vec3LerpMin(oldVNor, meshVerx.nor, speedDelta, speedDelta * 2.0f)));
+        asuint(lerp(oldVNor, meshVerx.nor, speedDelta)));
     
     #if SUPPORTVERTEXCOLORS_ON
     //interpolate color
     float4 oldVCol = asfloat(verNors.Load4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2));
     
     verNors.Store4(((id.x * VERTEX_32BIT_STRIDE) + COLOR_OFFSET) << 2,
-        asuint(float4(oldVCol.rgb, floatLerpMin(oldVCol.a, meshVerx.colA, speedDelta, speedDelta * 2.0f))));
+        asuint(float4(oldVCol.rgb, lerp(oldVCol.a, meshVerx.colA, speedDelta))));
     #endif
 }
 

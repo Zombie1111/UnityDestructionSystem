@@ -26,7 +26,7 @@ namespace zombDestruction
         [System.NonSerialized] public float rbMass;
 
         //Add custom properties here
-        //public float buoyancy; //Example
+        public float buoyancy;
     }
 
 
@@ -44,7 +44,7 @@ namespace zombDestruction
         /// <summary>
         /// The total mass of all parts that uses this parent
         /// </summary>
-        public float parentMass;
+        public float parentDesMass;
 
         /// <summary>
         /// If > 0 the parent is kinematic, usually also the total number of kinematic parts in this parent

@@ -19,7 +19,7 @@ namespace GameLogic
 
         private void Start()
         {
-            globalF = GameObject.FindObjectOfType<zombDestruction.DestructionHandler>();
+            globalF = GameObject.FindAnyObjectByType<zombDestruction.DestructionHandler>(FindObjectsInactive.Include);
         }
 
         /// <summary>
@@ -40,7 +40,7 @@ namespace GameLogic
             newO.layer = 5;
             Rigidbody rb = newO.AddComponent<Rigidbody>();
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
             rb.linearVelocity = shootDir * bulletMoveSpeed;
 #else
             rb.velocity = shootDir * bulletMoveSpeed;
@@ -81,7 +81,7 @@ namespace GameLogic
             {
                 if (Physics.Raycast(camTrans.position, camTrans.forward, out RaycastHit nHit, 100.0f, maskGround, QueryTriggerInteraction.Ignore) == true)
                 {
-                    DestructionHandler.TryGetGlobalHandler(gameObject).RegisterExplosion(
+                    DestructionHandler.TryGetDestructionHandler(gameObject).RegisterExplosion(
                         nHit.point + (nHit.normal * 0.51f), nHit.normal, explosionForce, explosionSpeed, maskGround, out _, out _, 0.5f, explosionRadius, 32);
                 }
             }

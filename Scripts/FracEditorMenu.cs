@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using Unity.EditorCoroutines.Editor;
+using UnityEngine.Assertions.Must;
 
 namespace zombDestruction
 {
@@ -54,8 +55,8 @@ namespace zombDestruction
             return selectedFracs;
         }
 
-        [MenuItem("Tools/Destruction/CopyPropertiesFromLastSelected")]
-        private static void CopyPropertiesFromLastSelected()
+        [MenuItem("Tools/Destruction/SetSelectedAsCopySource")]
+        private static void SetSelectedAsCopySource()
         {
             if (Selection.activeTransform == null)
             {
@@ -65,9 +66,38 @@ namespace zombDestruction
 
             if (Selection.activeTransform.TryGetComponent<DestructableObject>(out var fThis) == false)
             {
-                Debug.LogError("The last selected object is not a fracture");
+                Debug.LogError("The last selected object is not destructable");
                 return;
             }
+
+            DestructionHandler desHandler = DestructionHandler.TryGetDestructionHandler(fThis.gameObject);
+            if (desHandler == null) return;
+
+            desHandler.desCopySource = fThis;
+            Debug.Log(fThis.transform.name + " is set as copy source!");
+        }
+
+        [MenuItem("Tools/Destruction/SetSelectedFromCopySource")]
+        private static void SetSelectedFromCopySource()
+        {
+            if (Selection.activeGameObject == null)
+            {
+                Debug.LogError("No object selected");
+                return;
+            }
+
+            DestructionHandler desHandler = DestructionHandler.TryGetDestructionHandler(Selection.activeGameObject);
+            if (desHandler == null) return;
+            if (desHandler.desCopySource == null)
+            {
+                Debug.LogError("No copy source has been set!");
+                return;
+            }
+
+            var fThis = desHandler.desCopySource;
+
+            if (fThis.destructionMaterials.Count > (fThis.fractureIsValid == true ? 1 : 0))
+                Debug.Log("Only the defualt destruction material is copied!");
 
             int copyCount = 0;
 
@@ -75,13 +105,24 @@ namespace zombDestruction
             {
                 if (trans == fThis.transform) continue;
                 if (trans.TryGetComponent<DestructableObject>(out var frac) == false) continue;
-                copyCount++;
+                if (frac.fractureIsValid == true)
+                {
+                    Debug.Log("Copied fracture properties to " + trans.name + " while it was fractured, I recommend you regenerate the fracture!");
+                }
 
+                copyCount++;
                 frac.CopyFracturePropertiesFrom(fThis);
+
+                if (frac.GetFracturePrefabType() == 1)
+                {
+                    string prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(frac.gameObject);
+                    PrefabUtility.ApplyObjectOverride(frac, prefabPath, InteractionMode.AutomatedAction);
+                }
+
+                EditorUtility.SetDirty(frac);
             }
 
-            //Debug.Log(Selection.gameObjects);
-            Debug.Log("Copied fracture properties from " + fThis.transform.name + " to " + copyCount + " other fracture objects");
+            Debug.Log("Copied fracture properties from " + fThis.transform.name + " to " + copyCount + " other fracture object(s)");
         }
 
         /// <summary>
