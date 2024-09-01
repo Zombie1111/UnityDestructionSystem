@@ -1433,7 +1433,6 @@ namespace zombDestruction
                     if (keepRest == false && (child.GetComponentInChildren<MeshRenderer>(true) == null || child.gameObject.activeInHierarchy == false)) continue;
 
                     //We only support meshRenderers
-                    Debug.Log(child.name + " " + keepRest + " " + child.GetComponentInChildren<MeshRenderer>(true));
                     keepRest = true;
                     Transform newTrans = new GameObject(child.name + "_parentChild" + i).transform;
                     newTrans.SetParent(templateTrans);
@@ -4950,18 +4949,27 @@ namespace zombDestruction
             return connectionCount;
         }
 
-        public void TryLoadAssignedSaveState()
+        /// <summary>
+        /// Returns true if successfully loaded the assigned saveState asset (Set assigned saveState asset using SetSaveStateAsset())
+        /// </summary>
+        public bool TryLoadAssignedSaveState()
         {
-            if (saveState == null) return;
-            saveState.Load(this);
+            if (saveState == null) return false;
+            return saveState.Load(this);
         }
 
-        public void TrySaveAssignedSaveState()
+        /// <summary>
+        /// Returns true if successfully saved the assigned saveState asset (Set assigned saveState asset using SetSaveStateAsset())
+        /// </summary>
+        public bool TrySaveAssignedSaveState()
         {
-            if (saveState == null) return;
-            saveState.Save(this, false);
+            if (saveState == null) return false;
+            return saveState.Save(this, false);
         }
 
+        /// <summary>
+        /// Sets the saveState asset to the given asset
+        /// </summary>
         public void SetSaveStateAsset(FracSavedState saveStateAsset)
         {
             saveState = saveStateAsset;
