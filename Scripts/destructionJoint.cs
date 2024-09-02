@@ -226,7 +226,7 @@ namespace zombDestruction
             desJ.connectionCount--;
             if (desJ.connectionCount > 0) return;
 
-            Destroy(desJ.phyJoint);
+            DestroyImmediate(desJ.phyJoint);
             jointIdToDesJoint.Remove(desJId);
         }
 

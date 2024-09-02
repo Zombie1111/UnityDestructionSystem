@@ -29,7 +29,7 @@ public class reckBallRestore : MonoBehaviour
     {
         timeSinceLoaded = 0.0f;
 
-        ballTrans.position = ballOgPos;
+        //ballTrans.position = ballOgPos;
         desBall.TryLoadAssignedSaveState();
         desBuilding.TryLoadAssignedSaveState();
     }

@@ -2206,7 +2206,7 @@ namespace zombDestruction
 
                 //remove rigidbody
                 //if (allPartsCol[partI].attachedRigidbody != null) Destroy(allPartsCol[partI].attachedRigidbody);
-                if (allPartsCol[partI].TryGetComponent(out Rigidbody rb) == true) Destroy(rb);//We cant use attachedRigidbody since it may be the parents rigidbody
+                if (allPartsCol[partI].TryGetComponent(out Rigidbody rb) == true) DestroyImmediate(rb);//We cant use attachedRigidbody since it may be the parents rigidbody
             }
         }
 
@@ -4114,6 +4114,7 @@ namespace zombDestruction
 
                     //Get each part distance to any 90% impact
                     int oI = 0;
+                    Vector3 conDir;
 
                     while (oI < nextOrderI)
                     {
@@ -4124,7 +4125,7 @@ namespace zombDestruction
                         {
                             int partI = orderIToPartI[oI];
                             FracStruct fPart = _fStructs[partI];
-                            Vector3 partVelDir = partsVelDir[partI].normalized;
+                            Vector3 partVelDir = partsVelDir[partI];
                             Vector3 partWPos = partsWPos[partI];
                             oI++;
 
@@ -4134,7 +4135,9 @@ namespace zombDestruction
 
                                 if (partIToLayerI[npI] != 0 || _partsParentI[npI] != desSource.parentI || _partsToBreak.ContainsKey(npI) == true) continue;
 
-                                partsVelDir[npI] += (partVelDir * 2.0f) + (partsWPos[npI] - partWPos).normalized;
+                                conDir = (partsWPos[npI] - partWPos).normalized;
+                                if (Vector3.Dot(conDir, velDir) < 0.0f) conDir *= -1.0f;
+                                partsVelDir[npI] += ((partVelDir * 2.0f) + conDir).normalized;//Orient partVelDir towards connection dir
                                 partIToLayerI[npI] = nextLayerI;
                                 orderIToPartI[nextOrderI] = npI;
                                 nextOrderI++;
@@ -4150,10 +4153,8 @@ namespace zombDestruction
                     NativeList<int> usedTPI = new(usedStartCount, Allocator.Temp);
                     NativeParallelHashSet<int> usedNPI = new(usedStartCount, Allocator.Temp);
 
-                    //bool alwaysKin = (desSource.parentI == 0 && _optMainPhyType == OptMainPhysicsType.orginalIsKinematic) || _optMainPhyType == OptMainPhysicsType.alwaysKinematic;
                     //We currently dont know if a part is kinematic if orginalIsManuall or Manuall is selected,
                     //I currently pretend that they are always dynamic, should rarely if ever cause a problem.
-
                     for (oI = partCount - 1; oI >= 0; oI--)
                     {
                         int partI = orderIToPartI[oI];
@@ -4227,7 +4228,6 @@ namespace zombDestruction
                             forceRequired = Mathf.Min((velDis * partsMoveMass[pI]) + (forceRequired - (forceRequired * Mathf.Clamp01(desProp.chockResistance * layerI))), forceRequired);
                             forceRequired -= forceRequired * Mathf.Clamp01((layerI - 1) * desProp.falloff);
 
-                            //transDir /= usedNeighbourCount;
                             transDir.Normalize();//Maybe we should use the best dir instead of avg?
                             Vector3 partVelDir = partsVelDir[pI];
                             pTransCap *= Mathf.Clamp01(Math.Abs(Vector3.Dot(partVelDir, transDir)) + FracGlobalSettings.transDirInfluenceReduction);
