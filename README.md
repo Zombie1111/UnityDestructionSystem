@@ -3,11 +3,11 @@
 ## Overview
 The primary purpose of this project is to provide a efficient way to add destruction and deformation capabilities to medium sized objects like cars, robots or a wall. Its designed to work well with dynamic objects and scripting. This destruction solution is currently not designed to simulate a large building collapsing, for those purposes I suggest trying RayFire by RayFire Studios.
 
-![Gif showing small building being destroyed and restored](https://media.giphy.com/media/cOXCBgKDD1BoaWyAvL/giphy.gif)
+<img src="https://media.giphy.com/media/hIvqXY8HGMtml0vS1V/giphy.gif" width="200%" height="200%"/>
 
-![Gif showing mechanical spider being killed](https://media.giphy.com/media/0XjLDCdhNnC3LW9Nj3/giphy.gif)
+<img src="https://media.giphy.com/media/0XjLDCdhNnC3LW9Nj3/giphy.gif" width="200%" height="200%"/>
 
-![Gif showing boat crashing on beach](https://media.giphy.com/media/3EvyuUwIGKieDKzktM/giphy.gif)
+<img src="https://media.giphy.com/media/3EvyuUwIGKieDKzktM/giphy.gif" width="200%" height="200%"/>
 
 ## Key Features
 <ul>
