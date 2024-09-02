@@ -3,11 +3,11 @@
 ## Overview
 The primary purpose of this project is to provide a efficient way to add destruction and deformation capabilities to medium sized objects like cars, robots or a wall. Its designed to work well with dynamic objects and scripting. This destruction solution is currently not designed to simulate a large building collapsing, for those purposes I suggest trying RayFire by RayFire Studios.
 
-Gif showing small building being destroyed and restored
+![Gif showing small building being destroyed and restored](https://media.giphy.com/media/cOXCBgKDD1BoaWyAvL/giphy.gif)
 
-Gif showing car driving through wall
+![Gif showing mechanical spider being killed](https://media.giphy.com/media/0XjLDCdhNnC3LW9Nj3/giphy.gif)
 
-Gif showing mechanical spider being shot
+![Gif showing boat crashing on beach](https://media.giphy.com/media/3EvyuUwIGKieDKzktM/giphy.gif)
 
 ## Key Features
 <ul>
@@ -48,7 +48,7 @@ Gif showing mechanical spider being shot
   <li>Complete the General Setup</li>
   <li>Open Blender, import your mesh and install the addon found in the `Scipts/BlenderAddon/` folder</li>
   <li>Assign a vertex group too all vertics in your mesh. Maybe assign group A to a door and group B to the walls</li>
-  <li>Create a new vertex group that has a name that start with `link`. Assign the `link` vertex group to vertics that you want to be able to connect. Like the door hinges and the wall</li>
+  <li>Create a new vertex group that has a name that start with `link`. Assign the `link` vertex group to vertics that you want to be able to connect that are in different base vertex groups. Like the door hinges and the wall</li>
   <li>Press the `Setup vertex colors for unity fracture` button and export+import the mesh with vertex colors</li>
   <li>Select your DestructableObject and add a second destructionMaterial and make it affect groupIndex 1</li>
   <li>Add saveState and should work, joints</li>
