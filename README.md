@@ -3,11 +3,11 @@
 ## Overview
 The primary purpose of this project is to provide a efficient way to add destruction and deformation capabilities to medium sized objects like cars, robots or a wall. Its designed to work well with dynamic objects and scripting. This destruction solution is currently not designed to simulate a large building collapsing, for those purposes I suggest trying RayFire by RayFire Studios.
 
-<img src="https://media.giphy.com/media/hIvqXY8HGMtml0vS1V/giphy.gif" width="200%" height="200%"/>
+<img src="https://media.giphy.com/media/hIvqXY8HGMtml0vS1V/giphy.gif" width="100%" height="100%"/>
 
-<img src="https://media.giphy.com/media/0XjLDCdhNnC3LW9Nj3/giphy.gif" width="200%" height="200%"/>
+<img src="https://media.giphy.com/media/0XjLDCdhNnC3LW9Nj3/giphy.gif" width="100%" height="100%"/>
 
-<img src="https://media.giphy.com/media/3EvyuUwIGKieDKzktM/giphy.gif" width="200%" height="200%"/>
+<img src="https://media.giphy.com/media/3EvyuUwIGKieDKzktM/giphy.gif" width="100%" height="100%"/>
 
 ## Key Features
 <ul>
@@ -61,15 +61,19 @@ The `_Demo/` folder contains pratical exampels
 
 ## Technical Details
 **Fracturing**
+
 The DestructableObject is split into a bunch of small parts that can be moved independetly of each other, these parts are generated automatically from a source object using nvBlast. Parts that are next to each other are then connected forming a net that is used to solve the destruction. This processes is called fracturing and is normally done in the editor.
 
 **Rendering**
+
 The DestructableObject is rendered using a single meshRenderer and a compute shader that uses the mesh GPU Vertex Buffer to efficiently modify the mesh vertics and normals directly from the GPU. The compute shader works a bit like a skinnedMeshRender and uses the DestructableObject parts as bones. The compute shader also handels deformation by inputing deformation points and offsetting the vertices around the deformation points by a given amount (See `ComputeDestructionSolver.compute`).
 
 **Simulation**
+
  The destruction is simulated using my own severly faked algorythm. It computes the mass each part would need to push and the force needed to push the mass forward by X. If the part strenght is less than the force needed it breaks. The advatage of my algorythm is that it solves the destruction in a single iteration (See `CalcSource()` in `DestructableObject.cs`). The DestructableObject recieves most of its input from Physics.ContactModifyEvent (See `ModificationEvent()` in `DestructionHandler.cs`).
 
 **Performance**
+
 The destruction is computed on a background thread and I have not noticed any significant fps drops when destroying lots of objects even in the editor. 
 But based on my testing, the biggest performance impact simply comes from the normal unity physics engine and the fact that I cant set the transform parent or add components from a different thread. However since both these bottlenecks are cpu bound, they are mostly eliminated in a build using the IL2CPP backend and C++ Compiler Configuration set to Master. In a build with that configuration the biggest performance impact comes from the increased triangle count.
 
