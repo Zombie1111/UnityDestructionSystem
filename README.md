@@ -51,11 +51,14 @@ The primary purpose of this project is to provide a efficient way to add destruc
   <li>Create a new vertex group that has a name that start with `link`. Assign the `link` vertex group to vertics that you want to be able to connect that are in different base vertex groups. Like the door hinges and the wall</li>
   <li>Press the `Setup vertex colors for unity fracture` button and export+import the mesh with vertex colors</li>
   <li>Select your DestructableObject and add a second destructionMaterial and make it affect groupIndex 1</li>
-  <li>Add saveState and should work, joints</li>
+  <li>Add a DestructionJoint script to the door and assign the wall as connected transform. Create a Joint somewhere on a disabled gameobject and assign it as SourceJoint</li>
+  <li>Create empty gameobjects, position them on the door hinges and add them to the jointAnchors list</li>
+  <li>Create a saveState, assign it to the DestructableObject and save it, Tools->Destruction->CreateSaveStateAsset</li>
+  <li>Enter playmode and you should have a door that can open+close and restoring the object. See the `_Demo/swingDemo` scene for practical exampel</li>
 </ol>
 
 ## Documentation
-Most functions are documented and all parameters visible in the unity inspector have tooltips
+Most functions and parameters visible in the unity inspector are documented
 
 The `_Demo/` folder contains pratical exampels
 
@@ -76,9 +79,6 @@ The DestructableObject is rendered using a single meshRenderer and a compute sha
 
 The destruction is computed on a background thread and I have not noticed any significant fps drops when destroying lots of objects even in the editor. 
 But based on my testing, the biggest performance impact simply comes from the normal unity physics engine and the fact that I cant set the transform parent or add components from a different thread. However since both these bottlenecks are cpu bound, they are mostly eliminated in a build using the IL2CPP backend and C++ Compiler Configuration set to Master. In a build with that configuration the biggest performance impact comes from the increased triangle count.
-
-**Execution Order**
-
 
 ## License
 The original code and assets created for this project are licensed under CC BY-NC 4.0 - See the `LICENSE` file for more details.

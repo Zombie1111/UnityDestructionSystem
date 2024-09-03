@@ -164,50 +164,69 @@ namespace zombDestruction
 
         //fracture settings
         [Header("Fracture")]
+        [Tooltip("The asset to save the prefracture to, Create one in Tools->Destruction->CreateSaveAsset")]
         public FracSaveAsset saveAsset = null;
+        [Tooltip("If assigned you can save the state of the object and restore it later, Create one in Tools->Destruction->CreateSaveStateAsset")]
         [SerializeField] private FracSavedState saveState = null;
-        [SerializeField] private int fractureCount = 15;
-        [SerializeField] private bool dynamicFractureCount = true;
+        [Tooltip("The rough numder of parts to split the object into")]
+        [SerializeField] private int fractureCount = 200;
+        [Tooltip("If true the fractureCount is parts per cubic meter")]
+        [SerializeField] private bool dynamicFractureCount = false;
         [Tooltip("If < 1.0f, controls how random the angle of the cuts are. If >= 1.0f, voronoi is used")]
         [SerializeField][Range(0.0f, 1.0f)] private float randomness = 1.0f;
+        [Tooltip("The fracture seed, if < 0 a random seed is used")]
         [SerializeField] private int seed = -1;
-        public GenerationQuality generationQuality = GenerationQuality.normal;
+        [Tooltip("Only affects fracture performance, high is much slower and may give better result")]
+        public GenerationQuality generationQuality = GenerationQuality.high;
+        [Tooltip("If defualt the fractured mesh will be as similar as the source mesh as possible. If convex each part will be convex")]
         [SerializeField] private FractureRemesh remeshing = FractureRemesh.defualt;
 
         [Space(10)]
         [Header("Physics")]
+        [Tooltip("Not implemented")]
         public int maxColliderMergeCount = 6;//Not yet implemented, after lots of profilling,
                                              //By far biggest performance bottleneck seems to be unity physics,
                                              //only reasonable way I can think of to potentially fix it is to merge neighbour
                                              //colliders. Since its always convex that would mean less faces and less colliders
                                              //But would probably also mean way less accurate destruction input?
+        [Tooltip("The collider type each part will have")]
         [SerializeField] private ColliderType colliderType = ColliderType.mesh;
+        [Tooltip("Should part X not collide with its neighbours?")]
         [SerializeField] private SelfCollisionRule selfCollisionRule = SelfCollisionRule.ignoreNeighbours;
         public OptPhysicsMain phyMainOptions = new();
         [SerializeField] private OptPhysicsParts phyPartsOptions = new();
 
         [Space(10)]
         [Header("Destruction")]
+        [Tooltip("The interpolation speed when restoring object")]
         public float interpolationSpeedTarget = 10.0f;
+        [Tooltip("How fast interpolationSpeedActual will move towards interpolationSpeedTarget")]
         [SerializeField] private float interpolationSharpness = 5.0f;
         [System.NonSerialized] public float interpolationSpeedActual;
 
         [Space(10)]
         [Header("Material")]
+        [Tooltip("The material the inside of a fractured mesh should use if nameAddition fails, uses outside material if null")]
         [SerializeField] private Material insideMat_fallback = null;
+        [Tooltip("If a material is called outside material name + insideMat_nameAddition that material will be used as inside material")]
         [SerializeField] private string insideMat_nameAddition = "_inside";
+        [Tooltip("The destruction material to use if no other is specified in destructionMaterials list")]
         [SerializeField] private DefualtDesMatOptions defualtDestructionMaterial = new();
 
         [Space(10)]
         [Header("Advanced")]
-        [SerializeField] private bool splitDisconnectedFaces = false;
+        [Tooltip("If true, faces that are not connected will be fractured seperatly")]
+        [SerializeField] private bool splitDisconnectedFaces = true;
+        [Tooltip("If true, vertex groups assigned using my blender addon will used")]
         [SerializeField] private bool useGroupIds = false;
 #if UNITY_EDITOR
+        [Tooltip("If >= 0, the given vertex group index will be visualized in editor")]
         [SerializeField] private int visualizedGroupId = -1;
 #endif
         /// <summary>
         /// Contains all destruction materials, 0 is always defualt, > 0 is for groupIds that has overrides
         /// </summary>
+        [Tooltip("Used to add multiple materials to a single destructable object, requires voxel groups")]
         [SerializeField] internal List<DestructionMaterial> destructionMaterials = new();
 
         [System.Serializable]
@@ -392,18 +411,10 @@ namespace zombDestruction
             sphere
         }
 
-        private enum SelfDamageRule
-        {
-            ignoreNone = 0,
-            ignoreSource = 3,
-            ignoreSourceAndNeighbours = 4,
-            ignoreNeighbours = 2,
-            ignoreAll = 1
-        }
-
         [System.Serializable]
         public class OptPhysicsMain
         {
+            [Tooltip("If rigidbody should be kinematic or not. Manuall means the kinematic status it had before fracturing")]
             public OptMainPhysicsType mainPhysicsType = OptMainPhysicsType.overlappingIsManuall;
             public float massMultiplier = 0.5f;
             public GlobalRbData customRbProperties = new();
@@ -412,29 +423,21 @@ namespace zombDestruction
         [System.Serializable]
         private class OptPhysicsParts
         {
-            public OptPartPhysicsType partPhysicsType = OptPartPhysicsType.rigidbody_medium;
+            [Tooltip("Not implemented")]
+            public OptPartPhysicsType partPhysicsType = OptPartPhysicsType.rigidbody;
             public bool useGravity = true;
             public float massMultiplier = 4.0f;
             public float drag = 0.0f;
             public float angularDrag = 0.05f;
 
+            [Tooltip("How many % of the parts that becomes real when they break")]
             public float lifeChance = 1.0f;
-        }
-
-        private enum NormalRecalcMode
-        {
-            normalsAndTagents,
-            normalsOnly,
-            none
         }
 
         private enum OptPartPhysicsType
         {
-            rigidbody_high,
-            rigidbody_medium,
-            particle_high,
-            particle_medium,
-            particle_low,
+            rigidbody,
+            particle,
             verySimple
         }
 
@@ -1159,12 +1162,14 @@ namespace zombDestruction
         [System.Serializable]
         public class DestructionMaterial
         {
+            [Tooltip("The vertex group indexes that uses this material")]
             public List<int> affectedGroupIndexes = new();
 #if UNITY_2023_3_OR_NEWER
             public PhysicsMaterial phyMat;
 #else
             public PhysicMaterial phyMat;
 #endif
+            [Tooltip("Should it always be kinematic?")]
             public bool isKinematic = false;
             public byte objLayerDefualt = 0;
             public byte objLayerBroken = 0;
@@ -1188,7 +1193,9 @@ namespace zombDestruction
             [System.Serializable]
             public struct DesProperties
             {
+                [Tooltip("The mass of each part")]
                 public float mass;
+                [Tooltip("The force needed for the part to break")]
                 public float stenght;
                 public float falloff;
                 public float chockResistance;
@@ -1196,6 +1203,7 @@ namespace zombDestruction
                 /// <summary>
                 /// How much less X can transport depending on how much force it has recieved at most. (actualTransportCapacity = transportCapacity - (maxForceRecieved * transportMaxDamage)) 
                 /// </summary>
+                [Tooltip("The part strenght is subtracted by maxForceRecieved * damageAccumulation")]
                 public float damageAccumulation;
             }
 
@@ -1217,11 +1225,15 @@ namespace zombDestruction
 #else
             public PhysicMaterial phyMat;
 #endif
+            [Tooltip("The mass of each part")]
             public float mass = 0.1f;
+            [Tooltip("The layer a broken part should have")]
             public byte objLayerBroken = 0;
+            [Tooltip("The force needed for the part to break")]
             public float stenght = 40.0f;
             public float falloff = 0.2f;
             public float chockResistance = 0.4f;
+            [Tooltip("The part strenght is subtracted by maxForceRecieved * damageAccumulation")]
             public float damageAccumulation = 0.5f;
             public float bendyness = 0.25f;
             public float bendStrenght = 120.0f;

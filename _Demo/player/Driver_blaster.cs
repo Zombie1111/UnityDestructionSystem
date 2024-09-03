@@ -64,9 +64,9 @@ namespace GameLogic
             // Adjust speed based on mouse wheel input
             Time.timeScale = Mathf.Clamp(Time.timeScale + scrollWheelInput, 0.0f, 1.0f);
 
-            if (Input.GetKeyDown(KeyCode.Mouse0) == true) TryToShoot();
+            if (Input.GetKeyDown(KeyCode.Mouse1) == true) TryToShoot();
 
-            if (Input.GetKeyDown(KeyCode.Mouse1) == true)
+            if (Input.GetKeyDown(KeyCode.Mouse0) == true)
             {
                 if (Physics.Raycast(camTrans.position, camTrans.forward, out RaycastHit nHit, 100.0f, maskGround, QueryTriggerInteraction.Ignore) == true)
                 {
@@ -75,7 +75,7 @@ namespace GameLogic
                 }
             }
 
-            if (Input.GetKeyUp(KeyCode.Mouse1) == true) grabbedCol = null;
+            if (Input.GetKeyUp(KeyCode.Mouse0) == true) grabbedCol = null;
 
             if (Input.GetKeyDown(KeyCode.X) == true)
             {
