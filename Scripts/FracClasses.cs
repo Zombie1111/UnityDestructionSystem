@@ -26,7 +26,7 @@ namespace zombDestruction
         [System.NonSerialized] public float rbMass;
 
         //Add custom properties here
-        public float buoyancy;
+        public float buoyancy;//Example custom rb property
     }
 
 
@@ -115,9 +115,11 @@ namespace zombDestruction
     {
         [Header("Invoke Configuration")]
         public float invokeWhenBrokenPercentageHasChangedBy = 0.7f;
+        [Tooltip("If onlyMessure == PositiveChange, always invokes if currentBrokenPercentage is > alwaysInvokeIfOnMessuredSideOf")]
         public float alwaysInvokeIfOnMessuredSideOf = 0.9f;
         public BrokenMessureType onlyMessure = BrokenMessureType.PositiveChange;
         public bool onlyInvokeOnce = false;
+        [Tooltip("If onlyMessure == PositiveChange, resets has been invoked status if currentBrokenPercentage is reduced")]
         public bool resetInvokedStatusWhenOppositeChange = true;
 
         [Space()]

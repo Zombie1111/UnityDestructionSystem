@@ -8,10 +8,14 @@ namespace zombDestruction
 {
     public class DestructionJoint : MonoBehaviour
     {
+        [Tooltip("All parts that has connectedTransform as parent can be connected with all parts that has this transform as parent")]
         [SerializeField] private Transform connectedTransform = null;
+        [Tooltip("A copy of this joint is used to connect the different rigidbodies")]
         [SerializeField] private Joint sourceJoint = null;
         private DestructableObject fracSource = null;
+        [Tooltip("The position where the joint anchor should be")]
         [SerializeField] private List<Transform> jointAnchors = new();
+        [Tooltip("Only parts that are within maxDisFromAnchor meters from a jointAnchor can be connected")]
         [SerializeField] private float maxDisFromAnchor = 2.0f;
 
 #pragma warning disable IDE0044 // Add readonly modifier

@@ -21,7 +21,7 @@ The primary purpose of this project is to provide a efficient way to add destruc
 <li>Compatible with prefabs</li>
 </ul>
 
-## Installation
+## Instructions
 **Requirements** (Should work in other versions/render piplines)
 <ul>
 <li>Unity 2023.2.20f1 (Built-in)</li>
@@ -30,7 +30,7 @@ The primary purpose of this project is to provide a efficient way to add destruc
 <li>Compute Shader Support</li>
 <li>Allow unsafe code (Because using pointers)</li>
 <li>Meshes should be watertight, no self-intersections and no open-edges</li>
-<li>Blender 3.6 (For advanced setup)</li>
+<li>Blender 3.6 (For advanced features)</li>
 </ul>
 
 **General Setup**
@@ -38,24 +38,46 @@ The primary purpose of this project is to provide a efficient way to add destruc
   <li>Download and copy the Resources, Plugins, Scripts, and _Demo (optional) folders into an empty folder inside your Assets folder</li>
   <li>Create a new empty gameobject and add the DestructionHandler script to it</li>
   <li>Create a empty parent for the gameobject you want to be destructable and add the DestructableObject script to the empty parent</li>
-  <li>Create a SaveAsset and assign it to the DestructableObject script, Tools->Destruction->CreateSaveAsset</li>
+  <li>Create a SaveAsset and assign it to the DestructableObject script, <code>Tools->Destruction->CreateSaveAsset</code></li>
   <li>Configure the DestructableObject settings and press the Generate Fracture button</li>
   <li>Enter playmode and you should be able to destroy the object</li>
 </ol>
 
-**Advanced Setup**
+Its a good practice to always remove the fracture before you do any changes to the DestructableObject in editor
+
+**Multiple Destruction Materials**
 <ol>
-  <li>Complete the General Setup</li>
-  <li>Open Blender, import your mesh and install the addon found in the `Scipts/BlenderAddon/` folder</li>
-  <li>Assign a vertex group too all vertics in your mesh. Maybe assign group A to a door and group B to the walls</li>
-  <li>Create a new vertex group that has a name that start with `link`. Assign the `link` vertex group to vertics that you want to be able to connect that are in different base vertex groups. Like the door hinges and the wall</li>
-  <li>Press the `Setup vertex colors for unity fracture` button and export+import the mesh with vertex colors</li>
-  <li>Select your DestructableObject and add a second destructionMaterial and make it affect groupIndex 1</li>
-  <li>Add a DestructionJoint script to the door and assign the wall as connected transform. Create a Joint somewhere on a disabled gameobject and assign it as SourceJoint</li>
-  <li>Create empty gameobjects, position them on the door hinges and add them to the jointAnchors list</li>
-  <li>Create a saveState, assign it to the DestructableObject and save it, Tools->Destruction->CreateSaveStateAsset</li>
-  <li>Enter playmode and you should have a door that can open+close and restoring the object. See the `_Demo/swingDemo` scene for practical exampel</li>
+  <li>Open Blender, import your mesh and install the addon found in the <code>Scipts/BlenderAddon/</code> folder</li>
+  <li>Assign a vertex group too all vertics in your mesh. Example, assign group A to a door and group B to the rest</li>
+  <li>Create a new vertex group that has a name that start with <code>link</code>. Assign the <code>link</code> vertex group to vertics that you want to be able to connect but are not in the same base vertex group. Like door hinges and the nearby wall</li>
+  <li>Press the <code>Setup vertex colors for unity fracture</code> button and export+import the mesh with vertex colors</li>
+  <li>Select your DestructableObject, add a second destructionMaterial and make it affect groupIndex 0</li>
 </ol>
+
+You should now have a DestructableObject with multiple materials. Since vertex groups overwrites the vertex colors of your mesh, you can add a DestructionVisualMesh script to the gameobject that has your meshRenderer+filter to still be able to use vertex colors for other purposes.
+
+**Joints**
+<ol>
+  <li>Add a DestructionJoint script to object A and assign object B to ConnectedTransform</li>
+  <li>Create a Joint somewhere on a disabled gameobject and assign it to SourceJoint</li>
+  <li>Create empty gameobject and add it to the JointAnchors list. Position the JointAnchors where object A should connected with object B</li>
+  <li>Object A and B should now be connected using a copy of the SourceJoint at runtime</li>
+</ol>
+
+**Restoring Objects To A Saved State**
+<ol>
+  <li>Create a saveState asset and assign it to the DestructableObject <code>Tools->Destruction->CreateSaveStateAsset</code></li>
+  <li>Save the state in editor or at runtime by pressing the <code>Save State</code> button or calling <code>TrySaveAssignedSaveState()</code> in <code>DestructableObject.cs</code></li>
+  <li>At runtime you should now be able to load it by pressing the <code>Load State</code> button or calling <code>TryLoadAssignedSaveState()</code> in <code>DestructableObject.cs</code></li>
+</ol>
+
+**None Destructable Objects**
+
+If you have non DestructableObjects with rigidbodies you should add the `DestructionBody` script to them for proper interaction with other DestructableObjects
+
+**Scripting**
+
+You can subscribe to the `OnPartParentChanged` or `OnParentUpdated` delegate in `DestructionObject.cs` or add the `DestructionCallback` script to recieve callbacks when destruction occures
 
 ## Documentation
 Most functions and parameters visible in the unity inspector are documented

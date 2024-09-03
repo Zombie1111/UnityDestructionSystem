@@ -11,6 +11,7 @@ namespace zombDestruction
     {
         [Header("Configuration")]
         [SerializeField] private bool includeChildren = true;
+        [Tooltip("Should parts that are disconnected from the main body but connected with other parts count as broken?")]
         [SerializeField] private bool countDisconnectedChunksAsBroken = true;
 
         /// <summary>

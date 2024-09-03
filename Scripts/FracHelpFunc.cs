@@ -3038,8 +3038,8 @@ namespace zombDestruction
 
                 int index = current.GetSiblingIndex();
 
-                path |= (index + 1) << shift; // Store index + 1 to avoid issues with 0 index
-                shift += 5; // Assuming a maximum of 32 children, 5 bits are enough (2^5 = 32)
+                path |= (index + 1) << shift; //Store index + 1 to avoid issues with 0 index
+                shift += 5; //Max 32 children
 
                 current = parentTransform;
             }
@@ -3057,7 +3057,7 @@ namespace zombDestruction
 
             while (path != 0)
             {
-                int index = ((path >> 0) & 31) - 1; // Extract 5 bits and subtract 1 to get original index
+                int index = ((path >> 0) & 31) - 1; //Extract 5 bits and subtract 1 to get original index
                 kidPath.Push(index);//Is adding + removing from stack fastest way to reverse order?
                 path >>= 5;
             }

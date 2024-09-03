@@ -4,6 +4,8 @@ namespace zombDestruction
 {
     public class DestructionVisualMesh : MonoBehaviour
     {
+        [Tooltip("The fractured mesh will use the vertexColors from this mesh for rendering at runtime," +
+            " the mesh vertexColor array lenght must be the same as the other source mesh")]
         [SerializeField] private Mesh visualMesh = null;
 
         /// <summary>

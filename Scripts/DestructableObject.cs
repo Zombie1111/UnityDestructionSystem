@@ -229,23 +229,10 @@ namespace zombDestruction
         [Tooltip("Used to add multiple materials to a single destructable object, requires voxel groups")]
         [SerializeField] internal List<DestructionMaterial> destructionMaterials = new();
 
-        [System.Serializable]
-        public class FracVolume
-        {
-            public Bounds volume = new();
-            public float fadeStrenght = 1.0f;
-            public float multiplier = 1.0f;
-
-#if UNITY_EDITOR
-            [Tooltip("The color of volume bounds shown in the editor, useful to know what multiplier is for what area")] public Color boundsColor = Color.black;
-#endif
-        }
-
-
 #if UNITY_EDITOR
         [Space(10)]
         [Header("Debug")]
-        [SerializeField][Tooltip("Does not work at runtime")] private DebugMode debugMode = DebugMode.none;
+        [SerializeField] private DebugMode debugMode = DebugMode.none;
 
         private enum DebugMode
         {
@@ -416,6 +403,7 @@ namespace zombDestruction
         {
             [Tooltip("If rigidbody should be kinematic or not. Manuall means the kinematic status it had before fracturing")]
             public OptMainPhysicsType mainPhysicsType = OptMainPhysicsType.overlappingIsManuall;
+            [Tooltip("The mass the actuall parent rigidbody has is allChildPartMasses * massMultiplier")]
             public float massMultiplier = 0.5f;
             public GlobalRbData customRbProperties = new();
         }
@@ -426,6 +414,7 @@ namespace zombDestruction
             [Tooltip("Not implemented")]
             public OptPartPhysicsType partPhysicsType = OptPartPhysicsType.rigidbody;
             public bool useGravity = true;
+            [Tooltip("The mass the actuall part rigidbody has is childMass * massMultiplier")]
             public float massMultiplier = 4.0f;
             public float drag = 0.0f;
             public float angularDrag = 0.05f;
@@ -1198,6 +1187,7 @@ namespace zombDestruction
                 [Tooltip("The force needed for the part to break")]
                 public float stenght;
                 public float falloff;
+                [Tooltip("Ignores the push mass with 100% - clamp(100 * chockResistance * ~distanceFromImpact)")]
                 public float chockResistance;
 
                 /// <summary>
@@ -1211,6 +1201,7 @@ namespace zombDestruction
             public struct BendProperties
             {
                 public float bendyness;
+                [Tooltip("If you increase this by 200% you should decrease bendyness by 50% to make it require more force to bend the same amount")]
                 public float bendStrenght;
                 public float bendFalloff;
                 public float bendPower;
@@ -1232,10 +1223,12 @@ namespace zombDestruction
             [Tooltip("The force needed for the part to break")]
             public float stenght = 40.0f;
             public float falloff = 0.2f;
+            [Tooltip("Ignores the push mass with 100% - clamp(100 * chockResistance * ~distanceFromImpact)")]
             public float chockResistance = 0.4f;
             [Tooltip("The part strenght is subtracted by maxForceRecieved * damageAccumulation")]
             public float damageAccumulation = 0.5f;
             public float bendyness = 0.25f;
+            [Tooltip("If you increase this by 200% you should decrease bendyness by 50% to make it require more force to bend the same amount")]
             public float bendStrenght = 120.0f;
             public float bendFalloff = 80.0f;
             public float bendPower = 0.02f;
@@ -4980,7 +4973,7 @@ namespace zombDestruction
         }
 
         /// <summary>
-        /// Sets the saveState asset to the given asset
+        /// Sets the saveState asset to the given asset (Sets the assigned saveState asset)
         /// </summary>
         public void SetSaveStateAsset(FracSavedState saveStateAsset)
         {

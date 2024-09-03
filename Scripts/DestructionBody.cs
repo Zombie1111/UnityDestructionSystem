@@ -5,10 +5,12 @@ namespace zombDestruction
 {
     public class DestructionBody : MonoBehaviour
     {
+        [Tooltip("The mass the destructionSystem thinks this rigidbody has is rigidbody.mass * desMassMultiplier")]
         [SerializeField] private float desMassMultiplier = 2.0f;
         [SerializeField] private GlobalRbData customRigidbodyProperties = new();
         [SerializeField] private bool includeDisabled = false;
         [SerializeField] private bool includeKinematic = false;
+        [Tooltip("If true, rigidbodies attatched to children of this gameobject will also be affected")]
         [SerializeField] private bool includeChildren = true;
         private DestructionHandler globalHandler;
         private HashSet<Rigidbody> usedRigidbodies = new();
@@ -84,7 +86,7 @@ namespace zombDestruction
         public void SetRbBuoyancy(float newBuoyancy)
         {
             customRigidbodyProperties.buoyancy = newBuoyancy;
-            ApplyRigidbodyProperties(false, true);
+            ApplyRigidbodyProperties(false, true);//Example custom rb property
         }
     }
 }
