@@ -96,7 +96,7 @@ The `_Demo/` folder contains pratical exampels
 ## Technical Details
 **Fracturing**
 
-The DestructableObject is split into a bunch of small parts that can be moved independetly of each other, these parts are generated automatically from a source object using nvBlast. Parts that are next to each other are then connected forming a net that is used to solve the destruction. This processes is called fracturing and is normally done in the editor.
+The DestructableObject is split into a bunch of small parts that can be moved independetly of each other, these parts are generated automatically from a source object using nvBlast. Parts that are next to each other are then connected forming a net that is used to solve the destruction. This process is called fracturing and is normally done in the editor.
 
 **Rendering**
 
