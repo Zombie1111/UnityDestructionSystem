@@ -1,5 +1,14 @@
 <h1 align="center">UnityDestructionSystem by David Westberg</h1>
 
+## Table of Contents
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Instructions](#instructions)
+- [Documentation](#documentation)
+- [Technical Details](#technical-details)
+- [License](#license)
+- [Third-Party Libraries](#third-party-libraries)
+  
 ## Overview
 The primary purpose of this project is to provide a efficient way to add destruction and deformation capabilities to medium sized objects like cars, robots or a wall. Its designed to work well with dynamic objects and scripting. This destruction solution is currently not designed to simulate a large building collapsing, for those purposes I suggest trying RayFire by RayFire Studios.
 
