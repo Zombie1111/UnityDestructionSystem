@@ -22,7 +22,7 @@ The primary purpose of this project is to provide a efficient way to add destruc
 <ul>
 <li>Destruction and deformation based on forces applied to the object</li>
 <li>Maintains the hierarchy of the object, meaning object references will still work</li>
-<li>No significant lag spikes when destruction occures (See `Technical Details`)</li>
+<li>No significant lag spikes when destruction occures (See <code>Technical Details</code>)</li>
 <li>Restore objects to a saved state</li>
 <li>Scripting support and delegates</li>
 <li>Easy to setup and highly customizable</li>
