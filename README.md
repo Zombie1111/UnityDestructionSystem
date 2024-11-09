@@ -104,7 +104,9 @@ The DestructableObject is rendered using a single meshRenderer and a compute sha
 
 **Simulation**
 
- The destruction is simulated using my own severly faked algorythm. It computes the mass each part would need to push and the force needed to push the mass forward by X. If the part strenght is less than the force needed it breaks. The advatage of my algorythm is that it solves the destruction in a single iteration (See `CalcSource()` in `DestructableObject.cs`). The DestructableObject recieves most of its input from Physics.ContactModifyEvent (See `ModificationEvent()` in `DestructionHandler.cs`).
+ The destruction is simulated using a implementation of my own Algorithm called `Single-Iteration Node Stress Propagation`.\
+ (See [Algorithm Paper](Single-IterationNodeStressPropagationPaper.md))\
+ The DestructableObject recieves most of its input from Physics.ContactModifyEvent (See `ModificationEvent()` in `DestructionHandler.cs`).
 
 **Performance**
 
