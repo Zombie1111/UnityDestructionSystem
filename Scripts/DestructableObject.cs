@@ -98,6 +98,10 @@ namespace zombDestruction
                         EditorGUILayout.HelpBox("Modifying destructionMaterials at runtime is not supported and should only be used in editor to temporarly test different values", MessageType.Warning);
                         EditorGUILayout.PropertyField(serializedObject.FindProperty("destructionMaterials"), true);
                     }
+                    else
+                    {
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("collisionDamageMultiplier"), true);
+                    }
 
                     EditorGUILayout.Space();
                     EditorGUILayout.HelpBox("Properties cannot be edited while fractured", MessageType.Info);
@@ -107,6 +111,7 @@ namespace zombDestruction
                     { "m_Script",
                         "debugMode",
                         "saveState",
+                        Application.isPlaying == false ? "collisionDamageMultiplier" : "",
                         Application.isPlaying == true ? "destructionMaterials" : "",
                         Application.isPlaying == true ? "interpolationSpeedTarget" : "",
                         Application.isPlaying == true ? "interpolationSharpness" : ""
@@ -167,7 +172,7 @@ namespace zombDestruction
         [Tooltip("The asset to save the prefracture to, Create one in Tools->Destruction->CreateSaveAsset")]
         public FracSaveAsset saveAsset = null;
         [Tooltip("If assigned you can save the state of the object and restore it later, Create one in Tools->Destruction->CreateSaveStateAsset")]
-        [SerializeField] private FracSavedState saveState = null;
+        public FracSavedState saveState = null;
         [Tooltip("The rough numder of parts to split the object into")]
         [SerializeField] private int fractureCount = 200;
         [Tooltip("If true the fractureCount is parts per cubic meter")]
@@ -188,16 +193,21 @@ namespace zombDestruction
                                              //By far biggest performance bottleneck seems to be unity physics,
                                              //only reasonable way I can think of to potentially fix it is to merge neighbour
                                              //colliders. Since its always convex that would mean less faces and less colliders
-                                             //But would probably also mean way less accurate destruction input?
+                                             //But would probably also mean way less accurate destruction input? And hard to implement :(
         [Tooltip("The collider type each part will have")]
         [SerializeField] private ColliderType colliderType = ColliderType.mesh;
         [Tooltip("Should part X not collide with its neighbours?")]
         [SerializeField] private SelfCollisionRule selfCollisionRule = SelfCollisionRule.ignoreNeighbours;
         public OptPhysicsMain phyMainOptions = new();
-        [SerializeField] private OptPhysicsParts phyPartsOptions = new();
+
+        /// <summary>
+        /// Can safely be changed/set at runtime (Except phyPartsOptions.partPhyscisType)
+        /// </summary>
+        public OptPhysicsParts phyPartsOptions = new();
 
         [Space(10)]
         [Header("Destruction")]
+        [Tooltip("Multiplies the force caused by collisions")] public float collisionDamageMultiplier = 1.0f;
         [Tooltip("The interpolation speed when restoring object")]
         public float interpolationSpeedTarget = 10.0f;
         [Tooltip("How fast interpolationSpeedActual will move towards interpolationSpeedTarget")]
@@ -409,7 +419,7 @@ namespace zombDestruction
         }
 
         [System.Serializable]
-        private class OptPhysicsParts
+        public class OptPhysicsParts
         {
             [Tooltip("Not implemented")]
             public OptPartPhysicsType partPhysicsType = OptPartPhysicsType.rigidbody;
@@ -423,7 +433,7 @@ namespace zombDestruction
             public float lifeChance = 1.0f;
         }
 
-        private enum OptPartPhysicsType
+        public enum OptPartPhysicsType
         {
             rigidbody,
             particle,
@@ -921,15 +931,15 @@ namespace zombDestruction
                 //Log the error
                 Debug.LogError("Exception: " + ex.Message);
                 Debug.LogError("StackTrace: " + ex.StackTrace);
-            
-                #if UNITY_EDITOR
+
+#if UNITY_EDITOR
                 //Display an error message to the user
                 EditorUtility.DisplayDialog("Error", "An unexpected error occured while fracturing, look in console for more info", "OK");
-                #endif
-            
+#endif
+
                 //remove the fracture
                 CancelFracturing();
-            
+
                 //set fracture as invalid
                 fractureIsValid = false;
                 return false;
@@ -1431,7 +1441,7 @@ namespace zombDestruction
 
                 //Get if any child should be included in template
                 bool keepRest = false;
-                
+
                 for (int i = sourceTrans.childCount - 1; i >= 0; i--)
                 {
                     Transform child = sourceTrans.GetChild(i);
@@ -1622,7 +1632,13 @@ namespace zombDestruction
                     fracFilter.sharedMesh = mesh;
 
                     buf_gpuMeshVertexs = new ComputeBuffer(fr_verticesL.Count,
-                        sizeof(float) * 7);
+                        sizeof(float) *
+#if !FRAC_NO_VERTEXCOLORSUPPORT
+                        7
+#else
+                        6
+#endif
+                        );
 
                     InitGpuMeshVertexData();
                     buf_gpuMeshVertexs.SetData(gpuMeshVertexData);
@@ -2185,11 +2201,13 @@ namespace zombDestruction
                 newRb.angularDamping = phyPartsOptions.angularDrag;
                 newRb.linearVelocity = losePartVelocity * FracGlobalSettings.partBreakVelocityMultiplier;
 #else
-                newRb.drag = phyPartsOptions.drag;
-                newRb.angularDrag = phyPartsOptions.angularDrag;
+                //newRb.drag = phyPartsOptions.drag;
+                //newRb.angularDrag = phyPartsOptions.angularDrag;
                 newRb.velocity = losePartVelocity * FracGlobalSettings.partBreakVelocityMultiplier;
 #endif
-                newRb.useGravity = phyPartsOptions.useGravity;
+                newRb.solverIterations = 1;//Could make defualt 1 and set non parts instead
+                //newRb.solverVelocityIterations = 1;//Defualt is 1
+                //newRb.useGravity = phyPartsOptions.useGravity;
                 //fr_bones[partI].position = fr_bones[partI].position + (losePartVelocity * Time.fixedDeltaTime);
                 fr_bones[partI].position += losePartVelocity * Time.fixedDeltaTime;
             }
@@ -2210,7 +2228,6 @@ namespace zombDestruction
                 allPartsCol[partI].hasModifiableContacts = true;
 
                 //remove rigidbody
-                //if (allPartsCol[partI].attachedRigidbody != null) Destroy(allPartsCol[partI].attachedRigidbody);
                 if (allPartsCol[partI].TryGetComponent(out Rigidbody rb) == true) DestroyImmediate(rb);//We cant use attachedRigidbody since it may be the parents rigidbody
             }
         }
@@ -2381,7 +2398,7 @@ namespace zombDestruction
                 }
             }
 
-            SkipUpdateParentRb:;
+        SkipUpdateParentRb:;
 
             //Invoke update parent event
             OnParentUpdated?.Invoke(parentI);
@@ -3003,7 +3020,7 @@ namespace zombDestruction
         private void OnDestroy()
         {
             //Clear memory, should we really do it here? If the user just temporarly disabled it we would need to reallocolate everything again
-            ClearUsedGpuAndCpuMemory();
+            ClearUsedGpuAndCpuMemory(true);
         }
 
 
@@ -3060,7 +3077,7 @@ namespace zombDestruction
         /// <summary>
         /// Call to dispose variabels from gpu and cpu
         /// </summary>
-        public void ClearUsedGpuAndCpuMemory()
+        public void ClearUsedGpuAndCpuMemory(bool isBeingDestroyed = false)
         {
             //fracture is never valid when disposing
             fractureIsValid = false;
@@ -3117,7 +3134,7 @@ namespace zombDestruction
 
             //dispose getTransformData job
             GetTransformData_end();//Make sure the job aint running
-            ComputeDestruction_end();//Make sure the job aint running
+            ComputeDestruction_end(isBeingDestroyed);//Make sure the job aint running
             if (jGTD_hasMoved.IsCreated == true) jGTD_hasMoved.Dispose();
             if (jGTD_fracBoneTrans.isCreated == true) jGTD_fracBoneTrans.Dispose();
             if (jGTD_job.fracBonesLToW.IsCreated == true) jGTD_job.fracBonesLToW.Dispose();
@@ -3492,7 +3509,7 @@ namespace zombDestruction
             public Vector3 velPos;
         }
 
-        public void ComputeDestruction_end()
+        public void ComputeDestruction_end(bool isBeingDestroyed = false)
         {
             if (jCDW_jobIsActive == false) return;
 
@@ -3514,6 +3531,8 @@ namespace zombDestruction
 
             }
 #pragma warning restore IDE0060 // Remove unused parameter
+
+            if (isBeingDestroyed == true) return;//No need to apply destruction or deformation if object is being destroyed anyway
 
             //apply destruction result
             //send deformation points to gpu
@@ -3618,7 +3637,11 @@ namespace zombDestruction
 #endif
         public struct ComputeDestruction_work : IJob
         {
-            //solve destruction, to fix later, nearby must move the same amount as X - dis to X * dir to X dot
+            //solve destruction
+            //This is an old and rough implementation of my Single-Iteration Node Stress Propagation algorythm (Because I cameup with the algorythm while writing this code)
+            //Good enough for now but rewriting this implementation is highly recommended if I ever publish this to unity assetstore.
+            //This code is too messy and overcomplicated to fix if weird problems occures, reminder for my self that I should REWRITE IT if it becomes too bad, not worth trying to fix it
+
             public NativeList<Vector3> structPosL;
 
             /// <summary>
@@ -3666,7 +3689,6 @@ namespace zombDestruction
                 //We may wanna rewrite the stress solver to use a more physically accurate approach? The only advantage of my own solver is that it does not need iterations,
                 //it just solves it instatly but severly faked. If rewrite may take more inspiration from nvBlast
                 //https://github.com/NVIDIAGameWorks/Blast/blob/master/sdk/extensions/stress/source/NvBlastExtStressSolver.cpp
-                //Since its useless and you cant access fields from localLocal functions, I have to assign it like this
                 var _desSources = desSources;
                 var _partsParentI = partsParentI;
                 var _fStructs = fStructs;
@@ -4484,7 +4506,7 @@ namespace zombDestruction
         }
 
 
-#endregion ComputeDestruction
+        #endregion ComputeDestruction
 
 
 
@@ -4957,19 +4979,19 @@ namespace zombDestruction
         /// <summary>
         /// Returns true if successfully loaded the assigned saveState asset (Set assigned saveState asset using SetSaveStateAsset())
         /// </summary>
-        public bool TryLoadAssignedSaveState()
+        public void TryLoadAssignedSaveState()//Cant return bool because unity is useless and unityEvents does not support returning shit
         {
-            if (saveState == null) return false;
-            return saveState.Load(this);
+            if (saveState == null) return;
+            saveState.Load(this);
         }
 
         /// <summary>
         /// Returns true if successfully saved the assigned saveState asset (Set assigned saveState asset using SetSaveStateAsset())
         /// </summary>
-        public bool TrySaveAssignedSaveState()
+        public void TrySaveAssignedSaveState()//Cant return bool because unity is useless and unityEvents does not support returning shit
         {
-            if (saveState == null) return false;
-            return saveState.Save(this, false);
+            if (saveState == null) return;
+            saveState.Save(this, false);
         }
 
         /// <summary>

@@ -13,7 +13,13 @@ namespace zombDestruction
         [MenuItem("Tools/Destruction/Fracture All")]
         private static void FractureAll()
         {
-            EditorCoroutineUtility.StartCoroutineOwnerless(FractureArray(GameObject.FindObjectsOfType<DestructableObject>(false)));
+            EditorCoroutineUtility.StartCoroutineOwnerless(FractureArray(
+#if UNITY_2023_2_OR_NEWER
+                GameObject.FindObjectsByType<DestructableObject>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
+#else
+                GameObject.FindObjectsOfType<DestructableObject>(false)
+#endif
+                ));
         }
 
         [MenuItem("Tools/Destruction/Fracture Selected")]
@@ -25,7 +31,13 @@ namespace zombDestruction
         [MenuItem("Tools/Destruction/Remove All Fractures")]
         private static void RemoveAllFractures()
         {
-            RemoveFracturesArray(GameObject.FindObjectsOfType<DestructableObject>(false));
+            RemoveFracturesArray(
+#if UNITY_2023_2_OR_NEWER
+                GameObject.FindObjectsByType<DestructableObject>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
+#else
+                GameObject.FindObjectsOfType<DestructableObject>(false)
+#endif
+                );
         }
 
         [MenuItem("Tools/Destruction/Remove Selected Fractures")]

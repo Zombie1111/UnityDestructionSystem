@@ -22,7 +22,7 @@ namespace zombDestruction
     public static class FracHelpFuncBurst
     {
         /// <summary>
-        /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN NativeArray WILL BE MODIFIED!
+        /// Returns a unique hash, the order of the values does not matter (0,0,1)=(0,1,0). THE VALUES IN THE GIVEN NativeArray WILL BE SORTED!
         /// </summary>
 #if !FRAC_NO_BURST
         [BurstCompile]
@@ -396,16 +396,16 @@ namespace zombDestruction
         public static void GetPointOnCurve(ref Vector3 start, ref Vector3 startOffset,
             ref Vector3 endOffset, ref Vector3 end, ref float t, ref Vector3 result)
         {
-                float u = 1 - t;
-                float tt = t * t;
-                float uu = u * u;
-                float uuu = uu * u;
-                float ttt = tt * t;
+            float u = 1 - t;
+            float tt = t * t;
+            float uu = u * u;
+            float uuu = uu * u;
+            float ttt = tt * t;
 
-                result = uuu * start; // (1-t)^3 * p0
-                result += 3 * uu * t * startOffset; // 3 * (1-t)^2 * t * p1
-                result += 3 * u * tt * endOffset; // 3 * (1-t) * t^2 * p2
-                result += ttt * end; // t^3 * p3
+            result = uuu * start; // (1-t)^3 * p0
+            result += 3 * uu * t * startOffset; // 3 * (1-t)^2 * t * p1
+            result += 3 * u * tt * endOffset; // 3 * (1-t) * t^2 * p2
+            result += ttt * end; // t^3 * p3
         }
     }
 
@@ -474,7 +474,7 @@ namespace zombDestruction
         /// </summary>
         public static float FloatLerpMin(float current, float target, float t, float min, out bool reachedTarget)
         {
-            float dis = target - current;
+            float dis = Math.Abs(target - current);
             if (dis <= min)
             {
                 reachedTarget = true;
@@ -1301,6 +1301,31 @@ namespace zombDestruction
             }
 
             return bestDir;
+        }
+
+        /// <summary>
+        /// Returns each transform direction in worldspace (X, -X, Y, -Y, Z, -Z) (Dirs array must have a lenght of 6)
+        /// </summary>
+        public static void GetTransformDirections(Transform trans, ref Vector3[] dirs)
+        {
+            dirs[0] = trans.forward;
+            dirs[1] = -dirs[0];
+            dirs[2] = trans.up;
+            dirs[3] = -dirs[2];
+            dirs[4] = trans.right;
+            dirs[5] = -dirs[4];
+        }
+
+        public static Vector3 GuessClosestPointOnRb(Rigidbody rb, Vector3 posTarget, Vector3 posHandle, Vector3 nor, LayerMask mask)
+        {
+            Vector3 rayOrg = rb.ClosestPointOnBounds(posHandle - (nor * 69.0f));
+            if (Physics.Linecast(posTarget - (nor * 0.05f), rb.worldCenterOfMass, out RaycastHit nHit, mask, QueryTriggerInteraction.Ignore) == true
+                && nHit.rigidbody == rb)
+            {
+                return nHit.point;
+            }
+
+            return rayOrg;
         }
 
         /// <summary>
@@ -2297,7 +2322,7 @@ namespace zombDestruction
         /// <summary>
         /// Returns a mesh that is as similar to sourceMesh as possible while being convex, sourceMeshW must be in worldspace
         /// </summary>
-        public static Mesh MakeMeshConvex(Mesh sourceMeshW, bool verticsOnly = false, float worldScale = 1.0f)
+        public static Mesh MakeMeshConvex(Mesh sourceMeshW, bool verticsOnly = false, float worldScale = 1.0f, bool useSourceIfBetter = true)
         {
             var calc = new QuickHull_convex();
             var verts = new List<Vector3>();
@@ -2306,7 +2331,7 @@ namespace zombDestruction
 
             bool didMake = calc.GenerateHull(sourceMeshW.vertices.ToList(), !verticsOnly, ref verts, ref tris, ref normals);
 
-            if (didMake == false || verts.Count >= sourceMeshW.vertexCount)
+            if (didMake == false || (useSourceIfBetter == true && verts.Count >= sourceMeshW.vertexCount))
             {
                 //When unable to make convex or convex has more vertics than source, just use the source mesh
                 if (verticsOnly == true)
@@ -2751,7 +2776,10 @@ namespace zombDestruction
                     if (cDis > extents.y) extents.y = cDis;
                 }
 
-                bCol.size = colTrans.InverseTransformVector(extents) * 2.0f;
+                //bCol.size = colTrans.InverseTransformVector(extents) * 2.0f;
+                extents.Scale(colTrans.localToWorldMatrix.lossyScale);
+                bCol.size = extents * 2.0f;
+                extents = colTrans.TransformVector(extents);
 
             }
             else if (col is SphereCollider sCol)
@@ -3416,5 +3444,5 @@ namespace zombDestruction
             Debug.DrawLine(corners[3], corners[7], color, duration, doOcclusion);
         }
 #endif
-            }
-        }
+    }
+}

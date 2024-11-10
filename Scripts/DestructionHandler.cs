@@ -651,6 +651,7 @@ namespace zombDestruction
 
         public void ModificationEvent(PhysicsScene scene, NativeArray<ModifiableContactPair> pairs)
         {
+            //The input to the destruction system is still extremely inconsistant
             //variabels used durring calculations
             Dictionary<int, ImpPair> impIdToImpPair = new();
             ModifiableContactPair pair;
