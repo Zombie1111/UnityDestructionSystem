@@ -88,14 +88,14 @@ Given a 3D point (`A`) where a node in `Source` was struck and a 3D point (`B`) 
    - If `F <= TotalHeatForce * BendEfficiency`, offset `B` with `BendAmount * clamp(((TotalHeatForce * BendEfficiency) - F) / (BendStrength * sqrt(dot(Velocity, Velocity))), 0.0f, 1.0f) * Velocity;`.
 
 ## 4. Conclusion and Discussion
-The proposed algorithm has, in my tests, produced a stress distribution that resulted in visually appealing destruction and deformation for my Unity Destruction System project ([GitHub Repository](https://github.com/Zombie1111/UnityDestructionSystem)). Though the proposed algorithm produces a good stress distribution it is not physically accurate and there is room for further improvement (see sections 4.1 and 4.2).
+The proposed algorithm has in my tests produced a stress distribution that resulted in visually appealing destruction and deformation for my Unity Destruction System project ([GitHub Repository](https://github.com/Zombie1111/UnityDestructionSystem)). Though the proposed algorithm produces a good stress distribution it is not physically accurate and there is room for further improvement (see sections 4.1 and 4.2).
 
 ### 4.1. Directional Node Strength
 Currently, the direction from node `A` to node `B` has no effect on the connection strength. This could potentially be resolved by multiplying `NodeStrength` with `dot((B - A) / (∣B - A∣), Velocity / ∣Velocity∣)`.
 
 ### 4.2. Integrated Deformation
-The deformation is currently computed separately after the stress has been propagated. This usually gives good enough results for smaller structures but may not for more complex structures. The deformation could, in theory, be integrated into the stress propagation with a few modifications. Here is a general outline:
-   - For each node, offset its 3D position by `Velocity * min(NodeStress / (Velocity * NodeMass), 1.0f)`
+The deformation is currently computed separately after the stress has been propagated. This usually gives good enough results for smaller structures but may not work for more complex structures. The deformation could in theory be integrated into the stress propagation with a few modifications. Here is a general outline:
+   - For each node, offset its 3D position by `Velocity * min(NodeStress / (Velocity * NodeMass), 0.0f)`
    - For each node, get how stretched it is by comparing its offset amount with its neighbours. If the node streth amount exceeds max allowed stretch it breaks.
 
 ### 4.3. Distance Between Nodes
