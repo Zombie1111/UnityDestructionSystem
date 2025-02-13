@@ -5,7 +5,7 @@
 - [Definitions](#Definitions)
 - [The Algorithm](#The-Algorithm)
 - [Conclusion and Discussion](#Conclusion-and-Discussion)
-- [License](#License)
+- [Credit](#Credit)
   
 ## 1. Introduction
 
@@ -101,7 +101,8 @@ The deformation is currently computed separately after the stress has been propa
 ### 4.3. Distance Between Nodes
 The distance between each node currently has no effect on the stress distribution. This can result in unexpected stress distribution if the distance between nodes is not roughly the same.
 
-## 5. License
+## 5. Credit
 
-Single-Iteration Node Stress Propagation © 2024 by David Westberg is licensed under CC BY 4.0.\
-See full license text at: https://creativecommons.org/licenses/by/4.0/
+David Westberg
+
+
