@@ -1,4 +1,4 @@
-<h1 align="center">UnityDestructionSystem by David Westberg</h1>
+<h1 align="center">UnityDestructionSystem</h1>
 
 ## Table of Contents
 - [Overview](#overview)
